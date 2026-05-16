@@ -72,11 +72,18 @@ typedef struct
   uint32_t       shape[4];
 } arctoBatchedZFPOpts_t;
 
+/*
+ * Phase 1a ships REVERSIBLE only. FIXED_RATE / FIXED_PRECISION /
+ * FIXED_ACCURACY return arctoErrorNotSupported until their kernels land
+ * in subsequent phases. Default mode is therefore REVERSIBLE so the
+ * existing bit-exact bench/test infrastructure continues to validate
+ * round-trip correctness.
+ */
 static const arctoBatchedZFPOpts_t arctoBatchedZFPDefaultOpts = {
-    ARCTO_ZFP_MODE_FIXED_RATE,
+    ARCTO_ZFP_MODE_REVERSIBLE,
     ARCTO_ZFP_DIM_3D,
-    ARCTO_TYPE_INT, /* float32 reinterpreted; ZFP uses bit-pattern access */
-    16.0,           /* default rate: 16 bits/value (2x compression) */
+    ARCTO_TYPE_INT,
+    0.0, /* unused in REVERSIBLE */
     {0u, 0u, 0u, 1u}};
 
 /******************************************************************************
