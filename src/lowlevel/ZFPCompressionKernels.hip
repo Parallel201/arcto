@@ -67,7 +67,15 @@ constexpr uint8_t  kZfpDim3D             = 3;  // 3D cube with header-embedded s
 constexpr int kZfpEbiasReversible = 30;
 constexpr uint32_t kZfpHeader3DRevExtra = 8;  // 8 extra bytes after the 24-byte 3D header
                                               // (4 bytes K_max stats, 4 bytes num_blocks)
-constexpr uint8_t  kZfpRev3DSubFormatAdaptive = 1;  // per-block adaptive K with offsets[]
+constexpr uint8_t  kZfpRev3DSubFormatAdaptive = 1;  // Phase 1d.1: per-block adaptive K, flat K*64 bits/block
+constexpr uint8_t  kZfpRev3DSubFormatBitPlane = 2;  // Phase 1e:   per-block adaptive K + hybrid bit-plane/flat coder
+
+// K[] byte layout for sub_format = 2: high bit selects the coder, low 7 bits
+// hold K in 0..64. The choice is made per block at encode time.
+constexpr uint8_t  kZfpRev3DSchemeMask = 0x80u;  // bit 7: 0 = bit-plane, 1 = flat
+constexpr uint8_t  kZfpRev3DKMask      = 0x7Fu;  // bits 0-6: K value
+constexpr uint8_t  kZfpRev3DSchemeBP   = 0x00u;
+constexpr uint8_t  kZfpRev3DSchemeFlat = 0x80u;
 
 // -- REVERSIBLE -------------------------------------------------------------
 constexpr uint32_t kZfpReversiblePreambleBytes = 4;
@@ -992,39 +1000,44 @@ __global__ void zfp_get_decompress_size_3d_kernel(
 }
 
 // ===========================================================================
-// REVERSIBLE_3D (Phase 1d.1): block-FP + ZFP REV lift + per-block adaptive K
+// REVERSIBLE_3D (Phase 1e): block-FP + ZFP REV lift + hybrid per-block coder.
 //
-// Earlier Phase 1d used a single global K across the whole cube, which forces
-// every block to spend K_max * 64 bits even when most blocks need far fewer
-// bit-planes. On real seismic wavefields that produced > 1.0x EXPANSION
-// (e.g. 0.85x on a 100 MB TTI checkpoint). Per-block adaptive K trades one
-// device-side prefix-sum for compression-ratio gains around 2x on the same
-// input while preserving bit-exactness.
+// Each block races two coders at encode time and keeps whichever produces
+// fewer bytes:
+//   - Bit-plane with 16-bit group-test bitmap per plane (zfp_bp_*). Wins on
+//     sparse high planes (early-time wavefronts, zero-padded blocks).
+//   - Flat K-low-bits-per-coefficient (zfp_flat_*). Wins on dense blocks
+//     where most groups fire on most planes, so group-test overhead loses.
+// The choice is stored as the MSB of K[b]; bits 0-6 hold the K value (0..64).
 //
 // Output format (32 byte header + 6 bytes/block metadata + variable body):
 //   bytes 0-3:   actual_uncomp_size (= nx*ny*nz*sizeof(float))
-//   byte  4:     sub_format (= kZfpRev3DSubFormatAdaptive = 1)
+//   byte  4:     sub_format (= kZfpRev3DSubFormatBitPlane = 2)
 //   byte  5:     version
 //   byte  6:     mode = REVERSIBLE_3D
 //   byte  7:     dim = 3
-//   bytes 8-23:  nx, ny, nz, reserved
+//   bytes 8-19:  nx, ny, nz
+//   bytes 20-23: body_bytes_last (uint32_le; bytes the final block emits)
 //   bytes 24-27: K_max (uint32_le; informational atomicMax target)
 //   bytes 28-31: num_blocks (uint32_le)
 //   bytes 32 +              0 .. 4*num_blocks: offsets[] (uint32_le, body-relative)
-//   bytes 32 + 4*num_blocks  .. 5*num_blocks:  K[] (uint8, 0..64)
+//   bytes 32 + 4*num_blocks  .. 5*num_blocks:  K[] (uint8; bit 7 = scheme,
+//                                                   bits 0-6 = K in 0..64)
 //   bytes 32 + 5*num_blocks  .. 6*num_blocks:  emax[] (int8, with -128 sentinel)
-//   bytes 32 + 6*num_blocks  .. EOF:           body (sum(K[b]) * 8 bytes)
+//   bytes 32 + 6*num_blocks  .. EOF:           body (variable per-block stream,
+//                                                    byte-aligned)
 //
 // Three kernel passes on the encode side:
-//   1. compute_K_kernel:  BFP + lift + negabinary; reduce K_block, store
-//                         K[b] and emax[b], atomicMax K_max.
-//   2. ExclusiveSum:      hipcub::DeviceScan turns K[b]*8 (bytes/block) into
-//                         body-relative byte offsets[].
-//   3. pack_kernel:       re-runs the pipeline and packs K[b]*64 bits at
-//                         offsets[b]; thread (0,0) writes *out_size.
+//   1. compute_K_kernel:  BFP + lift + negabinary; reduce K_block and emax_b;
+//                         trial-run BOTH coders, pick min, write the choice
+//                         in K[]'s MSB and the chosen byte count into
+//                         offsets[b].
+//   2. ExclusiveSum:      hipcub::DeviceScan turns offsets[b] (byte count)
+//                         in-place into body-relative byte offsets.
+//   3. pack_kernel:       re-runs the pipeline; dispatches per block on the
+//                         scheme bit and writes at body+offsets[b].
 //
-// The decoder is single-pass: reads K[b], offsets[b], emax[b] and unpacks
-// directly without any scan or global state.
+// Decoder: single-pass; reads K[b], dispatches on the scheme bit.
 // ===========================================================================
 
 __device__ static void zfp_rev3d_load_transform(
@@ -1105,76 +1118,191 @@ __device__ static void zfp_rev3d_inv_transform_store(
   }
 }
 
-// Pack the LOW K bits of each negabinary coefficient. (For lossless, we
-// need ALL bits — K_global is set to bits64_for_max across the cube, so
-// no information is dropped.) Total packed bytes per block = K * 8.
-__device__ static void zfp_rev3d_pack_bits(
-    const uint64_t neg[kZfpValuesPerBlock],
-    int K, // 0..64
-    uint8_t* out_bits)
+// Per-block packing primitives for REVERSIBLE_3D (Phase 1e). The encoder
+// races two schemes per block at compute_K time and stores the cheaper one;
+// the high bit of K[b] (bit 7) marks the choice:
+//   bit 7 = 0  →  bit-plane coder with 16-bit group-test bitmap per plane
+//                (zfp_bp_*; great for sparse high planes, e.g. early-time
+//                 wavefronts where most groups have zero in their MSB)
+//   bit 7 = 1  →  flat: K low-order negabinary bits per coefficient
+//                (zfp_flat_*; great for dense data where almost every group
+//                 fires on every plane, so the per-plane 16-bit overhead of
+//                 group testing dominates)
+// The actual K value (0..64) lives in bits 0..6 of K[b].
+
+// ---------------------------------------------------------------------------
+// Flat encoder: K low-order bits per coefficient, packed left-to-right.
+// Total = K*64 bits = K*8 bytes per block.
+// ---------------------------------------------------------------------------
+
+__device__ static void zfp_flat_pack(
+    const uint64_t neg[kZfpValuesPerBlock], int K, uint8_t* out_bits)
 {
-  // We pack K bits per coefficient, low-order first. Use a 64-bit
-  // accumulator and flush bytes as it overflows.
-  uint64_t acc = 0;
+  uint64_t acc      = 0;
   int      acc_bits = 0;
   int      byte_idx = 0;
   const uint64_t mask = (K >= 64) ? ~uint64_t(0) : ((uint64_t(1) << K) - 1);
   #pragma unroll
   for (int i = 0; i < kZfpValuesPerBlock; i++) {
     const uint64_t lo = neg[i] & mask;
-    // Insert into acc at position acc_bits. May straddle a 64-bit boundary.
     acc |= (lo << acc_bits);
-    int produced = (acc_bits + K >= 64) ? (64 - acc_bits) : K;
     if (acc_bits + K < 64) {
       acc_bits += K;
     } else {
-      // Flush 8 bytes of acc
-      for (int b = 0; b < 8; b++) out_bits[byte_idx++] = static_cast<uint8_t>(acc >> (8 * b));
-      // Remaining K - produced bits go into a fresh acc
-      acc = (K > produced) ? (lo >> produced) : 0;
+      const int produced = 64 - acc_bits;
+      for (int b = 0; b < 8; b++) {
+        out_bits[byte_idx++] = static_cast<uint8_t>(acc >> (8 * b));
+      }
+      acc = (K > produced) ? (lo >> produced) : uint64_t(0);
       acc_bits = K - produced;
     }
   }
-  // Flush remaining bytes (ceil(acc_bits/8))
   while (acc_bits > 0) {
-    out_bits[byte_idx++] = static_cast<uint8_t>(acc & 0xffu);
+    out_bits[byte_idx++] = static_cast<uint8_t>(acc & 0xFFu);
     acc >>= 8;
     acc_bits -= 8;
   }
 }
 
-__device__ static void zfp_rev3d_unpack_bits(
-    const uint8_t* in_bits,
-    int K,
-    uint64_t neg[kZfpValuesPerBlock])
+__device__ static void zfp_flat_unpack(
+    const uint8_t* in_bits, int K, uint64_t neg[kZfpValuesPerBlock])
 {
-  uint64_t acc = 0;
+  uint64_t acc      = 0;
   int      acc_bits = 0;
   int      byte_idx = 0;
   const uint64_t mask = (K >= 64) ? ~uint64_t(0) : ((uint64_t(1) << K) - 1);
   #pragma unroll
   for (int i = 0; i < kZfpValuesPerBlock; i++) {
     while (acc_bits < K) {
-      acc |= (static_cast<uint64_t>(in_bits[byte_idx++]) << acc_bits);
+      acc |= static_cast<uint64_t>(in_bits[byte_idx++]) << acc_bits;
       acc_bits += 8;
       if (acc_bits >= 64) {
-        // 64-bit acc full; grab K bits worth, save spill into next round
-        const uint64_t lo = acc & mask;
-        neg[i] = lo;
-        const int produced = K;
+        neg[i] = acc & mask;
         acc = 0; acc_bits = 0;
-        // Bytes already consumed; subsequent K bits come from next bytes.
-        // (Simpler: handled by the outer loop's acc_bits<K check.)
         goto next_i;
       }
     }
-    {
-      const uint64_t lo = acc & mask;
-      neg[i] = lo;
-      acc      >>= K;
-      acc_bits  -= K;
-    }
+    neg[i]   = acc & mask;
+    acc      >>= K;
+    acc_bits -= K;
     next_i:;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bit-plane encoder: walks bit-planes MSB→LSB; per plane emits a 16-bit
+// group-test bitmap, then 4 bits per active group. Total = sum_p (16+4*active).
+// ---------------------------------------------------------------------------
+
+__device__ __forceinline__ uint32_t zfp_bp_block_test_bits(
+    const uint64_t neg[kZfpValuesPerBlock], uint64_t mask)
+{
+  uint32_t t = 0;
+  #pragma unroll
+  for (int g = 0; g < 16; g++) {
+    uint64_t any = (neg[4*g] | neg[4*g+1] | neg[4*g+2] | neg[4*g+3]) & mask;
+    if (any) t |= (1u << g);
+  }
+  return t;
+}
+
+__device__ static uint32_t zfp_bp_count_bits(
+    const uint64_t neg[kZfpValuesPerBlock], int K)
+{
+  uint32_t total = 0;
+  for (int p = K - 1; p >= 0; p--) {
+    const uint64_t mask = uint64_t(1) << p;
+    const uint32_t test = zfp_bp_block_test_bits(neg, mask);
+    total += 16u + 4u * static_cast<uint32_t>(__popc(test));
+  }
+  return total;
+}
+
+__device__ static void zfp_bp_pack(
+    const uint64_t neg[kZfpValuesPerBlock], int K,
+    uint8_t* out_bits)
+{
+  uint64_t acc      = 0;
+  int      acc_bits = 0;
+  int      byte_idx = 0;
+
+  for (int p = K - 1; p >= 0; p--) {
+    const uint64_t mask = uint64_t(1) << p;
+    const uint32_t test = zfp_bp_block_test_bits(neg, mask);
+
+    // Emit 16 group-test bits, low group index first.
+    acc |= static_cast<uint64_t>(test) << acc_bits;
+    acc_bits += 16;
+    while (acc_bits >= 8) {
+      out_bits[byte_idx++] = static_cast<uint8_t>(acc & 0xFFu);
+      acc >>= 8;
+      acc_bits -= 8;
+    }
+
+    // For each active group, emit 4 coefficient bits at plane p.
+    for (int g = 0; g < 16; g++) {
+      if (test & (1u << g)) {
+        uint32_t coeff_bits = 0;
+        #pragma unroll
+        for (int c = 0; c < 4; c++) {
+          coeff_bits |= static_cast<uint32_t>((neg[4*g+c] >> p) & 1u) << c;
+        }
+        acc |= static_cast<uint64_t>(coeff_bits) << acc_bits;
+        acc_bits += 4;
+        while (acc_bits >= 8) {
+          out_bits[byte_idx++] = static_cast<uint8_t>(acc & 0xFFu);
+          acc >>= 8;
+          acc_bits -= 8;
+        }
+      }
+    }
+  }
+
+  // Final partial byte: high bits are zero-padded. The decoder only ever
+  // consumes the exact number of bits this block contributed, so the
+  // padding cannot be mistaken for payload of a following block (offsets[]
+  // moves the next block onto a fresh byte boundary).
+  if (acc_bits > 0) {
+    out_bits[byte_idx++] = static_cast<uint8_t>(acc & 0xFFu);
+  }
+}
+
+__device__ static void zfp_bp_unpack(
+    const uint8_t* in_bits, int K,
+    uint64_t neg[kZfpValuesPerBlock])
+{
+  #pragma unroll
+  for (int i = 0; i < kZfpValuesPerBlock; i++) neg[i] = 0;
+  if (K == 0) return;
+
+  uint64_t acc      = 0;
+  int      acc_bits = 0;
+  int      byte_idx = 0;
+
+  for (int p = K - 1; p >= 0; p--) {
+    while (acc_bits < 16) {
+      acc |= static_cast<uint64_t>(in_bits[byte_idx++]) << acc_bits;
+      acc_bits += 8;
+    }
+    const uint32_t test = static_cast<uint32_t>(acc & 0xFFFFu);
+    acc >>= 16;
+    acc_bits -= 16;
+
+    for (int g = 0; g < 16; g++) {
+      if (test & (1u << g)) {
+        while (acc_bits < 4) {
+          acc |= static_cast<uint64_t>(in_bits[byte_idx++]) << acc_bits;
+          acc_bits += 8;
+        }
+        const uint32_t coeff_bits = static_cast<uint32_t>(acc & 0xFu);
+        acc >>= 4;
+        acc_bits -= 4;
+        #pragma unroll
+        for (int c = 0; c < 4; c++) {
+          neg[4*g+c] |= static_cast<uint64_t>((coeff_bits >> c) & 1u) << p;
+        }
+      }
+    }
   }
 }
 
@@ -1224,23 +1352,24 @@ __global__ void zfp_rev3d_compute_K_kernel(
   const uint32_t bx_count = div_ceil_4(nx);
   const uint32_t by_count = div_ceil_4(ny);
 
-  // Thread 0 writes the fixed header bytes. K_max slot (24..27) was memset
-  // to 0 by the host launcher and is updated below via atomicMax.
+  // Thread 0 writes the fixed header bytes. Bytes 20-27 (last-block byte
+  // count + K_max atomicMax target) were memset to 0 by the host launcher
+  // and are populated below.
   if (gid == 0) {
     store_u32_le(out + 0, nx * ny * nz * static_cast<uint32_t>(sizeof(float)));
-    out[4] = kZfpRev3DSubFormatAdaptive;
+    out[4] = kZfpRev3DSubFormatBitPlane;
     out[5] = static_cast<uint8_t>(kZfpFormatVersion);
     out[6] = kZfpModeReversible3D;
     out[7] = kZfpDim3D;
     store_u32_le(out +  8, nx);
     store_u32_le(out + 12, ny);
     store_u32_le(out + 16, nz);
-    store_u32_le(out + 20, 0);
     store_u32_le(out + 28, static_cast<uint32_t>(num_blocks));
   }
 
-  uint8_t* K_arr    = rev3d_K_arr(out, num_blocks);
-  uint8_t* emax_arr = rev3d_emax_arr(out, num_blocks);
+  uint32_t* offsets  = rev3d_offsets_arr(out);
+  uint8_t*  K_arr    = rev3d_K_arr(out, num_blocks);
+  uint8_t*  emax_arr = rev3d_emax_arr(out, num_blocks);
 
   for (uint64_t b = gid; b < num_blocks; b += stride) {
     const uint32_t bx = static_cast<uint32_t>(b % bx_count);
@@ -1257,8 +1386,27 @@ __global__ void zfp_rev3d_compute_K_kernel(
       if (neg[i] > block_max) block_max = neg[i];
     }
     const int K_block = bits64_for_max(block_max);
-    K_arr[b] = static_cast<uint8_t>(K_block);
     atomicMax(rev3d_Kmax_slot(out), static_cast<uint32_t>(K_block));
+
+    // Race the two coders: count bytes each would emit and pick the winner.
+    // Flat is deterministic at K*8 bytes; bit-plane requires a trial walk.
+    const uint32_t bp_bits   = zfp_bp_count_bits(neg, K_block);
+    const uint32_t bp_bytes  = (bp_bits + 7u) >> 3;
+    const uint32_t flat_bytes = static_cast<uint32_t>(K_block) * 8u;
+    const uint32_t bytes      = (bp_bytes <= flat_bytes) ? bp_bytes : flat_bytes;
+    const uint8_t  scheme_bit = (bp_bytes <= flat_bytes) ? kZfpRev3DSchemeBP
+                                                         : kZfpRev3DSchemeFlat;
+
+    K_arr[b]    = static_cast<uint8_t>(K_block) | scheme_bit;
+    offsets[b]  = bytes;
+
+    // The last block's byte count is the only one that the pack kernel
+    // can't recover from the scanned offsets[] alone. Stash it in the
+    // reserved bytes 20-23 slot. Single writer (no atomic needed) because
+    // exactly one thread/iteration hits b == num_blocks-1.
+    if (b == num_blocks - 1) {
+      store_u32_le(out + 20, bytes);
+    }
 
     int8_t emax_byte;
     if (emax == INT_MIN)        emax_byte = -128;
@@ -1286,16 +1434,15 @@ __global__ void zfp_rev3d_pack_kernel(
   const uint32_t* offsets   = rev3d_offsets_arr_c(out);
   const uint8_t*  K_arr     = rev3d_K_arr_c(out, num_blocks);
 
-  // Total body size = exclusive offsets[last] + K[last]*8. Compute and write
-  // *out_size from thread (0,0). Bail before writing body if it would overflow
-  // the caller's capacity (the reported size of 0 signals the failure).
+  // After the in-place ExclusiveSum, offsets[] is exclusive. The last
+  // block's byte count was stashed in header bytes 20-23 by compute_K.
+  // Total body = offsets[last] + bytes[last].
   const uint64_t gid    = static_cast<uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
   const uint64_t stride = static_cast<uint64_t>(gridDim.x) * blockDim.x;
 
-  const uint32_t body_bytes_last = (num_blocks > 0)
-      ? (offsets[num_blocks - 1] + static_cast<uint32_t>(K_arr[num_blocks - 1]) * 8u)
-      : 0u;
-  const size_t total = meta_bytes + body_bytes_last;
+  const uint32_t body_bytes_last = (num_blocks > 0) ? load_u32_le(out + 20) : 0u;
+  const uint32_t offsets_last    = (num_blocks > 0) ? offsets[num_blocks - 1] : 0u;
+  const size_t   total           = meta_bytes + offsets_last + body_bytes_last;
 
   if (gid == 0) {
     *out_size = (total <= out_capacity) ? total : 0;
@@ -1305,8 +1452,10 @@ __global__ void zfp_rev3d_pack_kernel(
 
   uint8_t* const body_packed = out + meta_bytes;
   for (uint64_t b = gid; b < num_blocks; b += stride) {
-    const uint32_t K_block = K_arr[b];
+    const uint8_t  K_byte  = K_arr[b];
+    const uint32_t K_block = static_cast<uint32_t>(K_byte & kZfpRev3DKMask);
     if (K_block == 0u) continue;  // all-zero block, nothing to pack
+    const bool use_flat = (K_byte & kZfpRev3DSchemeMask) != 0;
 
     const uint32_t bx = static_cast<uint32_t>(b % bx_count);
     const uint32_t by = static_cast<uint32_t>((b / bx_count) % by_count);
@@ -1316,8 +1465,11 @@ __global__ void zfp_rev3d_pack_kernel(
     int      unused_emax;
     zfp_rev3d_load_transform(in_cube, nx, ny, nz, bx, by, bz, neg, unused_emax);
 
-    zfp_rev3d_pack_bits(neg, static_cast<int>(K_block),
-                        body_packed + offsets[b]);
+    if (use_flat) {
+      zfp_flat_pack(neg, static_cast<int>(K_block), body_packed + offsets[b]);
+    } else {
+      zfp_bp_pack(neg, static_cast<int>(K_block), body_packed + offsets[b]);
+    }
   }
 }
 
@@ -1333,7 +1485,7 @@ __global__ void zfp_rev3d_decompress_kernel(
   const uint64_t stride = static_cast<uint64_t>(gridDim.x) * blockDim.x;
 
   if (in_size < kZfpHeader3DBytes + kZfpHeader3DRevExtra
-   || in[4] != kZfpRev3DSubFormatAdaptive
+   || in[4] != kZfpRev3DSubFormatBitPlane
    || in[5] != kZfpFormatVersion
    || in[6] != kZfpModeReversible3D
    || in[7] != kZfpDim3D) {
@@ -1380,14 +1532,17 @@ __global__ void zfp_rev3d_decompress_kernel(
     const uint32_t by = static_cast<uint32_t>((b / bx_count) % by_count);
     const uint32_t bz = static_cast<uint32_t>(b / (static_cast<uint64_t>(bx_count) * by_count));
 
-    const uint32_t K_block = K_arr[b];
+    const uint8_t  K_byte  = K_arr[b];
+    const uint32_t K_block = static_cast<uint32_t>(K_byte & kZfpRev3DKMask);
+    const bool     use_flat = (K_byte & kZfpRev3DSchemeMask) != 0;
     uint64_t neg[kZfpValuesPerBlock];
     if (K_block == 0u) {
       #pragma unroll
       for (int i = 0; i < kZfpValuesPerBlock; i++) neg[i] = 0;
+    } else if (use_flat) {
+      zfp_flat_unpack(body + offsets[b], static_cast<int>(K_block), neg);
     } else {
-      zfp_rev3d_unpack_bits(body + offsets[b],
-                            static_cast<int>(K_block), neg);
+      zfp_bp_unpack(body + offsets[b], static_cast<int>(K_block), neg);
     }
 
     const int8_t emax_byte = static_cast<int8_t>(emax_arr[b]);
@@ -1483,39 +1638,6 @@ int clamp_rate(double raw)
   if (raw < 1.0)   return 1;
   if (raw > 32.0)  return 32;
   return static_cast<int>(raw + 0.5);
-}
-
-// ---------------------------------------------------------------------------
-// hipcub plumbing for the REVERSIBLE_3D adaptive-K prefix sum.
-//
-// hipcub::DeviceScan::ExclusiveSum reads K[b] (uint8), multiplies by 8 via
-// a TransformInputIterator to get bytes-per-block, and produces a uint32_le
-// exclusive prefix-sum directly into the output buffer's offsets[] slot.
-// ---------------------------------------------------------------------------
-struct ZfpRev3dKToBytes {
-  __host__ __device__ __forceinline__
-  uint32_t operator()(uint8_t k) const { return static_cast<uint32_t>(k) * 8u; }
-};
-
-using ZfpRev3dKBytesIter = hipcub::TransformInputIterator<
-    uint32_t, ZfpRev3dKToBytes, const uint8_t*>;
-
-static size_t zfp_rev3d_scan_workspace_bytes(uint64_t num_blocks)
-{
-  // hipcub measures workspace by introspecting the call with d_temp_storage =
-  // nullptr. Pointer args don't need to be valid for the sizing pass.
-  size_t ws = 0;
-  ZfpRev3dKBytesIter iter(static_cast<const uint8_t*>(nullptr),
-                          ZfpRev3dKToBytes{});
-  HipUtils::check(
-      hipcub::DeviceScan::ExclusiveSum(
-          nullptr, ws,
-          iter,
-          static_cast<uint32_t*>(nullptr),
-          static_cast<int>(num_blocks),
-          hipStream_t(nullptr)),
-      "zfp_rev3d_scan_workspace_bytes: ExclusiveSum sizing");
-  return ws;
 }
 
 } // namespace
@@ -1645,10 +1767,14 @@ size_t zfp3DComputeMaxOutputSize(arctoBatchedZFPOpts_t opts)
     * static_cast<size_t>((nz + 3u) / 4u);
 
   if (opts.mode == ARCTO_ZFP_MODE_REVERSIBLE_3D) {
-    // Worst case: every block's K == 64 → 512 body bytes/block. Metadata is
-    // 4 offset + 1 K + 1 emax = 6 bytes/block. Plus the 32-byte header.
+    // Worst case for the bit-plane coder: every plane fires every group, so
+    // each plane costs 16 (group tests) + 4*16 (coeff bits) = 80 bits, with
+    // up to 64 planes → 5120 bits = 640 bytes/block (vs 512 for the Phase
+    // 1d.1 flat packing). Metadata is 4 offset + 1 K + 1 emax = 6 bytes.
+    // Real data never hits this worst case — bit-plane wins on sparse high
+    // planes — but allocation has to be safe.
     return kZfpHeader3DBytes + kZfpHeader3DRevExtra
-         + num_blocks * (6u /*offset+K+emax*/ + 64u * 8u /*body if K=64*/);
+         + num_blocks * (6u /*offset+K+emax*/ + 64u * 10u /*worst body if K=64*/);
   }
 
   // FIXED_RATE: deterministic, fixed per-block size.
@@ -1680,36 +1806,46 @@ void zfp3DCompress(
       ctas_needed > 65535u ? 65535u : (ctas_needed == 0u ? 1u : ctas_needed));
 
   if (opts.mode == ARCTO_ZFP_MODE_REVERSIBLE_3D) {
-    // Three-pass: compute K[b] and emax[b], scan into offsets[], then pack
-    // body at the derived byte positions. The scan needs a small scratch
-    // buffer that hipcub sizes for us; allocate/free stream-ordered.
-    HipUtils::check(hipMemsetAsync(device_output + 24, 0, 4, stream),
-                    "zfp3DCompress: clear K_max slot");
+    // Three-pass: compute K[b], emax[b], and per-block byte counts (into
+    // offsets[]); in-place ExclusiveSum turns those counts into body-relative
+    // offsets; pack writes the variable-length bit-plane stream per block.
+    //
+    // Bytes 20-23 hold the last block's byte count (set by compute_K) and
+    // bytes 24-27 are the K_max atomicMax target; clear them stream-ordered
+    // before compute_K runs.
+    HipUtils::check(hipMemsetAsync(device_output + 20, 0, 8, stream),
+                    "zfp3DCompress: clear bytes_last + K_max slots");
 
     zfp_rev3d_compute_K_kernel<<<grid, threads_per_cta, 0, stream>>>(
         device_input, nx, ny, nz, device_output, num_blocks);
     HipUtils::check_last_error("zfp_rev3d_compute_K_kernel launch");
 
-    // K[] starts at header_total + nblocks*4; offsets[] starts at
-    // header_total. Build them as device pointers for hipcub.
+    // offsets[] starts at header_total and is 4-aligned.
     const size_t header_total = kZfpHeader3DBytes + kZfpHeader3DRevExtra;
-    const uint8_t* K_arr      = device_output + header_total
-                              + num_blocks * sizeof(uint32_t);
-    uint32_t*      offsets    = reinterpret_cast<uint32_t*>(
-                                  device_output + header_total);
+    uint32_t* offsets = reinterpret_cast<uint32_t*>(
+                          device_output + header_total);
 
     void*  scan_ws       = nullptr;
-    size_t scan_ws_bytes = zfp_rev3d_scan_workspace_bytes(num_blocks);
+    size_t scan_ws_bytes = 0;
+    HipUtils::check(
+        hipcub::DeviceScan::ExclusiveSum(
+            nullptr, scan_ws_bytes,
+            offsets, offsets,
+            static_cast<int>(num_blocks),
+            stream),
+        "zfp3DCompress: ExclusiveSum sizing");
     if (scan_ws_bytes > 0) {
       HipUtils::check(hipMallocAsync(&scan_ws, scan_ws_bytes, stream),
                       "zfp3DCompress: scan workspace alloc");
     }
 
-    ZfpRev3dKBytesIter iter(K_arr, ZfpRev3dKToBytes{});
+    // In-place ExclusiveSum: offsets[] goes from "bytes per block" to
+    // "exclusive body-relative byte offset". hipcub guarantees the
+    // exclusive-sum variant supports d_in == d_out.
     HipUtils::check(
         hipcub::DeviceScan::ExclusiveSum(
             scan_ws, scan_ws_bytes,
-            iter, offsets,
+            offsets, offsets,
             static_cast<int>(num_blocks),
             stream),
         "zfp3DCompress: hipcub ExclusiveSum");

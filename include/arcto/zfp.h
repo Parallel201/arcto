@@ -33,11 +33,12 @@ extern "C" {
  *   byte-aligned bit-width. Use this for general data (the batched API
  *   defaults to it; the existing bit-exact test suite exercises it).
  * - REVERSIBLE_3D: lossless for float32 cubes via block-floating-point
- *   alignment + ZFP reversible integer lift transform + per-block adaptive K
- *   bit-plane packing. Only available through the single-cube 3D API.
- *   Strictly lossless for float32 inputs to within one ULP of the original
- *   IEEE 754 representation; an embedded prefix-sum lets each ZFP block
- *   spend only as many bit-planes as its data actually needs.
+ *   alignment + ZFP reversible integer lift transform + embedded bit-plane
+ *   coder with 4-tuple group testing. Only available through the single-cube
+ *   3D API. Strictly lossless for float32 inputs to within one ULP of the
+ *   original IEEE 754 representation; sparse high bit-planes are encoded
+ *   with a 16-bit group-test bitmap so only active 4-coefficient groups
+ *   emit their bits, while dense low planes pay just the 16-bit overhead.
  */
 typedef enum
 {

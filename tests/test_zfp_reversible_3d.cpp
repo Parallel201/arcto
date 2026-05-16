@@ -207,6 +207,36 @@ int main()
     std::puts("--- TTI REVERSIBLE: skipped (set ARCTO_ZFP_TTI_DATA to enable) ---");
   }
 
+  // Full simulation binary (TTI.rsf@): 256x256x256 floats per timestep,
+  // 101 timesteps stacked in C order (n1 inner). We compress the first and
+  // a middle-ish timestep as a sanity check that the bit-plane coder handles
+  // both early (mostly-zero) and late (full wavefront) frames.
+  const char* rsf = std::getenv("ARCTO_ZFP_TTI_RSF");
+  if (rsf) {
+    const uint32_t nx = 256, ny = 256, nz = 256;
+    const size_t   N           = size_t(nx) * ny * nz;
+    const size_t   bytes_step  = N * sizeof(float);
+    std::ifstream f(rsf, std::ios::binary);
+    REQUIRE(static_cast<bool>(f), "Could not open TTI.rsf@ file");
+
+    const int steps[] = {0, 50, 100};
+    for (int step : steps) {
+      std::printf("--- TTI.rsf@ REVERSIBLE round-trip, timestep %d (%s) ---\n",
+                  step, rsf);
+      f.seekg(static_cast<std::streamoff>(bytes_step) * step, std::ios::beg);
+      REQUIRE(static_cast<bool>(f), "TTI.rsf@ seek failed");
+      std::vector<float> input(N);
+      f.read(reinterpret_cast<char*>(input.data()), bytes_step);
+      REQUIRE(f.gcount() == std::streamsize(bytes_step),
+              "TTI.rsf@ shorter than 256^3 floats at requested timestep");
+      char label[32];
+      std::snprintf(label, sizeof(label), "tti.rsf t=%d", step);
+      run_round_trip(nx, ny, nz, input, label);
+    }
+  } else {
+    std::puts("--- TTI.rsf@ REVERSIBLE: skipped (set ARCTO_ZFP_TTI_RSF to enable) ---");
+  }
+
   std::puts("SUCCESS: All REVERSIBLE_3D round-trip tests passed");
   return 0;
 }
