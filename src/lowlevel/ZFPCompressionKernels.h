@@ -98,5 +98,53 @@ size_t zfpBatchCompressComputeTempSize(
 size_t zfpBatchDecompressComputeTempSize(
     size_t max_chunks_in_batch, size_t max_uncompressed_chunk_size);
 
+// ---------------------------------------------------------------------------
+// Phase 1c — single-cube 3D entry points (high-level API).
+//
+// One contiguous nx*ny*nz float32 cube in, one contiguous compressed buffer
+// out. Output is fully self-describing: header carries mode, rate, and shape.
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief Worst-case output size in bytes for one 3D cube at the given rate.
+ *        opts.shape[0..2] must hold nx, ny, nz.
+ */
+size_t zfp3DComputeMaxOutputSize(arctoBatchedZFPOpts_t opts);
+
+/**
+ * @brief Launch a single-cube 3D compress on the given stream.
+ *        Caller must pass FIXED_RATE in opts.mode and the cube shape in
+ *        opts.shape[0..2]; param holds the bit rate.
+ */
+void zfp3DCompress(
+    const uint8_t* device_input,
+    arctoBatchedZFPOpts_t opts,
+    uint8_t* device_output,
+    size_t device_output_capacity,
+    size_t* device_output_size,
+    hipStream_t stream);
+
+/**
+ * @brief Launch a single-cube 3D decompress. Shape, mode and rate are read
+ *        from the header in device_input.
+ */
+void zfp3DDecompress(
+    const uint8_t* device_input,
+    size_t input_size,
+    uint8_t* device_output,
+    size_t device_output_capacity,
+    size_t* device_actual_output_size,
+    arctoStatus_t* device_status,
+    hipStream_t stream);
+
+/**
+ * @brief Recover the uncompressed byte count from a 3D chunk header.
+ */
+void zfp3DGetDecompressSize(
+    const uint8_t* device_input,
+    size_t input_size,
+    size_t* device_uncompressed_bytes,
+    hipStream_t stream);
+
 } // namespace lowlevel
 } // namespace arcto

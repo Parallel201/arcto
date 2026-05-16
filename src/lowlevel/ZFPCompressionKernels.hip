@@ -43,11 +43,18 @@ namespace
 {
 
 // -- chunk header -----------------------------------------------------------
+// Layout (mode-independent, bytes 0..7 always present):
+//   [u32 actual_uncomp_size][u8 mode_param][u8 version][u8 mode][u8 dim]
+// FIXED_RATE_3D adds the 3D shape immediately after byte 7:
+//   [u32 nx][u32 ny][u32 nz][u32 reserved]   -> 24-byte header total
 constexpr int      kThreadsPerChunkCTA = 256;
-constexpr uint32_t kZfpHeaderBytes     = 8;
+constexpr uint32_t kZfpHeaderBytes     = 8;   // 1D / REVERSIBLE
+constexpr uint32_t kZfpHeader3DBytes   = 24;  // FIXED_RATE_3D
 constexpr uint32_t kZfpFormatVersion   = 1;
 constexpr uint8_t  kZfpModeReversible  = 0;
 constexpr uint8_t  kZfpModeFixedRate   = 1;
+constexpr uint8_t  kZfpDimLinear       = 0;  // back-compat: legacy 1D blocks
+constexpr uint8_t  kZfpDim3D           = 3;  // 3D cube with header-embedded shape
 
 // -- REVERSIBLE -------------------------------------------------------------
 constexpr uint32_t kZfpReversiblePreambleBytes = 4;
@@ -247,26 +254,17 @@ __device__ __forceinline__ int32_t zfp_negabinary_to_int(uint32_t x)
 // ===========================================================================
 // FIXED_RATE per-block encode / decode
 // Block layout: [int8 emax_byte][ceil(K*64/8) bytes of packed bits].
+//
+// The block-level pack/unpack is factored from any data layout so the 1D
+// (linear chunk) and 3D (real cube) paths can share the full ZFP pipeline
+// (block-floating-point → integer lift → negabinary → top-K bit-plane).
 // ===========================================================================
 
-__device__ static void zfp_fixed_rate_encode_block(
-    const uint8_t* in,
-    size_t         in_byte_offset,
-    size_t         in_size,
-    uint8_t*       out_block,
-    int            K)
+__device__ static void zfp_pack_block(
+    const float v[kZfpValuesPerBlock],
+    uint8_t*    out_block,
+    int         K)
 {
-  // Load 64 floats, zero-padding past the end of the chunk.
-  float v[kZfpValuesPerBlock];
-  #pragma unroll
-  for (int i = 0; i < kZfpValuesPerBlock; i++) {
-    const size_t off = in_byte_offset + i * sizeof(float);
-    uint32_t bits = load_u32_padded(in, off, in_size);
-    float f;
-    std::memcpy(&f, &bits, sizeof(float));
-    v[i] = f;
-  }
-
   const int emax = zfp_compute_emax(v);
 
   int32_t aligned[kZfpValuesPerBlock];
@@ -310,12 +308,10 @@ __device__ static void zfp_fixed_rate_encode_block(
   }
 }
 
-__device__ static void zfp_fixed_rate_decode_block(
+__device__ static void zfp_unpack_block(
     const uint8_t* in_block,
     int            K,
-    uint8_t*       out,
-    size_t         out_byte_offset,
-    size_t         out_size)
+    float          v[kZfpValuesPerBlock])
 {
   const int8_t emax_byte = static_cast<int8_t>(in_block[0]);
   const int    emax      = (emax_byte == -128) ? INT_MIN : static_cast<int>(emax_byte);
@@ -347,10 +343,40 @@ __device__ static void zfp_fixed_rate_decode_block(
 
   zfp_inv_xform_3d(aligned);
 
-  float v[kZfpValuesPerBlock];
   zfp_inv_cast(aligned, v, emax);
+}
 
-  // Write back, truncating at out_size for partial trailing blocks.
+// ---- 1D (linear chunk) variant -------------------------------------------
+
+__device__ static void zfp_fixed_rate_encode_block(
+    const uint8_t* in,
+    size_t         in_byte_offset,
+    size_t         in_size,
+    uint8_t*       out_block,
+    int            K)
+{
+  float v[kZfpValuesPerBlock];
+  #pragma unroll
+  for (int i = 0; i < kZfpValuesPerBlock; i++) {
+    const size_t off = in_byte_offset + i * sizeof(float);
+    uint32_t bits = load_u32_padded(in, off, in_size);
+    float f;
+    std::memcpy(&f, &bits, sizeof(float));
+    v[i] = f;
+  }
+  zfp_pack_block(v, out_block, K);
+}
+
+__device__ static void zfp_fixed_rate_decode_block(
+    const uint8_t* in_block,
+    int            K,
+    uint8_t*       out,
+    size_t         out_byte_offset,
+    size_t         out_size)
+{
+  float v[kZfpValuesPerBlock];
+  zfp_unpack_block(in_block, K, v);
+
   #pragma unroll
   for (int i = 0; i < kZfpValuesPerBlock; i++) {
     const size_t off = out_byte_offset + i * sizeof(float);
@@ -361,6 +387,73 @@ __device__ static void zfp_fixed_rate_decode_block(
       std::memcpy(&bits, &v[i], sizeof(float));
       for (size_t b = off; b < out_size; b++) {
         out[b] = static_cast<uint8_t>(bits >> (8 * (b - off)));
+      }
+    }
+  }
+}
+
+// ---- 3D (real cube) variant ----------------------------------------------
+// One ZFP block = 4x4x4 sub-cube indexed in row-major (i = dx + 4*dy + 16*dz).
+// Voxels past the cube boundary on each axis are zero-padded on encode and
+// discarded on decode. The kernel iterates over (bx, by, bz) block indices
+// in [0, ceil(nx/4)) x [0, ceil(ny/4)) x [0, ceil(nz/4)).
+
+__device__ static void zfp_fixed_rate_3d_encode_block(
+    const uint8_t* in_cube,
+    uint32_t       nx, uint32_t ny, uint32_t nz,
+    uint32_t       bx, uint32_t by, uint32_t bz,
+    int            K,
+    uint8_t*       out_block)
+{
+  float v[kZfpValuesPerBlock];
+  #pragma unroll
+  for (int dz = 0; dz < 4; dz++) {
+    #pragma unroll
+    for (int dy = 0; dy < 4; dy++) {
+      #pragma unroll
+      for (int dx = 0; dx < 4; dx++) {
+        const uint32_t x = bx * 4u + dx;
+        const uint32_t y = by * 4u + dy;
+        const uint32_t z = bz * 4u + dz;
+        const int idx = 16 * dz + 4 * dy + dx;
+        if (x < nx && y < ny && z < nz) {
+          const size_t lin = (static_cast<size_t>(z) * ny + y) * nx + x;
+          float f;
+          std::memcpy(&f, in_cube + lin * sizeof(float), sizeof(float));
+          v[idx] = f;
+        } else {
+          v[idx] = 0.0f;
+        }
+      }
+    }
+  }
+  zfp_pack_block(v, out_block, K);
+}
+
+__device__ static void zfp_fixed_rate_3d_decode_block(
+    const uint8_t* in_block,
+    int            K,
+    uint32_t       nx, uint32_t ny, uint32_t nz,
+    uint32_t       bx, uint32_t by, uint32_t bz,
+    uint8_t*       out_cube)
+{
+  float v[kZfpValuesPerBlock];
+  zfp_unpack_block(in_block, K, v);
+
+  #pragma unroll
+  for (int dz = 0; dz < 4; dz++) {
+    #pragma unroll
+    for (int dy = 0; dy < 4; dy++) {
+      #pragma unroll
+      for (int dx = 0; dx < 4; dx++) {
+        const uint32_t x = bx * 4u + dx;
+        const uint32_t y = by * 4u + dy;
+        const uint32_t z = bz * 4u + dz;
+        if (x < nx && y < ny && z < nz) {
+          const int idx = 16 * dz + 4 * dy + dx;
+          const size_t lin = (static_cast<size_t>(z) * ny + y) * nx + x;
+          std::memcpy(out_cube + lin * sizeof(float), &v[idx], sizeof(float));
+        }
       }
     }
   }
@@ -615,6 +708,150 @@ __device__ static void zfp_fixed_rate_decompress_chunk(
 }
 
 // ===========================================================================
+// FIXED_RATE_3D kernels (Phase 1c)
+// Inputs are a single contiguous nx*ny*nz float32 cube. The kernel tiles it
+// into ceil(nx/4)*ceil(ny/4)*ceil(nz/4) ZFP blocks; per-block output size
+// is fixed, so block offsets are deterministic and writes do not race.
+// ===========================================================================
+
+__device__ __forceinline__ uint32_t div_ceil_4(uint32_t n)
+{
+  return (n + 3u) >> 2;
+}
+
+__global__ void zfp_fixed_rate_3d_compress_kernel(
+    const uint8_t* __restrict__ in_cube,
+    uint32_t nx, uint32_t ny, uint32_t nz,
+    int K,
+    uint8_t* __restrict__ out,
+    size_t out_capacity,
+    size_t* __restrict__ out_size)
+{
+  const uint32_t bx_count = div_ceil_4(nx);
+  const uint32_t by_count = div_ceil_4(ny);
+  const uint32_t bz_count = div_ceil_4(nz);
+  const uint64_t num_blocks = static_cast<uint64_t>(bx_count) * by_count * bz_count;
+
+  const size_t per_block_out = 1 + static_cast<size_t>((K * kZfpValuesPerBlock + 7) / 8);
+  const size_t header_bytes  = kZfpHeader3DBytes;
+  const size_t total_bytes   = header_bytes + static_cast<size_t>(num_blocks) * per_block_out;
+
+  const uint64_t gid    = static_cast<uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const uint64_t stride = static_cast<uint64_t>(gridDim.x) * blockDim.x;
+
+  // Thread 0 of the kernel writes the chunk header. We rely on out_capacity
+  // being at least header_bytes before any thread writes a block body.
+  if (gid == 0) {
+    if (total_bytes > out_capacity) {
+      // Insufficient output capacity: report zero and refuse to write.
+      *out_size = 0;
+      return;
+    }
+    const uint32_t actual = nx * ny * nz * static_cast<uint32_t>(sizeof(float));
+    store_u32_le(out + 0, actual);
+    out[4] = static_cast<uint8_t>(K);
+    out[5] = static_cast<uint8_t>(kZfpFormatVersion);
+    out[6] = kZfpModeFixedRate;
+    out[7] = kZfpDim3D;
+    store_u32_le(out +  8, nx);
+    store_u32_le(out + 12, ny);
+    store_u32_le(out + 16, nz);
+    store_u32_le(out + 20, 0);
+    *out_size = total_bytes;
+  }
+
+  if (total_bytes > out_capacity) return; // capacity already reported by gid 0
+
+  uint8_t* const body = out + header_bytes;
+  for (uint64_t b = gid; b < num_blocks; b += stride) {
+    const uint32_t bx = static_cast<uint32_t>(b % bx_count);
+    const uint32_t by = static_cast<uint32_t>((b / bx_count) % by_count);
+    const uint32_t bz = static_cast<uint32_t>(b / (static_cast<uint64_t>(bx_count) * by_count));
+    zfp_fixed_rate_3d_encode_block(
+        in_cube, nx, ny, nz, bx, by, bz, K,
+        body + b * per_block_out);
+  }
+}
+
+__global__ void zfp_fixed_rate_3d_decompress_kernel(
+    const uint8_t* __restrict__ in,
+    size_t in_size,
+    uint8_t* __restrict__ out_cube,
+    size_t out_capacity,
+    size_t* __restrict__ actual_out_size,
+    arctoStatus_t* __restrict__ status)
+{
+  const uint64_t gid    = static_cast<uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const uint64_t stride = static_cast<uint64_t>(gridDim.x) * blockDim.x;
+
+  if (in_size < kZfpHeader3DBytes
+   || in[5] != kZfpFormatVersion
+   || in[6] != kZfpModeFixedRate
+   || in[7] != kZfpDim3D) {
+    if (gid == 0) {
+      if (status)          *status          = arctoErrorCannotDecompress;
+      if (actual_out_size) *actual_out_size = 0;
+    }
+    return;
+  }
+
+  const uint32_t actual_size = load_u32_le(in + 0);
+  const int      K           = static_cast<int>(in[4]);
+  const uint32_t nx          = load_u32_le(in +  8);
+  const uint32_t ny          = load_u32_le(in + 12);
+  const uint32_t nz          = load_u32_le(in + 16);
+
+  if (K < 1 || K > 32 || actual_size > out_capacity) {
+    if (gid == 0) {
+      if (status)          *status          = arctoErrorCannotDecompress;
+      if (actual_out_size) *actual_out_size = 0;
+    }
+    return;
+  }
+
+  const uint32_t bx_count = div_ceil_4(nx);
+  const uint32_t by_count = div_ceil_4(ny);
+  const uint32_t bz_count = div_ceil_4(nz);
+  const uint64_t num_blocks = static_cast<uint64_t>(bx_count) * by_count * bz_count;
+  const size_t per_block_in = 1 + static_cast<size_t>((K * kZfpValuesPerBlock + 7) / 8);
+  const size_t expected     = kZfpHeader3DBytes + static_cast<size_t>(num_blocks) * per_block_in;
+  if (in_size < expected) {
+    if (gid == 0) {
+      if (status)          *status          = arctoErrorCannotDecompress;
+      if (actual_out_size) *actual_out_size = 0;
+    }
+    return;
+  }
+
+  const uint8_t* body = in + kZfpHeader3DBytes;
+  for (uint64_t b = gid; b < num_blocks; b += stride) {
+    const uint32_t bx = static_cast<uint32_t>(b % bx_count);
+    const uint32_t by = static_cast<uint32_t>((b / bx_count) % by_count);
+    const uint32_t bz = static_cast<uint32_t>(b / (static_cast<uint64_t>(bx_count) * by_count));
+    zfp_fixed_rate_3d_decode_block(
+        body + b * per_block_in, K, nx, ny, nz, bx, by, bz, out_cube);
+  }
+
+  if (gid == 0) {
+    if (status)          *status          = arctoSuccess;
+    if (actual_out_size) *actual_out_size = actual_size;
+  }
+}
+
+__global__ void zfp_get_decompress_size_3d_kernel(
+    const uint8_t* __restrict__ in,
+    size_t in_size,
+    size_t* __restrict__ out_size)
+{
+  if (threadIdx.x != 0 || blockIdx.x != 0) return;
+  if (in_size < kZfpHeaderBytes || in[5] != kZfpFormatVersion) {
+    *out_size = 0;
+    return;
+  }
+  *out_size = static_cast<size_t>(load_u32_le(in + 0));
+}
+
+// ===========================================================================
 // Unified decompress kernel: reads the mode byte from each chunk header and
 // dispatches. All threads of a CTA process the same chunk, so the dispatch
 // branch is uniform across the warp.
@@ -645,11 +882,16 @@ __global__ void zfp_decompress_kernel(
   }
 
   const uint8_t mode = in[6];
+  const uint8_t dim  = in[7];
+
+  // FIXED_RATE with dim == 3 means a 3D cube — the batched decompress
+  // kernel does not handle that layout (the high-level API has its own
+  // kernel for single-cube decompress).
   if (mode == kZfpModeReversible) {
     zfp_reversible_decompress_serial(
         chunk_idx, in_ptrs, in_sizes, out_capacity,
         out_ptrs, actual_out_sizes, statuses);
-  } else if (mode == kZfpModeFixedRate) {
+  } else if (mode == kZfpModeFixedRate && dim != kZfpDim3D) {
     zfp_fixed_rate_decompress_chunk(
         chunk_idx, in_ptrs, in_sizes, out_capacity,
         out_ptrs, actual_out_sizes, statuses);
@@ -802,6 +1044,87 @@ size_t zfpComputeMaxSize(size_t chunk_size, arctoBatchedZFPOpts_t opts)
   // header + K=4 worst-case payload = 8 + ceil(chunk_size/4) * 4.
   const size_t N = (chunk_size + 3) / 4;
   return kZfpHeaderBytes + N * 4u;
+}
+
+// ===========================================================================
+// Phase 1c: high-level single-cube 3D entry points
+// ===========================================================================
+
+size_t zfp3DComputeMaxOutputSize(arctoBatchedZFPOpts_t opts)
+{
+  // Only FIXED_RATE is supported in this entry point.
+  const int K = clamp_rate(opts.param);
+  const uint32_t nx = opts.shape[0];
+  const uint32_t ny = opts.shape[1];
+  const uint32_t nz = opts.shape[2];
+  const size_t   num_blocks =
+      static_cast<size_t>((nx + 3u) / 4u)
+    * static_cast<size_t>((ny + 3u) / 4u)
+    * static_cast<size_t>((nz + 3u) / 4u);
+  const size_t per_block_out = 1 + static_cast<size_t>((K * kZfpValuesPerBlock + 7) / 8);
+  return kZfpHeader3DBytes + num_blocks * per_block_out;
+}
+
+void zfp3DCompress(
+    const uint8_t* device_input,
+    arctoBatchedZFPOpts_t opts,
+    uint8_t* device_output,
+    size_t device_output_capacity,
+    size_t* device_output_size,
+    hipStream_t stream)
+{
+  const int      K  = clamp_rate(opts.param);
+  const uint32_t nx = opts.shape[0];
+  const uint32_t ny = opts.shape[1];
+  const uint32_t nz = opts.shape[2];
+
+  const uint64_t num_blocks =
+      static_cast<uint64_t>((nx + 3u) / 4u)
+    * static_cast<uint64_t>((ny + 3u) / 4u)
+    * static_cast<uint64_t>((nz + 3u) / 4u);
+
+  // One thread per block, grid-strided. Cap grid at something reasonable
+  // so very large cubes don't try to launch millions of CTAs.
+  const unsigned threads_per_cta = kThreadsPerChunkCTA;
+  const uint64_t ctas_needed     = (num_blocks + threads_per_cta - 1) / threads_per_cta;
+  const unsigned grid            = static_cast<unsigned>(
+      ctas_needed > 65535u ? 65535u : (ctas_needed == 0u ? 1u : ctas_needed));
+
+  zfp_fixed_rate_3d_compress_kernel<<<grid, threads_per_cta, 0, stream>>>(
+      device_input, nx, ny, nz, K,
+      device_output, device_output_capacity, device_output_size);
+  HipUtils::check_last_error("zfp_fixed_rate_3d_compress_kernel launch");
+}
+
+void zfp3DDecompress(
+    const uint8_t* device_input,
+    size_t input_size,
+    uint8_t* device_output,
+    size_t device_output_capacity,
+    size_t* device_actual_output_size,
+    arctoStatus_t* device_status,
+    hipStream_t stream)
+{
+  // Use the same grid sizing as compress; the kernel will reject mismatched
+  // headers and emit a status code without touching the output cube.
+  const unsigned threads_per_cta = kThreadsPerChunkCTA;
+  const unsigned grid            = 65535u;
+  zfp_fixed_rate_3d_decompress_kernel<<<grid, threads_per_cta, 0, stream>>>(
+      device_input, input_size,
+      device_output, device_output_capacity,
+      device_actual_output_size, device_status);
+  HipUtils::check_last_error("zfp_fixed_rate_3d_decompress_kernel launch");
+}
+
+void zfp3DGetDecompressSize(
+    const uint8_t* device_input,
+    size_t input_size,
+    size_t* device_uncompressed_bytes,
+    hipStream_t stream)
+{
+  zfp_get_decompress_size_3d_kernel<<<1, 1, 0, stream>>>(
+      device_input, input_size, device_uncompressed_bytes);
+  HipUtils::check_last_error("zfp_get_decompress_size_3d_kernel launch");
 }
 
 size_t zfpBatchCompressComputeTempSize(

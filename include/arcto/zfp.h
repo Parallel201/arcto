@@ -158,6 +158,73 @@ arctoStatus_t arctoBatchedZFPGetDecompressSizeAsync(
     size_t batch_size,
     hipStream_t stream);
 
+/******************************************************************************
+ * Single-cube 3D interface (Phase 1c)
+ *
+ * A high-level API that mirrors the shape of hipcompZfpCompressAsync: one
+ * GPU buffer in, one GPU buffer out, the field's 3D shape passed in opts.
+ * Internally the kernel tiles the cube into real 4x4x4 sub-cubes (not the
+ * linear 64-float groups used by the batched API), so spatial correlation
+ * along y and z is exploited the way ZFP intends.
+ *
+ * opts must have:
+ *   - mode = ARCTO_ZFP_MODE_FIXED_RATE   (other modes return NotSupported)
+ *   - dim  = ARCTO_ZFP_DIM_3D
+ *   - shape[0..2] = (nx, ny, nz); shape[3] is ignored (use the batched API
+ *                   or call this once per timestep for 4D)
+ *   - param = rate (bits per value, clamped to [1, 32])
+ *****************************************************************************/
+
+/**
+ * @brief Worst-case compressed-output size for a single 3D cube.
+ */
+arctoStatus_t arctoZFP3DCompressGetMaxOutputSize(
+    arctoBatchedZFPOpts_t opts,
+    size_t* max_compressed_bytes);
+
+/**
+ * @brief Compress one nx*ny*nz float32 cube into a contiguous output buffer.
+ *
+ * The compressed payload is fully self-describing (header carries the shape
+ * and rate), so the caller does not need to remember opts at decompress
+ * time.
+ *
+ * device_output_size is a GPU-side size_t* that receives the actual number
+ * of bytes written, suitable for D2H async copy.
+ */
+arctoStatus_t arctoZFP3DCompressAsync(
+    const void* device_input,
+    arctoBatchedZFPOpts_t opts,
+    void* device_output,
+    size_t device_output_capacity,
+    size_t* device_output_size,
+    hipStream_t stream);
+
+/**
+ * @brief Decompress a 3D cube previously written by arctoZFP3DCompressAsync.
+ *
+ * Shape, mode and rate are recovered from the compressed header; the
+ * decompressed buffer must be at least nx*ny*nz*sizeof(float) bytes.
+ */
+arctoStatus_t arctoZFP3DDecompressAsync(
+    const void* device_input,
+    size_t input_size,
+    void* device_output,
+    size_t device_output_capacity,
+    size_t* device_actual_output_size,
+    arctoStatus_t* device_status,
+    hipStream_t stream);
+
+/**
+ * @brief Recover the decompressed cube size (in bytes) from a compressed
+ * buffer asynchronously. Reads only the chunk header.
+ */
+arctoStatus_t arctoZFP3DGetDecompressSizeAsync(
+    const void* device_input,
+    size_t input_size,
+    size_t* device_uncompressed_bytes,
+    hipStream_t stream);
+
 #ifdef __cplusplus
 }
 #endif
