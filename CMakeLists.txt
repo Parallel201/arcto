@@ -262,6 +262,42 @@ if (UNIX)
   include(GNUInstallDirs)
 endif()
 
+# -----------------------------------------------------------------------------
+# Vendored canonical LLNL/zfp (third_party/zfp submodule).
+#
+# Built as part of our tree (no runtime dependency on libzfp.so) so the
+# canonical encoder/decoder is inherited bit-for-bit, with zero risk of
+# divergence from a hand-ported reimplementation. Only the GPU-side code
+# paths are enabled; CLI / tests / examples / Fortran / Python are turned
+# off to keep the build quick and the install footprint small.
+# -----------------------------------------------------------------------------
+if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/zfp/CMakeLists.txt")
+  message(FATAL_ERROR
+    "third_party/zfp is missing -- run "
+    "'git submodule update --init --recursive' in the ARCTO source tree "
+    "before configuring.")
+endif()
+
+set(ZFP_WITH_HIP        ON  CACHE BOOL "" FORCE)
+if (CUDA_BACKEND)
+  set(ZFP_WITH_CUDA     ON  CACHE BOOL "" FORCE)
+endif()
+set(BUILD_SHARED_LIBS_BACKUP ${BUILD_SHARED_LIBS})
+set(BUILD_SHARED_LIBS   OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING       OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING_FULL  OFF CACHE BOOL "" FORCE)
+set(BUILD_UTILITIES     OFF CACHE BOOL "" FORCE)
+set(BUILD_EXAMPLES      OFF CACHE BOOL "" FORCE)
+set(BUILD_CFP           OFF CACHE BOOL "" FORCE)
+set(BUILD_ZFORP         OFF CACHE BOOL "" FORCE)
+set(BUILD_ZFPY          OFF CACHE BOOL "" FORCE)
+
+add_subdirectory(third_party/zfp)
+
+# Restore BUILD_SHARED_LIBS so any downstream ARCTO targets keep their
+# original (likely shared) linkage.
+set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_BACKUP} CACHE BOOL "" FORCE)
+
 add_subdirectory(src)
 
 if (BUILD_TESTS)
