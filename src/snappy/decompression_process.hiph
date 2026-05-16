@@ -47,7 +47,7 @@
 
 #define READ_BYTE(pos) s->q.buf[(pos) & (PREFETCH_SIZE - 1)]
 
-namespace hipcomp
+namespace arcto
 {
   namespace snappy
   {
@@ -264,6 +264,6 @@ namespace hipcomp
     };
 
   } // namespace snappy
-} // namespace hipcomp
+} // namespace arcto
 
 #endif // SNAPPY_DECOMPRESSION_PROCESS_HIPH

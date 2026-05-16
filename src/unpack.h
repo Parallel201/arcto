@@ -47,8 +47,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef HIPCOMP_UNPACK_H
-#define HIPCOMP_UNPACK_H
+#ifndef ARCTO_UNPACK_H
+#define ARCTO_UNPACK_H
 
 #include <limits>
 #include <cstdint>
@@ -56,16 +56,16 @@
 #include <cassert>
 
 #if defined(__HIP_PLATFORM_AMD__) or defined(__HIP_PLATFORM_NVCC__)
-#define HIPCOMP_HOST_DEVICE __device__ __host__
+#define ARCTO_HOST_DEVICE __device__ __host__
 #else
-#define HIPCOMP_HOST_DEVICE
+#define ARCTO_HOST_DEVICE
 #endif
 
-namespace hipcomp
+namespace arcto
 {
   
 template <typename T>
-HIPCOMP_HOST_DEVICE T unpackBytes(
+ARCTO_HOST_DEVICE T unpackBytes(
     const void* data, const uint8_t numBits, const T minValue, const size_t i)
 {
   using U = typename std::make_unsigned<T>::type;
@@ -114,6 +114,6 @@ HIPCOMP_HOST_DEVICE T unpackBytes(
 
 }
 
-#undef HIPCOMP_HOST_DEVICE
+#undef ARCTO_HOST_DEVICE
 
 #endif

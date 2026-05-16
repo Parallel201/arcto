@@ -49,14 +49,14 @@
 
 #pragma once
 
-#include "hipcomp/ans.h"
-#include "hipcomp/ans.hpp"
+#include "arcto/ans.h"
+#include "arcto/ans.hpp"
 #include "BatchManager.hpp"
 #ifdef ENABLE_ANS
 #include "ans_hlif.h"
 #endif
 
-namespace hipcomp {
+namespace arcto {
 
 #ifdef ENABLE_ANS
 
@@ -88,9 +88,9 @@ public:
   size_t compute_max_compressed_chunk_size() final override
   {
     size_t max_comp_chunk_size;
-    hipcompBatchedANSCompressGetMaxOutputChunkSize(
+    arctoBatchedANSCompressGetMaxOutputChunkSize(
         get_uncomp_chunk_size(),
-        hipcompBatchedANSDefaultOpts,
+        arctoBatchedANSDefaultOpts,
         &max_comp_chunk_size);
     return max_comp_chunk_size;
   }
@@ -121,7 +121,7 @@ public:
       const uint32_t num_chunks,
       const size_t* comp_chunk_offsets,
       const size_t* comp_chunk_sizes,
-      hipcompStatus_t* output_status) final override
+      arctoStatus_t* output_status) final override
   {
     ans::hlif::batchDecompress(
         comp_data_buffer,
@@ -161,11 +161,11 @@ ANSManager::ANSManager(
   (void)uncomp_chunk_size;
   (void)user_stream;
   (void)device_id;
-  throw std::runtime_error("hipcomp configured without ANS support. Please check the README for configuration instructions");
+  throw std::runtime_error("arcto configured without ANS support. Please check the README for configuration instructions");
 #endif
 }
 
 ANSManager::~ANSManager()
 {}
 
-} // namespace hipcomp
+} // namespace arcto

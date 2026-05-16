@@ -64,31 +64,31 @@
  * DEFINES ********************************************************************
  *****************************************************************************/
 
-#define HIPCOMP_TYPE_SWITCH(type_var, func, ...)                                \
+#define ARCTO_TYPE_SWITCH(type_var, func, ...)                                \
   do {                                                                         \
     switch (type_var) {                                                        \
-    case HIPCOMP_TYPE_CHAR:                                                     \
+    case ARCTO_TYPE_CHAR:                                                     \
       func<char, uint32_t, char>(__VA_ARGS__);                                 \
       break;                                                                   \
-    case HIPCOMP_TYPE_UCHAR:                                                    \
+    case ARCTO_TYPE_UCHAR:                                                    \
       func<unsigned char, uint32_t, unsigned char>(__VA_ARGS__);               \
       break;                                                                   \
-    case HIPCOMP_TYPE_SHORT:                                                    \
+    case ARCTO_TYPE_SHORT:                                                    \
       func<short, uint32_t, short>(__VA_ARGS__);                               \
       break;                                                                   \
-    case HIPCOMP_TYPE_USHORT:                                                   \
+    case ARCTO_TYPE_USHORT:                                                   \
       func<unsigned short, uint32_t, unsigned short>(__VA_ARGS__);             \
       break;                                                                   \
-    case HIPCOMP_TYPE_INT:                                                      \
+    case ARCTO_TYPE_INT:                                                      \
       func<int, uint32_t, int>(__VA_ARGS__);                                   \
       break;                                                                   \
-    case HIPCOMP_TYPE_UINT:                                                     \
+    case ARCTO_TYPE_UINT:                                                     \
       func<unsigned int, uint32_t, unsigned int>(__VA_ARGS__);                 \
       break;                                                                   \
-    case HIPCOMP_TYPE_LONGLONG:                                                 \
+    case ARCTO_TYPE_LONGLONG:                                                 \
       func<long long, uint64_t, long long>(__VA_ARGS__);                       \
       break;                                                                   \
-    case HIPCOMP_TYPE_ULONGLONG:                                                \
+    case ARCTO_TYPE_ULONGLONG:                                                \
       func<unsigned long long, uint64_t, unsigned long long>(__VA_ARGS__);     \
       break;                                                                   \
     default:                                                                   \
@@ -96,7 +96,7 @@
     }                                                                          \
   } while (0)
 
-namespace hipcomp
+namespace arcto
 {
 
 /******************************************************************************
@@ -611,7 +611,7 @@ void bitPackInternal(
 void BitPackGPU::compress(
     void* const workspace,
     const size_t workspaceSize,
-    const hipcompType_t inType,
+    const arctoType_t inType,
     void* const* const outPtr,
     const void* const in,
     const size_t* const numPtr,
@@ -627,7 +627,7 @@ void BitPackGPU::compress(
         + ", need " + std::to_string(reqWorkSize));
   }
 
-  HIPCOMP_TYPE_SWITCH(
+  ARCTO_TYPE_SWITCH(
       inType,
       bitPackInternal,
       workspace,
@@ -641,13 +641,13 @@ void BitPackGPU::compress(
 }
 
 size_t
-BitPackGPU::requiredWorkspaceSize(size_t const num, const hipcompType_t type)
+BitPackGPU::requiredWorkspaceSize(size_t const num, const arctoType_t type)
 {
   // we need a space for min values, and a space for maximum values
   size_t const bytes
-      = sizeOfhipcompType(type) * getReduceScratchSpaceSize(num) * 2;
+      = sizeOfarctoType(type) * getReduceScratchSpaceSize(num) * 2;
 
   return bytes;
 }
 
-} // namespace hipcomp
+} // namespace arcto

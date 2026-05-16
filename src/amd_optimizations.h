@@ -36,7 +36,7 @@
 
 #include "device_types.h"
 
-namespace hipcomp {
+namespace arcto {
 namespace amd {
 
 // ============================================================================
@@ -348,6 +348,6 @@ __device__ __forceinline__ int align_to_wavefront(int value)
 #define AMD_UNLIKELY(x) __builtin_expect(!!(x), 0)
 
 } // namespace amd
-} // namespace hipcomp
+} // namespace arcto
 
 #endif // AMD_OPTIMIZATIONS_H

@@ -47,14 +47,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "hipcomp/snappy.h"
+#include "arcto/snappy.h"
 
 #include "Check.h"
 #include "HipUtils.h"
 #include "SnappyBatchKernels.h"
 #include "common.h"
-#include "hipcomp.h"
-#include "hipcomp.hpp"
+#include "arcto.h"
+#include "arcto.hpp"
 #include "type_macros.h"
 
 #include <cassert>
@@ -65,7 +65,7 @@
 #include <sstream>
 #include <vector>
 
-using namespace hipcomp;
+using namespace arcto;
 namespace
 {
 
@@ -81,7 +81,7 @@ size_t snappy_get_max_compressed_length(size_t source_bytes)
  *     C-style API calls for BATCHED compression/decompress defined below.
  *****************************************************************************/
 
-hipcompStatus_t hipcompBatchedSnappyDecompressGetTempSize(
+arctoStatus_t arctoBatchedSnappyDecompressGetTempSize(
     size_t /* num_chunks */,
     size_t /* max_uncompressed_chunk_size */,
     size_t* temp_bytes)
@@ -95,13 +95,13 @@ hipcompStatus_t hipcompBatchedSnappyDecompressGetTempSize(
 
   } catch (const std::exception& e) {
     return Check::exception_to_error(
-        e, "hipcompBatchedSnappyDecompressGetTempSize()");
+        e, "arctoBatchedSnappyDecompressGetTempSize()");
   }
 
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedSnappyGetDecompressSizeAsync(
+arctoStatus_t arctoBatchedSnappyGetDecompressSizeAsync(
     const void* const* device_compressed_ptrs,
     const size_t* device_compressed_bytes,
     size_t* device_uncompressed_bytes,
@@ -123,13 +123,13 @@ hipcompStatus_t hipcompBatchedSnappyGetDecompressSizeAsync(
 
   } catch (const std::exception& e) {
     return Check::exception_to_error(
-        e, "hipcompBatchedSnappyGetDecompressSizeAsync()");
+        e, "arctoBatchedSnappyGetDecompressSizeAsync()");
   }
 
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedSnappyDecompressAsync(
+arctoStatus_t arctoBatchedSnappyDecompressAsync(
     const void* const* device_compressed_ptrs,
     const size_t* device_compressed_bytes,
     const size_t* device_uncompressed_bytes,
@@ -138,7 +138,7 @@ hipcompStatus_t hipcompBatchedSnappyDecompressAsync(
     void* const /* temp_ptr */,
     const size_t /* temp_bytes */,
     void* const* device_uncompressed_ptr,
-    hipcompStatus_t* device_statuses,
+    arctoStatus_t* device_statuses,
     hipStream_t stream)
 {
   try {
@@ -159,16 +159,16 @@ hipcompStatus_t hipcompBatchedSnappyDecompressAsync(
         stream);
 
   } catch (const std::exception& e) {
-    return Check::exception_to_error(e, "hipcompBatchedSnappyDecompressAsync()");
+    return Check::exception_to_error(e, "arctoBatchedSnappyDecompressAsync()");
   }
 
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedSnappyCompressGetTempSize(
+arctoStatus_t arctoBatchedSnappyCompressGetTempSize(
     const size_t /* batch_size */,
     const size_t /* max_chunk_size */,
-    const hipcompBatchedSnappyOpts_t /* format_opts */,
+    const arctoBatchedSnappyOpts_t /* format_opts */,
     size_t* const temp_bytes)
 {
   try {
@@ -180,15 +180,15 @@ hipcompStatus_t hipcompBatchedSnappyCompressGetTempSize(
 
   } catch (const std::exception& e) {
     return Check::exception_to_error(
-        e, "hipcompBatchedSnappyCompressGetTempSize()");
+        e, "arctoBatchedSnappyCompressGetTempSize()");
   }
 
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedSnappyCompressGetMaxOutputChunkSize(
+arctoStatus_t arctoBatchedSnappyCompressGetMaxOutputChunkSize(
     const size_t max_chunk_size,
-    const hipcompBatchedSnappyOpts_t /* format_opts */,
+    const arctoBatchedSnappyOpts_t /* format_opts */,
     size_t* const max_compressed_size)
 {
   try {
@@ -199,13 +199,13 @@ hipcompStatus_t hipcompBatchedSnappyCompressGetMaxOutputChunkSize(
 
   } catch (const std::exception& e) {
     return Check::exception_to_error(
-        e, "hipcompBatchedSnappyCompressGetOutputSize()");
+        e, "arctoBatchedSnappyCompressGetOutputSize()");
   }
 
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedSnappyCompressAsync(
+arctoStatus_t arctoBatchedSnappyCompressAsync(
     const void* const* device_uncompressed_ptr,
     const size_t* device_uncompressed_bytes,
     size_t /*max_uncompressed_chunk_bytes*/,
@@ -214,7 +214,7 @@ hipcompStatus_t hipcompBatchedSnappyCompressAsync(
     size_t /* temp_bytes */,
     void* const* device_compressed_ptr,
     size_t* device_compressed_bytes,
-    const hipcompBatchedSnappyOpts_t /* format_ops */,
+    const arctoBatchedSnappyOpts_t /* format_ops */,
     hipStream_t stream)
 {
   try {
@@ -238,8 +238,8 @@ hipcompStatus_t hipcompBatchedSnappyCompressAsync(
         stream);
 
   } catch (const std::exception& e) {
-    return Check::exception_to_error(e, "hipcompBatchedSnappyCompressAsync()");
+    return Check::exception_to_error(e, "arctoBatchedSnappyCompressAsync()");
   }
 
-  return hipcompSuccess;
+  return arctoSuccess;
 }

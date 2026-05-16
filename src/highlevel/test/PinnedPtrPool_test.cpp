@@ -57,10 +57,10 @@
 
 #include "highlevel/PinnedPtrs.hpp"
 
-using namespace hipcomp;
+using namespace arcto;
 using namespace std;
 
-namespace hipcomp {
+namespace arcto {
 
 template<typename T>
 struct PoolTestWrapper {

@@ -49,8 +49,8 @@
 
 #pragma once
 
-#include "hipcomp.h"
-#include "hipcomp.hpp"
+#include "arcto.h"
+#include "arcto.hpp"
 
 #include <cassert>
 #include <chrono>
@@ -64,7 +64,7 @@
 using ssize_t = ptrdiff_t;
 #endif
 
-namespace hipcomp {
+namespace arcto {
 
 namespace {
 
@@ -147,30 +147,30 @@ using larger_t = typename make_larger<U, T>::type;
 
 } // namespace 
 
-__inline__ size_t sizeOfhipcompType(hipcompType_t type)
+__inline__ size_t sizeOfarctoType(arctoType_t type)
 {
   switch (type) {
-  case HIPCOMP_TYPE_BITS:
+  case ARCTO_TYPE_BITS:
     return 1;
-  case HIPCOMP_TYPE_CHAR:
+  case ARCTO_TYPE_CHAR:
     return sizeof(int8_t);
-  case HIPCOMP_TYPE_UCHAR:
+  case ARCTO_TYPE_UCHAR:
     return sizeof(uint8_t);
-  case HIPCOMP_TYPE_SHORT:
+  case ARCTO_TYPE_SHORT:
     return sizeof(int16_t);
-  case HIPCOMP_TYPE_USHORT:
+  case ARCTO_TYPE_USHORT:
     return sizeof(uint16_t);
-  case HIPCOMP_TYPE_INT:
+  case ARCTO_TYPE_INT:
     return sizeof(int32_t);
-  case HIPCOMP_TYPE_UINT:
+  case ARCTO_TYPE_UINT:
     return sizeof(uint32_t);
-  case HIPCOMP_TYPE_LONGLONG:
+  case ARCTO_TYPE_LONGLONG:
     return sizeof(int64_t);
-  case HIPCOMP_TYPE_ULONGLONG:
+  case ARCTO_TYPE_ULONGLONG:
     return sizeof(uint64_t);
   default:
     throw std::runtime_error("Unsupported type " + std::to_string(type));
   }
 }
 
-} // namespace hipcomp
+} // namespace arcto

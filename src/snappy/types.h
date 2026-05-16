@@ -49,10 +49,10 @@
 
 #pragma once
 
-#include "hipcomp.h"
+#include "arcto.h"
 #include "common.h"
 
-namespace hipcomp {
+namespace arcto {
 
 /**
  * @brief The result of the compression and decompression routines
@@ -61,4 +61,4 @@ struct gpu_snappy_status_s {
   uint32_t status; // Non-zero value indicates an error
 };
 
-} // namespace hipcomp
+} // namespace arcto

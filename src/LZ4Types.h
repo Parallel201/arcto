@@ -51,7 +51,7 @@
 
 #include "common.h"
 
-namespace hipcomp {
+namespace arcto {
 
 // This restricts us to 4GB chunk sizes (total buffer can be up to
 // max(size_t)). We actually artificially restrict it to much less, to
@@ -62,4 +62,4 @@ using position_type = uint32_t;
 // Limits lookback to 64 KB
 using offset_type = uint16_t;
 
-} // namespace hipcomp
+} // namespace arcto

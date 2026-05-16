@@ -53,11 +53,11 @@
 #include <vector>
 
 #include "HipUtils.h"
-#include "hipcomp_common_deps/hlif_shared_types.hpp"
+#include "arcto_common_deps/hlif_shared_types.hpp"
 #include "highlevel/PinnedPtrs.hpp"
-#include "hipcomp/hipcompManager.hpp"
+#include "arcto/arctoManager.hpp"
 
-namespace hipcomp {
+namespace arcto {
 
 /******************************************************************************
  * CLASSES ********************************************************************
@@ -66,48 +66,48 @@ namespace hipcomp {
 /**
  * @brief Config used to aggregate information about the compression of a particular buffer.
  * 
- * Contains a "PinnedPtrHandle" to an hipcompStatus. After the compression is complete,
+ * Contains a "PinnedPtrHandle" to an arctoStatus. After the compression is complete,
  * the user can check the result status which resides in pinned host memory.
  */
 struct CompressionConfig::CompressionConfigImpl {
 private: 
-  std::unique_ptr<PinnedPtrPool<hipcompStatus_t>::PinnedPtrHandle> status;
+  std::unique_ptr<PinnedPtrPool<arctoStatus_t>::PinnedPtrHandle> status;
 
 public:
   /**
-   * @brief Construct the config given an hipcompStatus_t memory pool
+   * @brief Construct the config given an arctoStatus_t memory pool
    */
-  CompressionConfigImpl(PinnedPtrPool<hipcompStatus_t>& pool);
+  CompressionConfigImpl(PinnedPtrPool<arctoStatus_t>& pool);
 
   /**
-   * @brief Get the raw hipcompStatus_t*
+   * @brief Get the raw arctoStatus_t*
    */
-  hipcompStatus_t* get_status() const;
+  arctoStatus_t* get_status() const;
 };
 
 /**
  * @brief Config used to aggregate information about a particular decompression.
  * 
- * Contains a "PinnedPtrHandle" to an hipcompStatus. After the decompression is complete,
+ * Contains a "PinnedPtrHandle" to an arctoStatus. After the decompression is complete,
  * the user can check the result status which resides in pinned host memory.
  */
 struct DecompressionConfig::DecompressionConfigImpl {
 private: 
-  std::unique_ptr<PinnedPtrPool<hipcompStatus_t>::PinnedPtrHandle> status;
+  std::unique_ptr<PinnedPtrPool<arctoStatus_t>::PinnedPtrHandle> status;
 
 public:
   size_t decomp_data_size;
   uint32_t num_chunks;
 
   /**
-   * @brief Construct the config given an hipcompStatus_t memory pool
+   * @brief Construct the config given an arctoStatus_t memory pool
    */
-  DecompressionConfigImpl(PinnedPtrPool<hipcompStatus_t>& pool);
+  DecompressionConfigImpl(PinnedPtrPool<arctoStatus_t>& pool);
 
   /**
-   * @brief Get the raw hipcompStatus_t*
+   * @brief Get the raw arctoStatus_t*
    */
-  hipcompStatus_t* get_status() const;
+  arctoStatus_t* get_status() const;
 };
 
-} // namespace hipcomp
+} // namespace arcto

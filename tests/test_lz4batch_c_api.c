@@ -50,7 +50,7 @@
 #define CRASH_SAFE
 #define SUPPORT_NULLPTR_APIS
 
-#include "hipcomp/lz4.h"
+#include "arcto/lz4.h"
 #include "test_batch_c_api.h"
 
 GENERATE_TESTS(LZ4);

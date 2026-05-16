@@ -45,14 +45,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef HIPCOMP_HIPUTILS_H
-#define HIPCOMP_HIPUTILS_H
+#ifndef ARCTO_HIPUTILS_H
+#define ARCTO_HIPUTILS_H
 
 #include "hip/hip_runtime.h"
 
 #include <string>
 
-namespace hipcomp
+namespace arcto
 {
 
 enum CopyDirection {
@@ -135,6 +135,6 @@ private:
   static void* void_device_pointer(void* ptr);
 };
 
-} // namespace hipcomp
+} // namespace arcto
 
 #endif

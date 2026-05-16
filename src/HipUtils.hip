@@ -50,7 +50,7 @@
 #include <sstream>
 #include <stdexcept>
 
-namespace hipcomp
+namespace arcto
 {
 
 namespace
@@ -169,4 +169,4 @@ void* HipUtils::void_device_pointer(void* const ptr)
   return attr.devicePointer;
 }
 
-} // namespace hipcomp
+} // namespace arcto

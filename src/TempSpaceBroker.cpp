@@ -54,7 +54,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace hipcomp
+namespace arcto
 {
 
 /******************************************************************************
@@ -109,4 +109,4 @@ void* TempSpaceBroker::next() const
   return static_cast<char*>(m_base) + m_offset;
 }
 
-} // namespace hipcomp
+} // namespace arcto

@@ -50,11 +50,11 @@
 #pragma once
 
 #include "hip/hip_runtime.h"
-#include "hipcomp.h"
+#include "arcto.h"
 
 #include <cstddef>
 
-namespace hipcomp
+namespace arcto
 {
 
 class BitPackGPU
@@ -84,7 +84,7 @@ public:
   static void compress(
       void* workspace,
       size_t workspaceSize,
-      hipcompType_t inType,
+      arctoType_t inType,
       void* const* outPtr,
       const void* in,
       const size_t* numDevice,
@@ -101,7 +101,7 @@ public:
    *
    * @return The size in bytes of the required workspace.
    */
-  static size_t requiredWorkspaceSize(size_t num, hipcompType_t type);
+  static size_t requiredWorkspaceSize(size_t num, arctoType_t type);
 };
 
-} // namespace hipcomp
+} // namespace arcto

@@ -23,7 +23,7 @@
 
 #include <stdint.h>
 
-namespace hipcomp {
+namespace arcto {
 
 #if !defined(USE_WARPSIZE_32)
 # if defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__)
@@ -43,6 +43,6 @@ typedef int32_t signed_warp_mask_t;
 constexpr uint32_t uwarpsize = sizeof(warp_mask_t)*8;
 constexpr int32_t warpsize = uwarpsize;
 
-} // namespace hipcomp
+} // namespace arcto
 
 #endif // DEVICE_TYPES_HIPH

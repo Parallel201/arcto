@@ -49,8 +49,8 @@
 
 #define CATCH_CONFIG_MAIN
 
-#include "hipcomp.hpp"
-#include "hipcomp/bitcomp.h"
+#include "arcto.hpp"
+#include "arcto/bitcomp.h"
 
 #include "catch.hpp"
 
@@ -63,7 +63,7 @@
 #ifdef ENABLE_BITCOMP
 
 using namespace std;
-using namespace hipcomp;
+using namespace arcto;
 
 #define HIP_CHECK(cond)                                                       \
   do {                                                                         \
@@ -219,7 +219,7 @@ void test_bitcomp_batch(
   HIP_CHECK(hipMalloc(&d_input_data, input_bytes));
   HIP_CHECK(hipMemcpy(d_input_data, input.data(), input_bytes, hipMemcpyDefault));
 
-  hipcompBatchedBitcompFormatOpts bitcomp_opts;
+  arctoBatchedBitcompFormatOpts bitcomp_opts;
   bitcomp_opts.algorithm_type = 0; // Using default algorithm
   bitcomp_opts.data_type = TypeOf<T>();
 
@@ -228,7 +228,7 @@ void test_bitcomp_batch(
   std::vector<size_t> batch_max_sizes(batches);
   for (size_t i = 0; i < batches; i++) {
     size_t maxi;
-    hipcompBatchedBitcompCompressGetMaxOutputChunkSize(
+    arctoBatchedBitcompCompressGetMaxOutputChunkSize(
         offsets[i].size, bitcomp_opts, &maxi);
     batch_max_sizes[i] = maxi;
     total_output_size += maxi;
@@ -258,8 +258,8 @@ void test_bitcomp_batch(
   HIP_CHECK(hipMalloc((void**)&d_input_sizes, batchsize_bytes));
   HIP_CHECK(hipMalloc((void**)&d_comp_sizes, batchsize_bytes));
   HIP_CHECK(hipMalloc((void**)&d_decomp_sizes, batchsize_bytes));
-  hipcompStatus_t* d_decomp_statuses;
-  HIP_CHECK(hipMalloc((void**)&d_decomp_statuses, batches * sizeof(hipcompStatus_t)));
+  arctoStatus_t* d_decomp_statuses;
+  HIP_CHECK(hipMalloc((void**)&d_decomp_statuses, batches * sizeof(arctoStatus_t)));
   HIP_CHECK(hipMemcpy(d_input_ptrs, input_ptrs.data(), pointer_bytes, hipMemcpyDefault));
   HIP_CHECK(hipMemcpy(d_comp_ptrs, comp_ptrs.data(), pointer_bytes, hipMemcpyDefault));
   HIP_CHECK(hipMemcpy(d_input_sizes, input_sizes.data(), batchsize_bytes, hipMemcpyDefault));
@@ -269,7 +269,7 @@ void test_bitcomp_batch(
   hipStreamCreate(&stream);
 
   // Compress async
-  hipcompBatchedBitcompCompressAsync(
+  arctoBatchedBitcompCompressAsync(
       d_input_ptrs,
       d_input_sizes,
       0,       // max_uncompressed_chunk_bytes: not used
@@ -282,7 +282,7 @@ void test_bitcomp_batch(
       stream);
 
   // Query the uncompressed sizes, make sure it matches the input sizes
-  hipcompBatchedBitcompGetDecompressSizeAsync (d_comp_ptrs, d_comp_sizes, d_decomp_sizes, batches, stream);
+  arctoBatchedBitcompGetDecompressSizeAsync (d_comp_ptrs, d_comp_sizes, d_decomp_sizes, batches, stream);
   HIP_CHECK (hipStreamSynchronize (stream));
   HIP_CHECK(hipMemcpy(decomp_sizes.data(), d_decomp_sizes, batchsize_bytes, hipMemcpyDefault));
   REQUIRE (decomp_sizes == input_sizes);
@@ -292,7 +292,7 @@ void test_bitcomp_batch(
   hipMemsetAsync(d_decomp_sizes, 0xee, batchsize_bytes, stream);
 
   // Decompress async, back into input
-  hipcompBatchedBitcompDecompressAsync(
+  arctoBatchedBitcompDecompressAsync(
       d_comp_ptrs,
       nullptr, // device_compressed_bytes: not used
       d_input_sizes,
@@ -312,11 +312,11 @@ void test_bitcomp_batch(
   REQUIRE (res == input);
   HIP_CHECK(hipMemcpy(decomp_sizes.data(), d_decomp_sizes, batchsize_bytes, hipMemcpyDefault));
   REQUIRE (decomp_sizes == input_sizes);
-  std::vector<hipcompStatus_t> decomp_statuses(batches);
+  std::vector<arctoStatus_t> decomp_statuses(batches);
   HIP_CHECK(hipMemcpy(decomp_statuses.data(), d_decomp_statuses,
-                        batches * sizeof(hipcompStatus_t), hipMemcpyDefault));
+                        batches * sizeof(arctoStatus_t), hipMemcpyDefault));
 
-  REQUIRE (decomp_statuses == std::vector<hipcompStatus_t>(batches, hipcompSuccess));
+  REQUIRE (decomp_statuses == std::vector<arctoStatus_t>(batches, arctoSuccess));
 
   HIP_CHECK(hipFree(d_input_data));
   HIP_CHECK(hipFree(d_comp_data));
@@ -366,52 +366,52 @@ void test_bitcomp_batch (size_t n)
 #define SMALL 1000
 #define LARGE 20000000
 
-TEST_CASE("comp/decomp bitcomp-batch-runs small", "[hipcomp]")
+TEST_CASE("comp/decomp bitcomp-batch-runs small", "[arcto]")
 {
     test_bitcomp_batch<RUNS> (SMALL);
 }
 
-TEST_CASE("comp/decomp bitcomp-batch-runs large", "[hipcomp]")
+TEST_CASE("comp/decomp bitcomp-batch-runs large", "[arcto]")
 {
     test_bitcomp_batch<RUNS> (LARGE);
 }
 
-TEST_CASE("comp/decomp bitcomp-batch-zeroes small", "[hipcomp]")
+TEST_CASE("comp/decomp bitcomp-batch-zeroes small", "[arcto]")
 {
     test_bitcomp_batch<CST_Z> (SMALL);
 }
 
-TEST_CASE("comp/decomp bitcomp-batch-zeroes large", "[hipcomp]")
+TEST_CASE("comp/decomp bitcomp-batch-zeroes large", "[arcto]")
 {
     test_bitcomp_batch<CST_Z> (LARGE);
 }
 
-TEST_CASE("comp/decomp bitcomp-batch-ff small", "[hipcomp]")
+TEST_CASE("comp/decomp bitcomp-batch-ff small", "[arcto]")
 {
     test_bitcomp_batch<CST_FF> (SMALL);
 }
 
-TEST_CASE("comp/decomp bitcomp-batch-ff large", "[hipcomp]")
+TEST_CASE("comp/decomp bitcomp-batch-ff large", "[arcto]")
 {
     test_bitcomp_batch<CST_FF> (LARGE);
 }
 
-TEST_CASE("comp/decomp bitcomp-batch-inc small", "[hipcomp]")
+TEST_CASE("comp/decomp bitcomp-batch-inc small", "[arcto]")
 {
     test_bitcomp_batch<INC> (SMALL);
 }
 
-TEST_CASE("comp/decomp bitcomp-batch-inc large", "[hipcomp]")
+TEST_CASE("comp/decomp bitcomp-batch-inc large", "[arcto]")
 {
     test_bitcomp_batch<INC> (LARGE);
 }
 
-TEST_CASE("comp/decomp bitcomp-batch-random small", "[hipcomp]")
+TEST_CASE("comp/decomp bitcomp-batch-random small", "[arcto]")
 {
     test_bitcomp_batch<RANDOM> (SMALL);
 }
 
-TEST_CASE("comp/decomp bitcomp-batch-random large", "[hipcomp]")
+TEST_CASE("comp/decomp bitcomp-batch-random large", "[arcto]")
 {
     test_bitcomp_batch<RANDOM> (LARGE);
 }

@@ -29,20 +29,20 @@
 #include "benchmark_template_chunked.cuh"
 
 #ifdef __HIP_PLATFORM_AMD__
-#include "hipcomp/gdeflate.h"
+#include "arcto/gdeflate.h"
 #else
 #include "nvcomp/gdeflate.h"
 #endif
 
 #ifdef __HIP_PLATFORM_AMD__
 GENERATE_CHUNKED_BENCHMARK(
-    hipcompBatchedGdeflateCompressGetTempSize,
-    hipcompBatchedGdeflateCompressGetMaxOutputChunkSize,
-    hipcompBatchedGdeflateCompressAsync,
-    hipcompBatchedGdeflateDecompressGetTempSize,
-    hipcompBatchedGdeflateDecompressAsync,
+    arctoBatchedGdeflateCompressGetTempSize,
+    arctoBatchedGdeflateCompressGetMaxOutputChunkSize,
+    arctoBatchedGdeflateCompressAsync,
+    arctoBatchedGdeflateDecompressGetTempSize,
+    arctoBatchedGdeflateDecompressAsync,
     inputAlwaysValid,
-    hipcompBatchedGdeflateDefaultOpts);
+    arctoBatchedGdeflateDefaultOpts);
 #else
 GENERATE_CHUNKED_BENCHMARK(
     nvcompBatchedGdeflateCompressGetTempSize,

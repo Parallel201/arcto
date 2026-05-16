@@ -49,7 +49,7 @@
 #define SUPPORT_NULLPTR_APIS
 #define CRASH_SAFE
 
-#include "hipcomp/ans.h"
+#include "arcto/ans.h"
 #include "test_batch_c_api.h"
 
 GENERATE_TESTS(ANS);

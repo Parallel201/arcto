@@ -69,13 +69,13 @@
  * use the upper 6 bits of the tag_byte to encode the length information (subtracted by 1).
  */
 
-namespace hipcomp {
+namespace arcto {
 namespace snappy {
 
 struct LZ77Symbol {
   int32_t len;     //> 1..64 = Number of bytes
   int32_t offset;  //> copy distance if greater than zero, or negative of literal offset in byte stream
-  #ifdef HIPCOMP_PRINT_DEBUG_INFO
+  #ifdef ARCTO_PRINT_DEBUG_INFO
   uint32_t cur;   //> Cursor position when decoding, for debugging purposes.
   #endif
 
@@ -83,12 +83,12 @@ public:
   /**
    * \brief Setter for type attributes.
    * \note Can be used for debugging purposes.
-   * \note Argument `cur` is only used if HIPCOMP_PRINT_DEBUG_INFO is defined.
+   * \note Argument `cur` is only used if ARCTO_PRINT_DEBUG_INFO is defined.
    */
   __device__ inline void set(int32_t len,int32_t offset,uint32_t cur,const char* context = "") volatile {
     this->len = len;
     this->offset = offset;
-    #ifdef HIPCOMP_PRINT_DEBUG_INFO
+    #ifdef ARCTO_PRINT_DEBUG_INFO
     this->cur = cur;
     printf("%10u\t%4u\tdecode\t%u\t<%d,%d>%s\n",(unsigned)blockIdx.x,(unsigned)threadIdx.x,this->cur,this->len,this->offset,context);
     #endif
@@ -101,7 +101,7 @@ public:
   __device__ inline void get(int32_t& len,int32_t& offset) volatile {
     len = this->len;
     offset = this->offset;
-    #ifdef HIPCOMP_PRINT_DEBUG_INFO
+    #ifdef ARCTO_PRINT_DEBUG_INFO
     printf("%10u\t%4u\tprocess\t%u\t<%d,%d>\n",(unsigned)blockIdx.x,(unsigned)threadIdx.x,this->cur,this->len,this->offset);
     #endif
   }
@@ -277,6 +277,6 @@ public:
 };
 
 } // namespace snappy
-} // namespace hipcomp
+} // namespace arcto
 
 #endif // SNAPPY_SYMBOL_HIPH

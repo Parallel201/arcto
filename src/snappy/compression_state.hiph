@@ -40,7 +40,7 @@
 
 #include "snappy/config.h"
 
-namespace hipcomp {
+namespace arcto {
 namespace snappy {
 
 /**
@@ -59,6 +59,6 @@ struct snap_state_s {
 };
 
 } // namespace snappy
-} // namespace hipcomp
+} // namespace arcto
 
 #endif // SNAPPY_COMPRESSION_STATE_HIPH

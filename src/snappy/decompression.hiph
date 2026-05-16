@@ -48,7 +48,7 @@
 #include "snappy/decompression_decode.hiph"
 #include "snappy/decompression_process.hiph"
 
-namespace hipcomp
+namespace arcto
 {
   namespace snappy
   {
@@ -109,7 +109,7 @@ namespace hipcomp
         const uint64_t device_in_bytes,
         uint8_t *const __restrict__ device_out_ptr,
         const uint64_t device_out_available_bytes,
-        hipcompStatus_t *const __restrict__ outputs,
+        arctoStatus_t *const __restrict__ outputs,
         uint64_t *__restrict__ device_out_bytes
     ) {
       __shared__ __align__(16) unsnap_state_s state_g;
@@ -185,7 +185,7 @@ namespace hipcomp
         if (device_out_bytes)
           *device_out_bytes = s->uncompressed_size - s->bytes_left;
         if (outputs)
-          *outputs = s->error ? hipcompErrorCannotDecompress : hipcompSuccess;
+          *outputs = s->error ? arctoErrorCannotDecompress : arctoSuccess;
       }
     }
 
@@ -197,7 +197,7 @@ namespace hipcomp
         const uint64_t device_in_bytes,
         uint8_t *const __restrict__ device_out_ptr,
         const uint64_t device_out_available_bytes,
-        hipcompStatus_t *const __restrict__ outputs,
+        arctoStatus_t *const __restrict__ outputs,
         uint64_t *__restrict__ device_out_bytes)
     {
       _do_unsnap<
@@ -210,6 +210,6 @@ namespace hipcomp
       >(device_in_ptr,device_in_bytes,device_out_ptr,device_out_available_bytes,outputs,device_out_bytes);
     }
   } // snappy namespace
-} // hipcomp namespace
+} // arcto namespace
 
 #endif // SNAPPY_DEDECOMPRESSION_HIPH

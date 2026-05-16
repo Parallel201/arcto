@@ -51,16 +51,16 @@
 
 #include <memory>
 
-#include "hipcomp/cascaded.hpp"
+#include "arcto/cascaded.hpp"
 #include "Check.h"
 #include "HipUtils.h"
 #include "common.h"
-#include "hipcomp/cascaded.h"
-#include "hipcomp_common_deps/hlif_shared_types.hpp"
+#include "arcto/cascaded.h"
+#include "arcto_common_deps/hlif_shared_types.hpp"
 #include "highlevel/CascadedHlifKernels.h"
 #include "highlevel/BatchManager.hpp"
 
-namespace hipcomp {
+namespace arcto {
 
 struct CascadedBatchManager : BatchManager<CascadedFormatSpecHeader> {
 private:
@@ -68,7 +68,7 @@ private:
 
 public:
   CascadedBatchManager(
-      const hipcompBatchedCascadedOpts_t& options = hipcompBatchedCascadedDefaultOpts,
+      const arctoBatchedCascadedOpts_t& options = arctoBatchedCascadedDefaultOpts,
       hipStream_t user_stream = 0,
       int device_id = 0) :
       BatchManager(options.chunk_size, user_stream, device_id),
@@ -92,9 +92,9 @@ public:
   size_t compute_max_compressed_chunk_size() final override
   {
     size_t max_comp_chunk_size;
-    hipcompBatchedCascadedCompressGetMaxOutputChunkSize(
+    arctoBatchedCascadedCompressGetMaxOutputChunkSize(
         get_uncomp_chunk_size(),
-        hipcompBatchedCascadedDefaultOpts,
+        arctoBatchedCascadedDefaultOpts,
         &max_comp_chunk_size);
     return max_comp_chunk_size;
   }
@@ -131,7 +131,7 @@ public:
       const uint32_t num_chunks,
       const size_t* comp_chunk_offsets,
       const size_t* comp_chunk_sizes,
-      hipcompStatus_t* output_status) final override
+      arctoStatus_t* output_status) final override
   {
     cascadedHlifBatchDecompress(
         comp_data_buffer,
@@ -152,7 +152,7 @@ public:
 // CascadedManager implementation
 
 CascadedManager::CascadedManager(
-    const hipcompBatchedCascadedOpts_t& options,
+    const arctoBatchedCascadedOpts_t& options,
     hipStream_t user_stream,
     int device_id)
 {
@@ -164,4 +164,4 @@ CascadedManager::~CascadedManager()
 {
 }
 
-} // namespace hipcomp
+} // namespace arcto

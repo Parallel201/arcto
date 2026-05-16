@@ -63,14 +63,14 @@ macro (setup_cuda_devices)
 endmacro(setup_cuda_devices)
 
 macro (set_cuda_compilation_options)
-  set_property(TARGET hipcomp PROPERTY POSITION_INDEPENDENT_CODE ON)
-  set_property(TARGET hipcomp PROPERTY CUDA_ARCHITECTURES ${GPU_ARCHS})
-  target_compile_options(hipcomp PRIVATE
+  set_property(TARGET arcto PROPERTY POSITION_INDEPENDENT_CODE ON)
+  set_property(TARGET arcto PROPERTY CUDA_ARCHITECTURES ${GPU_ARCHS})
+  target_compile_options(arcto PRIVATE
       $<$<COMPILE_LANGUAGE:HIP>:--expt-extended-lambda>)
   if(DEFINED CUB_DIR)
-    target_include_directories(hipcomp PRIVATE "${CUB_DIR}")
+    target_include_directories(arcto PRIVATE "${CUB_DIR}")
   endif()
-  target_include_directories(hipcomp PRIVATE "${CUDAToolkit_INCLUDE_DIRS}")
+  target_include_directories(arcto PRIVATE "${CUDAToolkit_INCLUDE_DIRS}")
 endmacro (set_cuda_compilation_options)
 
 file(GLOB HIP_SOURCES
@@ -88,43 +88,43 @@ if (CUDA_BACKEND)
 endif (CUDA_BACKEND)
 
 if (BUILD_STATIC)
-  add_library(hipcomp STATIC ${HIP_SOURCES} ${CPP_SOURCES})
+  add_library(arcto STATIC ${HIP_SOURCES} ${CPP_SOURCES})
 else()
   if (MSVC_VERSION)
     # we have to export all symbols on windows for a dll
-    add_library(hipcomp STATIC ${HIP_SOURCES} ${CPP_SOURCES})
+    add_library(arcto STATIC ${HIP_SOURCES} ${CPP_SOURCES})
   else()
-    add_library(hipcomp SHARED ${HIP_SOURCES} ${CPP_SOURCES})
+    add_library(arcto SHARED ${HIP_SOURCES} ${CPP_SOURCES})
   endif()
 endif()
 
-target_include_directories(hipcomp PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../src>")
-target_include_directories(hipcomp PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>")
+target_include_directories(arcto PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../src>")
+target_include_directories(arcto PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>")
 
 if (CUDA_BACKEND)
   set_cuda_compilation_options()
 endif (CUDA_BACKEND)
 
 if(UNIX)
-target_include_directories(hipcomp PUBLIC
+target_include_directories(arcto PUBLIC
   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 endif()
 
-include_directories("${hipcomp_SOURCE_DIR}/src")
+include_directories("${arcto_SOURCE_DIR}/src")
 
 if (bitcomp_FOUND)
-  target_include_directories(hipcomp INTERFACE ${BITCOMP_INCLUDE_DIRS})
-  target_link_libraries(hipcomp PRIVATE bitcomp)
+  target_include_directories(arcto INTERFACE ${BITCOMP_INCLUDE_DIRS})
+  target_link_libraries(arcto PRIVATE bitcomp)
 endif()
 
 if (gdeflate_FOUND)
-  target_include_directories(hipcomp PRIVATE ${GDEFLATE_INCLUDE_DIRS})
-  target_link_libraries(hipcomp PRIVATE gdeflate)
+  target_include_directories(arcto PRIVATE ${GDEFLATE_INCLUDE_DIRS})
+  target_link_libraries(arcto PRIVATE gdeflate)
 endif()
 
 if (ans_FOUND)
-  target_include_directories(hipcomp PRIVATE ${ANS_INCLUDE_DIRS})
-  target_link_libraries(hipcomp PRIVATE ans)
+  target_include_directories(arcto PRIVATE ${ANS_INCLUDE_DIRS})
+  target_link_libraries(arcto PRIVATE ans)
 endif()
 
 if (BUILD_TESTS)

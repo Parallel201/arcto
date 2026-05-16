@@ -49,10 +49,10 @@
 
 #pragma once
 
-#include "hipcomp.h"
-#include "hipcomp_common_deps/hlif_shared_types.hpp"
+#include "arcto.h"
+#include "arcto_common_deps/hlif_shared_types.hpp"
 
-namespace hipcomp {
+namespace arcto {
 
 void snappyHlifBatchCompress(
     const CompressArgs& compress_args,
@@ -69,9 +69,9 @@ void snappyHlifBatchDecompress(
     const size_t* comp_chunk_sizes,
     const uint32_t max_ctas,
     hipStream_t stream,
-    hipcompStatus_t* output_status);
+    arctoStatus_t* output_status);
 
 size_t snappyHlifDecompMaxBlockOccupancy(const int device_id); 
 size_t snappyHlifCompMaxBlockOccupancy(const int device_id);
 
-} // namespace hipcomp
+} // namespace arcto

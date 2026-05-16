@@ -41,9 +41,9 @@
 
 #include "snappy/symbol.hiph"
 
-using namespace hipcomp::snappy;
+using namespace arcto::snappy;
 
-namespace hipcomp {
+namespace arcto {
 namespace snappy {
 
 /**
@@ -124,6 +124,6 @@ struct unsnap_state_s {
 };
 
 } // namespace snappy
-} // namespace hipcomp
+} // namespace arcto
 
 #endif // SNAPPY_DECOMPRESSION_STATE_HIPH

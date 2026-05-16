@@ -8,3 +8,9 @@ install/
 
 # Large test data files (generate with scripts/generate_testdata.sh)
 testdata/*.bin
+
+# Singularity images
+*.sif
+
+# Benchmark results (generated per-run)
+results/

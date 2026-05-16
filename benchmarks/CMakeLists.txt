@@ -49,7 +49,7 @@ foreach(BENCHMARK_SOURCE ${BENCHMARK_SOURCES})
     )
     target_link_libraries(${BENCHMARK_NAME}
       PRIVATE
-        hipcomp
+        arcto
     )
     set_target_properties(${BENCHMARK_NAME} PROPERTIES
       CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
@@ -69,7 +69,7 @@ foreach(BENCHMARK_SOURCE ${BENCHMARK_SOURCES})
     )
     target_link_libraries(${BENCHMARK_NAME}
       PRIVATE
-        hipcomp
+        arcto
         hip::host
     )
     set_target_properties(${BENCHMARK_NAME} PROPERTIES
@@ -89,11 +89,6 @@ foreach(BENCHMARK_SOURCE ${BENCHMARK_SOURCES})
   )
 endforeach()
 
-# Copy benchmark scripts
-install(FILES
-  ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/benchmark.sh
-  DESTINATION bin/benchmarks
-  PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-)
+
 
 message(STATUS "Benchmarks will be built: ${BENCHMARK_SOURCES}")

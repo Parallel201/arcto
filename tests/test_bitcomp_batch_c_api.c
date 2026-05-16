@@ -49,7 +49,7 @@
 
 #ifdef ENABLE_BITCOMP
 
-#include "hipcomp/bitcomp.h"
+#include "arcto/bitcomp.h"
 #include "test_batch_c_api.h"
 
 GENERATE_TESTS(Bitcomp);

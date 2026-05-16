@@ -49,8 +49,8 @@
 
 #define CATCH_CONFIG_MAIN
 
-#include "hipcomp.hpp"
-#include "hipcomp/cascaded.hpp"
+#include "arcto.hpp"
+#include "arcto/cascaded.hpp"
 
 #include "catch.hpp"
 
@@ -61,7 +61,7 @@
 // Test GPU decompression with cascaded compression API //
 
 using namespace std;
-using namespace hipcomp;
+using namespace arcto;
 
 #define HIP_CHECK(cond)                                                       \
   do {                                                                         \
@@ -90,7 +90,7 @@ std::vector<T> buildRuns(const size_t numRuns, const size_t runSize)
 }
 
 template <typename T>
-void test_cascaded(const std::vector<T>& input, hipcompType_t data_type)
+void test_cascaded(const std::vector<T>& input, arctoType_t data_type)
 {
   // create GPU only input buffer
   T* d_in_data;
@@ -102,7 +102,7 @@ void test_cascaded(const std::vector<T>& input, hipcompType_t data_type)
   hipStream_t stream;
   hipStreamCreate(&stream);
 
-  hipcompBatchedCascadedOpts_t options = hipcompBatchedCascadedDefaultOpts;
+  arctoBatchedCascadedOpts_t options = arctoBatchedCascadedDefaultOpts;
   options.type = data_type;
   CascadedManager manager{options, stream};
   auto comp_config = manager.configure_compression(in_bytes);
@@ -163,16 +163,16 @@ void test_cascaded(const std::vector<T>& input, hipcompType_t data_type)
  * UNIT TESTS *****************************************************************
  *****************************************************************************/
 
-TEST_CASE("comp/decomp cascaded-small", "[hipcomp]")
+TEST_CASE("comp/decomp cascaded-small", "[arcto]")
 {
   using T = int;
 
   std::vector<T> input = {0, 2, 2, 3, 0, 0, 0, 0, 0, 3, 1, 1, 1, 1, 1, 2, 3, 3};
 
-  test_cascaded(input, HIPCOMP_TYPE_INT);
+  test_cascaded(input, ARCTO_TYPE_INT);
 }
 
-TEST_CASE("comp/decomp cascaded-1", "[hipcomp]")
+TEST_CASE("comp/decomp cascaded-1", "[arcto]")
 {
   using T = int;
 
@@ -182,78 +182,78 @@ TEST_CASE("comp/decomp cascaded-1", "[hipcomp]")
     input.push_back(i >> 2);
   }
 
-  test_cascaded(input, HIPCOMP_TYPE_INT);
+  test_cascaded(input, ARCTO_TYPE_INT);
 }
 
-TEST_CASE("comp/decomp cascaded-all-small-sizes", "[hipcomp][small]")
+TEST_CASE("comp/decomp cascaded-all-small-sizes", "[arcto][small]")
 {
   using T = uint8_t;
 
   for (int total = 1; total < 4096; ++total) {
     std::vector<T> input = buildRuns<T>(total, 1);
-    test_cascaded(input, HIPCOMP_TYPE_UCHAR);
+    test_cascaded(input, ARCTO_TYPE_UCHAR);
   }
 }
 
-TEST_CASE("comp/decomp cascaded-multichunk", "[hipcomp][large]")
+TEST_CASE("comp/decomp cascaded-multichunk", "[arcto][large]")
 {
   using T = int;
 
   for (int total = 10; total < (1 << 24); total = total * 2 + 7) {
     std::vector<T> input = buildRuns<T>(total, 10);
-    test_cascaded(input, HIPCOMP_TYPE_INT);
+    test_cascaded(input, ARCTO_TYPE_INT);
   }
 }
 
-TEST_CASE("comp/decomp cascaded-small-uint8", "[hipcomp][small]")
+TEST_CASE("comp/decomp cascaded-small-uint8", "[arcto][small]")
 {
   using T = uint8_t;
 
   for (size_t num = 1; num < 1 << 18; num = num * 2 + 1) {
     std::vector<T> input = buildRuns<T>(num, 3);
-    test_cascaded(input, HIPCOMP_TYPE_UCHAR);
+    test_cascaded(input, ARCTO_TYPE_UCHAR);
   }
 }
 
-TEST_CASE("comp/decomp cascaded-small-uint16", "[hipcomp][small]")
+TEST_CASE("comp/decomp cascaded-small-uint16", "[arcto][small]")
 {
   using T = uint16_t;
 
   for (size_t num = 1; num < 1 << 18; num = num * 2 + 1) {
     std::vector<T> input = buildRuns<T>(num, 3);
-    test_cascaded(input, HIPCOMP_TYPE_USHORT);
+    test_cascaded(input, ARCTO_TYPE_USHORT);
   }
 }
 
-TEST_CASE("comp/decomp cascaded-small-uint32", "[hipcomp][small]")
+TEST_CASE("comp/decomp cascaded-small-uint32", "[arcto][small]")
 {
   using T = uint32_t;
 
   for (size_t num = 1; num < 1 << 18; num = num * 2 + 1) {
     std::vector<T> input = buildRuns<T>(num, 3);
-    test_cascaded(input, HIPCOMP_TYPE_UINT);
+    test_cascaded(input, ARCTO_TYPE_UINT);
   }
 }
 
-TEST_CASE("comp/decomp cascaded-small-uint64", "[hipcomp][small]")
+TEST_CASE("comp/decomp cascaded-small-uint64", "[arcto][small]")
 {
   using T = uint64_t;
 
   for (size_t num = 1; num < 1 << 18; num = num * 2 + 1) {
     std::vector<T> input = buildRuns<T>(num, 3);
-    test_cascaded(input, HIPCOMP_TYPE_ULONGLONG);
+    test_cascaded(input, ARCTO_TYPE_ULONGLONG);
   }
 }
 
-TEST_CASE("comp/decomp cascaded-none-aligned-sizes", "[hipcomp][small]")
+TEST_CASE("comp/decomp cascaded-none-aligned-sizes", "[arcto][small]")
 {
   std::vector<size_t> input_sizes = { 1, 33, 1021 };
 
-  std::vector<hipcompType_t> data_types = {
-    HIPCOMP_TYPE_CHAR,
-    HIPCOMP_TYPE_SHORT,
-    HIPCOMP_TYPE_INT,
-    HIPCOMP_TYPE_LONGLONG,
+  std::vector<arctoType_t> data_types = {
+    ARCTO_TYPE_CHAR,
+    ARCTO_TYPE_SHORT,
+    ARCTO_TYPE_INT,
+    ARCTO_TYPE_LONGLONG,
   };
   for (auto size : input_sizes) {
     std::vector<uint8_t> input = buildRuns<uint8_t>(1, size);

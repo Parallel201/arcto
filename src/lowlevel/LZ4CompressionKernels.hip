@@ -54,7 +54,7 @@
 #include "common.h"
 
 #include "hip/hip_runtime.h"
-#include "hipcomp_hipcub.hiph"
+#include "arcto_hipcub.hiph"
 
 #include <cassert>
 #include <fstream>
@@ -66,7 +66,7 @@ using item_type = uint32_t;
 
 #define OOB_CHECKING 1 // Prevent's crashing of corrupt lz4 sequences
 
-namespace hipcomp {
+namespace arcto {
 
 namespace lowlevel {
 
@@ -100,7 +100,7 @@ __global__ void lz4DecompressBatchKernel(
     const size_t batch_size,
     uint8_t* const* const device_out_ptrs,
     size_t* device_uncompressed_bytes,
-    hipcompStatus_t* device_status_ptrs,
+    arctoStatus_t* device_status_ptrs,
     bool output_decompressed)
 {
   const int bid = blockIdx.x * LZ4_DECOMP_CHUNKS_PER_BLOCK + threadIdx.y;
@@ -164,7 +164,7 @@ void lz4BatchCompress(
     const size_t temp_bytes,
     uint8_t* const* const comp_data_device,
     size_t* const comp_sizes_device,
-    hipcompType_t data_type,
+    arctoType_t data_type,
     hipStream_t stream)
 {
 
@@ -183,9 +183,9 @@ void lz4BatchCompress(
   const dim3 block(LZ4_COMP_THREADS_PER_CHUNK); //: 32
 
   switch (data_type) {
-    case HIPCOMP_TYPE_BITS:
-    case HIPCOMP_TYPE_CHAR:
-    case HIPCOMP_TYPE_UCHAR:
+    case ARCTO_TYPE_BITS:
+    case ARCTO_TYPE_CHAR:
+    case ARCTO_TYPE_UCHAR:
       lz4CompressBatchKernel<uint8_t><<<grid, block, 0, stream>>>(
           decomp_data_device,
           decomp_sizes_device,
@@ -194,8 +194,8 @@ void lz4BatchCompress(
           static_cast<offset_type*>(temp_data),
           HT_size);
       break;
-    case HIPCOMP_TYPE_SHORT:
-    case HIPCOMP_TYPE_USHORT:
+    case ARCTO_TYPE_SHORT:
+    case ARCTO_TYPE_USHORT:
       lz4CompressBatchKernel<uint16_t><<<grid, block, 0, stream>>>(
           decomp_data_device,
           decomp_sizes_device,
@@ -204,8 +204,8 @@ void lz4BatchCompress(
           static_cast<offset_type*>(temp_data),
           HT_size);
       break;
-    case HIPCOMP_TYPE_INT:
-    case HIPCOMP_TYPE_UINT:
+    case ARCTO_TYPE_INT:
+    case ARCTO_TYPE_UINT:
       lz4CompressBatchKernel<uint32_t><<<grid, block, 0, stream>>>(
           decomp_data_device,
           decomp_sizes_device,
@@ -230,7 +230,7 @@ void lz4BatchDecompress(
     const size_t /* temp_bytes */,
     uint8_t* const* const device_out_ptrs,
     size_t* device_actual_uncompressed_bytes,
-    hipcompStatus_t* device_status_ptrs,
+    arctoStatus_t* device_status_ptrs,
     hipStream_t stream)
 {
   const dim3 grid(roundUpDiv(batch_size, LZ4_DECOMP_CHUNKS_PER_BLOCK)); //: chunks per block: 2
@@ -318,4 +318,4 @@ size_t lz4MaxChunkSize()
 }
 
 } // namespace lowlevel
-} // namespace hipcomp
+} // namespace arcto

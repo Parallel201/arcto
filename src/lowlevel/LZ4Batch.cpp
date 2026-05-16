@@ -47,14 +47,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "hipcomp/lz4.h"
+#include "arcto/lz4.h"
 
 #include "Check.h"
 #include "HipUtils.h"
 #include "LZ4CompressionKernels.h"
 #include "common.h"
-#include "hipcomp.h"
-#include "hipcomp.hpp"
+#include "arcto.h"
+#include "arcto.hpp"
 #include "type_macros.h"
 
 #include <cassert>
@@ -65,10 +65,10 @@
 #include <sstream>
 #include <vector>
 
-using namespace hipcomp;
-using namespace hipcomp::lowlevel;
+using namespace arcto;
+using namespace arcto::lowlevel;
 
-hipcompStatus_t hipcompBatchedLZ4DecompressGetTempSize(
+arctoStatus_t arctoBatchedLZ4DecompressGetTempSize(
     const size_t num_chunks,
     const size_t max_uncompressed_chunk_size,
     size_t* const temp_bytes)
@@ -80,13 +80,13 @@ hipcompStatus_t hipcompBatchedLZ4DecompressGetTempSize(
         = lz4DecompressComputeTempSize(num_chunks, max_uncompressed_chunk_size);
   } catch (const std::exception& e) {
     return Check::exception_to_error(
-        e, "hipcompBatchedLZ4DecompressGetTempSize()");
+        e, "arctoBatchedLZ4DecompressGetTempSize()");
   }
 
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedLZ4DecompressAsync(
+arctoStatus_t arctoBatchedLZ4DecompressAsync(
     const void* const* device_compressed_ptrs,
     const size_t* device_compressed_bytes,
     const size_t* device_uncompressed_bytes,
@@ -95,7 +95,7 @@ hipcompStatus_t hipcompBatchedLZ4DecompressAsync(
     void* const device_temp_ptr,
     size_t temp_bytes,
     void* const* device_uncompressed_ptrs,
-    hipcompStatus_t* device_statuses,
+    arctoStatus_t* device_statuses,
     hipStream_t stream)
 {
   // NOTE: if we start using `max_uncompressed_chunk_bytes`, we need to check
@@ -118,13 +118,13 @@ hipcompStatus_t hipcompBatchedLZ4DecompressAsync(
         stream);
 
   } catch (const std::exception& e) {
-    return Check::exception_to_error(e, "hipcompBatchedLZ4DecompressAsync()");
+    return Check::exception_to_error(e, "arctoBatchedLZ4DecompressAsync()");
   }
 
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedLZ4GetDecompressSizeAsync(
+arctoStatus_t arctoBatchedLZ4GetDecompressSizeAsync(
     const void* const* device_compressed_ptrs,
     const size_t* device_compressed_bytes,
     size_t* device_uncompressed_bytes,
@@ -145,16 +145,16 @@ hipcompStatus_t hipcompBatchedLZ4GetDecompressSizeAsync(
         stream);
   } catch (const std::exception& e) {
     return Check::exception_to_error(
-        e, "hipcompBatchedLZ4GetDecompressSizeAsync()");
+        e, "arctoBatchedLZ4GetDecompressSizeAsync()");
   }
 
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedLZ4CompressGetTempSize(
+arctoStatus_t arctoBatchedLZ4CompressGetTempSize(
     const size_t batch_size,
     const size_t max_chunk_size,
-    const hipcompBatchedLZ4Opts_t /* format_opts */,
+    const arctoBatchedLZ4Opts_t /* format_opts */,
     size_t* const temp_bytes)
 {
   CHECK_NOT_NULL(temp_bytes);
@@ -163,15 +163,15 @@ hipcompStatus_t hipcompBatchedLZ4CompressGetTempSize(
     *temp_bytes = lz4BatchCompressComputeTempSize(max_chunk_size, batch_size);
   } catch (const std::exception& e) {
     return Check::exception_to_error(
-        e, "hipcompBatchedLZ4CompressGetTempSize()");
+        e, "arctoBatchedLZ4CompressGetTempSize()");
   }
 
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedLZ4CompressGetMaxOutputChunkSize(
+arctoStatus_t arctoBatchedLZ4CompressGetMaxOutputChunkSize(
     const size_t max_chunk_size,
-    const hipcompBatchedLZ4Opts_t /* format_opts */,
+    const arctoBatchedLZ4Opts_t /* format_opts */,
     size_t* const max_compressed_size)
 {
   CHECK_NOT_NULL(max_compressed_size);
@@ -180,13 +180,13 @@ hipcompStatus_t hipcompBatchedLZ4CompressGetMaxOutputChunkSize(
     *max_compressed_size = lz4ComputeMaxSize(max_chunk_size);
   } catch (const std::exception& e) {
     return Check::exception_to_error(
-        e, "hipcompBatchedLZ4CompressGetOutputSize()");
+        e, "arctoBatchedLZ4CompressGetOutputSize()");
   }
 
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedLZ4CompressAsync(
+arctoStatus_t arctoBatchedLZ4CompressAsync(
     const void* const* const device_uncompressed_ptrs,
     const size_t* const device_uncompressed_bytes,
     const size_t max_uncompressed_chunk_size,
@@ -195,7 +195,7 @@ hipcompStatus_t hipcompBatchedLZ4CompressAsync(
     const size_t temp_bytes,
     void* const* const device_compressed_ptrs,
     size_t* const device_compressed_bytes,
-    const hipcompBatchedLZ4Opts_t format_opts,
+    const arctoBatchedLZ4Opts_t format_opts,
     hipStream_t stream)
 {
   // NOTE: if we start using `max_uncompressed_chunk_bytes`, we need to check
@@ -217,8 +217,8 @@ hipcompStatus_t hipcompBatchedLZ4CompressAsync(
         format_opts.data_type,
         stream);
   } catch (const std::exception& e) {
-    return Check::exception_to_error(e, "hipcompBatchedLZ4CompressAsync()");
+    return Check::exception_to_error(e, "arctoBatchedLZ4CompressAsync()");
   }
 
-  return hipcompSuccess;
+  return arctoSuccess;
 }

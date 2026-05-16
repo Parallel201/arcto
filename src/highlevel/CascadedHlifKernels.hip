@@ -49,11 +49,11 @@
 
 #include "CascadedKernels.hiph"
 #include "highlevel/CascadedHlifKernels.h"
-#include "hipcomp_common_deps/hlif_shared.hiph"
-#include "hipcomp/cascaded.h"
+#include "arcto_common_deps/hlif_shared.hiph"
+#include "arcto/cascaded.h"
 #include "HipUtils.h"
 
-namespace hipcomp {
+namespace arcto {
 
 template <
     typename data_type,
@@ -63,15 +63,15 @@ template <
 struct cascaded_compress_wrapper : hlif_compress_wrapper
 {
 private:
-  hipcompStatus_t* status;
-  const hipcompBatchedCascadedOpts_t options;
+  arctoStatus_t* status;
+  const arctoBatchedCascadedOpts_t options;
 
 public:
   __device__ cascaded_compress_wrapper(
-      const hipcompBatchedCascadedOpts_t options,
+      const arctoBatchedCascadedOpts_t options,
       uint8_t* /*tmp_buffer*/,
       uint8_t* /*share_buffer*/,
-      hipcompStatus_t* status) :
+      arctoStatus_t* status) :
       status(status), options(options)
   {}
       
@@ -97,7 +97,7 @@ public:
         options);
   }
 
-  __device__ hipcompStatus_t& get_output_status() {
+  __device__ arctoStatus_t& get_output_status() {
     return *status;
   }
 
@@ -115,14 +115,14 @@ struct cascaded_decompress_wrapper : hlif_decompress_wrapper
 {
 
 private:
-  hipcompStatus_t* status;
-  const hipcompBatchedCascadedOpts_t options;
+  arctoStatus_t* status;
+  const arctoBatchedCascadedOpts_t options;
 
 public:
   __device__ cascaded_decompress_wrapper(
-      const hipcompBatchedCascadedOpts_t options,
+      const arctoBatchedCascadedOpts_t options,
       uint8_t* /*shared_buffer*/,
-      hipcompStatus_t* status) :
+      arctoStatus_t* status) :
       status(status), options(options)
   {}
       
@@ -133,7 +133,7 @@ public:
       const size_t decomp_buffer_size)
   {
     size_t actual_decompressed_bytes;
-    hipcompStatus_t status;
+    arctoStatus_t status;
 
     // allocate shmem and run fcn for data_type
     constexpr int shmem_size = compute_smem_size<
@@ -159,7 +159,7 @@ public:
         &status);
   }
 
-  __device__ hipcompStatus_t& get_output_status() {
+  __device__ arctoStatus_t& get_output_status() {
     return *status;
   }
 };
@@ -168,31 +168,31 @@ void cascadedHlifBatchCompress(
     const CompressArgs& compress_args,
     const uint32_t max_ctas,
     hipStream_t stream,
-    const hipcompBatchedCascadedOpts_t* options)
+    const arctoBatchedCascadedOpts_t* options)
 {
   const dim3 batch_size(max_ctas);
   constexpr int threadblock_size = cascaded_compress_threadblock_size;
 
-  const hipcompType_t type = options->type;
-  if (type == HIPCOMP_TYPE_CHAR || type == HIPCOMP_TYPE_UCHAR) {
+  const arctoType_t type = options->type;
+  if (type == ARCTO_TYPE_CHAR || type == ARCTO_TYPE_UCHAR) {
     HlifCompressBatchKernel<
         cascaded_compress_wrapper<uint8_t, size_t, threadblock_size>,
-        const hipcompBatchedCascadedOpts_t&>
+        const arctoBatchedCascadedOpts_t&>
         <<<batch_size, threadblock_size, 0, stream>>>(compress_args, *options);
-  } else if (type == HIPCOMP_TYPE_SHORT || type == HIPCOMP_TYPE_USHORT) {
+  } else if (type == ARCTO_TYPE_SHORT || type == ARCTO_TYPE_USHORT) {
     HlifCompressBatchKernel<
         cascaded_compress_wrapper<uint16_t, size_t, threadblock_size>,
-        const hipcompBatchedCascadedOpts_t&>
+        const arctoBatchedCascadedOpts_t&>
         <<<batch_size, threadblock_size, 0, stream>>>(compress_args, *options);
-  } else if (type == HIPCOMP_TYPE_INT || type == HIPCOMP_TYPE_UINT) {
+  } else if (type == ARCTO_TYPE_INT || type == ARCTO_TYPE_UINT) {
     HlifCompressBatchKernel<
         cascaded_compress_wrapper<uint32_t, size_t, threadblock_size>,
-        const hipcompBatchedCascadedOpts_t&>
+        const arctoBatchedCascadedOpts_t&>
         <<<batch_size, threadblock_size, 0, stream>>>(compress_args, *options);
-  } else if (type == HIPCOMP_TYPE_LONGLONG || type == HIPCOMP_TYPE_ULONGLONG) {
+  } else if (type == ARCTO_TYPE_LONGLONG || type == ARCTO_TYPE_ULONGLONG) {
     HlifCompressBatchKernel<
         cascaded_compress_wrapper<uint64_t, size_t, threadblock_size>,
-        const hipcompBatchedCascadedOpts_t&>
+        const arctoBatchedCascadedOpts_t&>
         <<<batch_size, threadblock_size, 0, stream>>>(compress_args, *options);
   }
 }
@@ -207,18 +207,18 @@ void cascadedHlifBatchDecompress(
     const size_t* comp_chunk_sizes,
     const uint32_t max_ctas,
     hipStream_t stream,
-    hipcompStatus_t* output_status,
-    const hipcompBatchedCascadedOpts_t* options)
+    arctoStatus_t* output_status,
+    const arctoBatchedCascadedOpts_t* options)
 {
   const dim3 batch_size(max_ctas);
   constexpr int threadblock_size = cascaded_decompress_threadblock_size;
 
-  const hipcompType_t type = options->type;
-  if (type == HIPCOMP_TYPE_CHAR || type == HIPCOMP_TYPE_UCHAR) {
+  const arctoType_t type = options->type;
+  if (type == ARCTO_TYPE_CHAR || type == ARCTO_TYPE_UCHAR) {
     HlifDecompressBatchKernel<
         cascaded_decompress_wrapper<uint8_t, size_t, threadblock_size>,
         1,
-        const hipcompBatchedCascadedOpts_t&>
+        const arctoBatchedCascadedOpts_t&>
         <<<batch_size, threadblock_size, 0, stream>>>(
             comp_buffer,
             decomp_buffer,
@@ -229,11 +229,11 @@ void cascadedHlifBatchDecompress(
             comp_chunk_sizes,
             output_status,
             *options);
-  } else if (type == HIPCOMP_TYPE_SHORT || type == HIPCOMP_TYPE_USHORT) {
+  } else if (type == ARCTO_TYPE_SHORT || type == ARCTO_TYPE_USHORT) {
     HlifDecompressBatchKernel<
         cascaded_decompress_wrapper<uint16_t, size_t, threadblock_size>,
         1,
-        const hipcompBatchedCascadedOpts_t&>
+        const arctoBatchedCascadedOpts_t&>
         <<<batch_size, threadblock_size, 0, stream>>>(
             comp_buffer,
             decomp_buffer,
@@ -244,11 +244,11 @@ void cascadedHlifBatchDecompress(
             comp_chunk_sizes,
             output_status,
             *options);
-  } else if (type == HIPCOMP_TYPE_INT || type == HIPCOMP_TYPE_UINT) {
+  } else if (type == ARCTO_TYPE_INT || type == ARCTO_TYPE_UINT) {
     HlifDecompressBatchKernel<
         cascaded_decompress_wrapper<uint32_t, size_t, threadblock_size>,
         1,
-        const hipcompBatchedCascadedOpts_t&>
+        const arctoBatchedCascadedOpts_t&>
         <<<batch_size, threadblock_size, 0, stream>>>(
             comp_buffer,
             decomp_buffer,
@@ -259,11 +259,11 @@ void cascadedHlifBatchDecompress(
             comp_chunk_sizes,
             output_status,
             *options);
-  } else if (type == HIPCOMP_TYPE_LONGLONG || type == HIPCOMP_TYPE_ULONGLONG) {
+  } else if (type == ARCTO_TYPE_LONGLONG || type == ARCTO_TYPE_ULONGLONG) {
     HlifDecompressBatchKernel<
         cascaded_decompress_wrapper<uint64_t, size_t, threadblock_size>,
         1,
-        const hipcompBatchedCascadedOpts_t&>
+        const arctoBatchedCascadedOpts_t&>
         <<<batch_size, threadblock_size, 0, stream>>>(
             comp_buffer,
             decomp_buffer,
@@ -278,7 +278,7 @@ void cascadedHlifBatchDecompress(
 
 }
 
-size_t cascadedHlifCompMaxBlockOccupancy(const int device_id, hipcompType_t type)
+size_t cascadedHlifCompMaxBlockOccupancy(const int device_id, arctoType_t type)
 {
   hipDeviceProp_t deviceProp;
   hipGetDeviceProperties(&deviceProp, device_id);
@@ -289,36 +289,36 @@ size_t cascadedHlifCompMaxBlockOccupancy(const int device_id, hipcompType_t type
   constexpr int threadblock_size = cascaded_compress_threadblock_size;
   // The values will almost certainly be identical for all data types,
   // but just in case, handle types separately.
-  if (type == HIPCOMP_TYPE_CHAR || type == HIPCOMP_TYPE_UCHAR) {
+  if (type == ARCTO_TYPE_CHAR || type == ARCTO_TYPE_UCHAR) {
     hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &numBlocksPerSM,
         HlifCompressBatchKernel<
             cascaded_compress_wrapper<uint8_t, size_t, threadblock_size>,
-            const hipcompBatchedCascadedOpts_t&>,
+            const arctoBatchedCascadedOpts_t&>,
         threadblock_size,
         runtime_shmem_size);
-  } else if (type == HIPCOMP_TYPE_SHORT || type == HIPCOMP_TYPE_USHORT) {
+  } else if (type == ARCTO_TYPE_SHORT || type == ARCTO_TYPE_USHORT) {
     hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &numBlocksPerSM,
         HlifCompressBatchKernel<
             cascaded_compress_wrapper<uint16_t, size_t, threadblock_size>,
-            const hipcompBatchedCascadedOpts_t&>,
+            const arctoBatchedCascadedOpts_t&>,
         threadblock_size,
         runtime_shmem_size);
-  } else if (type == HIPCOMP_TYPE_INT || type == HIPCOMP_TYPE_UINT) {
+  } else if (type == ARCTO_TYPE_INT || type == ARCTO_TYPE_UINT) {
     hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &numBlocksPerSM,
         HlifCompressBatchKernel<
             cascaded_compress_wrapper<uint32_t, size_t, threadblock_size>,
-            const hipcompBatchedCascadedOpts_t&>,
+            const arctoBatchedCascadedOpts_t&>,
         threadblock_size,
         runtime_shmem_size);
-  } else if (type == HIPCOMP_TYPE_LONGLONG || type == HIPCOMP_TYPE_ULONGLONG) {
+  } else if (type == ARCTO_TYPE_LONGLONG || type == ARCTO_TYPE_ULONGLONG) {
     hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &numBlocksPerSM,
         HlifCompressBatchKernel<
             cascaded_compress_wrapper<uint64_t, size_t, threadblock_size>,
-            const hipcompBatchedCascadedOpts_t&>,
+            const arctoBatchedCascadedOpts_t&>,
         threadblock_size,
         runtime_shmem_size);
   }
@@ -327,7 +327,7 @@ size_t cascadedHlifCompMaxBlockOccupancy(const int device_id, hipcompType_t type
 }
 
 size_t cascadedHlifDecompMaxBlockOccupancy(
-    const int device_id, hipcompType_t type)
+    const int device_id, arctoType_t type)
 {
   hipDeviceProp_t deviceProp;
   hipGetDeviceProperties(&deviceProp, device_id);
@@ -338,40 +338,40 @@ size_t cascadedHlifDecompMaxBlockOccupancy(
   constexpr int threadblock_size = cascaded_decompress_threadblock_size;
   // The values will almost certainly be identical for all data types,
   // but just in case, handle types separately.
-  if (type == HIPCOMP_TYPE_CHAR || type == HIPCOMP_TYPE_UCHAR) {
+  if (type == ARCTO_TYPE_CHAR || type == ARCTO_TYPE_UCHAR) {
     hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &numBlocksPerSM,
         HlifDecompressBatchKernel<
             cascaded_decompress_wrapper<uint8_t, size_t, threadblock_size>,
             1,
-            const hipcompBatchedCascadedOpts_t&>,
+            const arctoBatchedCascadedOpts_t&>,
         threadblock_size,
         runtime_shmem_size);
-  } else if (type == HIPCOMP_TYPE_SHORT || type == HIPCOMP_TYPE_USHORT) {
+  } else if (type == ARCTO_TYPE_SHORT || type == ARCTO_TYPE_USHORT) {
     hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &numBlocksPerSM,
         HlifDecompressBatchKernel<
             cascaded_decompress_wrapper<uint16_t, size_t, threadblock_size>,
             1,
-            const hipcompBatchedCascadedOpts_t&>,
+            const arctoBatchedCascadedOpts_t&>,
         threadblock_size,
         runtime_shmem_size);
-  } else if (type == HIPCOMP_TYPE_INT || type == HIPCOMP_TYPE_UINT) {
+  } else if (type == ARCTO_TYPE_INT || type == ARCTO_TYPE_UINT) {
     hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &numBlocksPerSM,
         HlifDecompressBatchKernel<
             cascaded_decompress_wrapper<uint32_t, size_t, threadblock_size>,
             1,
-            const hipcompBatchedCascadedOpts_t&>,
+            const arctoBatchedCascadedOpts_t&>,
         threadblock_size,
         runtime_shmem_size);
-  } else if (type == HIPCOMP_TYPE_LONGLONG || type == HIPCOMP_TYPE_ULONGLONG) {
+  } else if (type == ARCTO_TYPE_LONGLONG || type == ARCTO_TYPE_ULONGLONG) {
     hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &numBlocksPerSM,
         HlifDecompressBatchKernel<
             cascaded_decompress_wrapper<uint64_t, size_t, threadblock_size>,
             1,
-            const hipcompBatchedCascadedOpts_t&>,
+            const arctoBatchedCascadedOpts_t&>,
         threadblock_size,
         runtime_shmem_size);
   }
@@ -379,4 +379,4 @@ size_t cascadedHlifDecompMaxBlockOccupancy(
   return deviceProp.multiProcessorCount * numBlocksPerSM;
 }
 
-} // hipcomp namespace
+} // arcto namespace

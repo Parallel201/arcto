@@ -83,27 +83,27 @@
 // will show up at compile time, and things should only need to change if our
 // interface changes, which should be very infrequent.
 #define GENERATE_TESTS(NAME)                                                   \
-  hipcompStatus_t compressGetTempSize(                                          \
+  arctoStatus_t compressGetTempSize(                                          \
       const size_t batch_size,                                                 \
       const size_t max_uncompressed_chunk_bytes,                               \
       size_t* const temp_bytes)                                                \
   {                                                                            \
-    return hipcompBatched##NAME##CompressGetTempSize(                           \
+    return arctoBatched##NAME##CompressGetTempSize(                           \
         batch_size,                                                            \
         max_uncompressed_chunk_bytes,                                          \
-        hipcompBatched##NAME##DefaultOpts,                                      \
+        arctoBatched##NAME##DefaultOpts,                                      \
         temp_bytes);                                                           \
   }                                                                            \
-  hipcompStatus_t compressGetMaxOutputChunkSize(                                \
+  arctoStatus_t compressGetMaxOutputChunkSize(                                \
       const size_t max_uncompressed_chunk_bytes,                               \
       size_t* const max_compressed_bytes)                                      \
   {                                                                            \
-    return hipcompBatched##NAME##CompressGetMaxOutputChunkSize(                 \
+    return arctoBatched##NAME##CompressGetMaxOutputChunkSize(                 \
         max_uncompressed_chunk_bytes,                                          \
-        hipcompBatched##NAME##DefaultOpts,                                      \
+        arctoBatched##NAME##DefaultOpts,                                      \
         max_compressed_bytes);                                                 \
   }                                                                            \
-  hipcompStatus_t compressAsync(                                                \
+  arctoStatus_t compressAsync(                                                \
       const void* const* const device_in_ptr,                                  \
       const size_t* const device_in_bytes,                                     \
       const size_t max_uncompressed_chunk_bytes,                               \
@@ -114,7 +114,7 @@
       size_t* const device_out_bytes,                                          \
       hipStream_t stream)                                                     \
   {                                                                            \
-    return hipcompBatched##NAME##CompressAsync(                                 \
+    return arctoBatched##NAME##CompressAsync(                                 \
         device_in_ptr,                                                         \
         device_in_bytes,                                                       \
         max_uncompressed_chunk_bytes,                                          \
@@ -123,32 +123,32 @@
         temp_bytes,                                                            \
         device_out_ptr,                                                        \
         device_out_bytes,                                                      \
-        hipcompBatched##NAME##DefaultOpts,                                      \
+        arctoBatched##NAME##DefaultOpts,                                      \
         stream);                                                               \
   }                                                                            \
-  hipcompStatus_t decompressGetSizeAsync(                                       \
+  arctoStatus_t decompressGetSizeAsync(                                       \
       const void* const* const device_compressed_ptrs,                         \
       const size_t* const device_compressed_bytes,                             \
       size_t* const device_uncompressed_bytes,                                 \
       const size_t batch_size,                                                 \
       hipStream_t stream)                                                     \
   {                                                                            \
-    return hipcompBatched##NAME##GetDecompressSizeAsync(                        \
+    return arctoBatched##NAME##GetDecompressSizeAsync(                        \
         device_compressed_ptrs,                                                \
         device_compressed_bytes,                                               \
         device_uncompressed_bytes,                                             \
         batch_size,                                                            \
         stream);                                                               \
   }                                                                            \
-  hipcompStatus_t decompressGetTempSize(                                        \
+  arctoStatus_t decompressGetTempSize(                                        \
       const size_t num_chunks,                                                 \
       const size_t max_uncompressed_chunk_bytes,                               \
       size_t* const temp_bytes)                                                \
   {                                                                            \
-    return hipcompBatched##NAME##DecompressGetTempSize(                         \
+    return arctoBatched##NAME##DecompressGetTempSize(                         \
         num_chunks, max_uncompressed_chunk_bytes, temp_bytes);                 \
   }                                                                            \
-  hipcompStatus_t decompressAsync(                                              \
+  arctoStatus_t decompressAsync(                                              \
       const void* const* device_compressed_ptrs,                               \
       const size_t* device_compressed_bytes,                                   \
       const size_t* device_uncompressed_bytes,                                 \
@@ -157,10 +157,10 @@
       void* const device_temp_ptr,                                             \
       size_t temp_bytes,                                                       \
       void* const* device_uncompressed_ptrs,                                   \
-      hipcompStatus_t* device_status_ptr,                                       \
+      arctoStatus_t* device_status_ptr,                                       \
       hipStream_t stream)                                                     \
   {                                                                            \
-    return hipcompBatched##NAME##DecompressAsync(                               \
+    return arctoBatched##NAME##DecompressAsync(                               \
         device_compressed_ptrs,                                                \
         device_compressed_bytes,                                               \
         device_uncompressed_bytes,                                             \
@@ -172,19 +172,19 @@
         device_status_ptr,                                                     \
         stream);                                                               \
   }                                                                            \
-  typedef int __hipcomp_semicolon_catch
+  typedef int __arcto_semicolon_catch
 
 // Declear the test function wrappers
-hipcompStatus_t compressGetTempSize(
+arctoStatus_t compressGetTempSize(
     const size_t batch_size,
     const size_t max_uncompressed_chunk_bytes,
     size_t* const temp_bytes);
 
-hipcompStatus_t compressGetMaxOutputChunkSize(
+arctoStatus_t compressGetMaxOutputChunkSize(
     const size_t max_uncompressed_chunk_bytes,
     size_t* const max_compressed_bytes);
 
-hipcompStatus_t compressAsync(
+arctoStatus_t compressAsync(
     const void* const* device_in_ptr,
     const size_t* device_in_bytes,
     size_t max_uncompressed_chunk_bytes,
@@ -195,19 +195,19 @@ hipcompStatus_t compressAsync(
     size_t* device_out_bytes,
     hipStream_t stream);
 
-hipcompStatus_t decompressGetSizeAsync(
+arctoStatus_t decompressGetSizeAsync(
     const void* const* device_compressed_ptrs,
     const size_t* device_compressed_bytes,
     size_t* device_uncompressed_bytes,
     size_t batch_size,
     hipStream_t stream);
 
-hipcompStatus_t decompressGetTempSize(
+arctoStatus_t decompressGetTempSize(
     const size_t num_chunks,
     const size_t max_uncompressed_chunk_bytes,
     size_t* const temp_bytes);
 
-hipcompStatus_t decompressAsync(
+arctoStatus_t decompressAsync(
     const void* const* device_compressed_ptrs,
     const size_t* device_compressed_bytes,
     const size_t* device_uncompressed_bytes,
@@ -216,7 +216,7 @@ hipcompStatus_t decompressAsync(
     void* const device_temp_ptr,
     size_t temp_bytes,
     void* const* device_uncompressed_ptrs,
-    hipcompStatus_t* device_status_ptrs,
+    arctoStatus_t* device_status_ptrs,
     hipStream_t stream);
 
 static const int PASS_TEST = 1;
@@ -296,20 +296,20 @@ int test_generic_batch_compression_and_decompression(
       sizeof(*device_batch_bytes) * batch_size,
       hipMemcpyHostToDevice));
 
-  hipcompStatus_t status;
+  arctoStatus_t status;
 
   // Compress on the GPU using batched API
   size_t comp_temp_bytes;
   status = compressGetTempSize(batch_size, max_chunk_size, &comp_temp_bytes);
   if (max_chunk_size > 1<<16) printf("max_chunk_size = %zu\n", max_chunk_size);
-  REQUIRE(status == hipcompSuccess);
+  REQUIRE(status == arctoSuccess);
 
   void* d_comp_temp;
   HIP_CHECK(hipMalloc(&d_comp_temp, comp_temp_bytes));
 
   size_t max_comp_out_bytes;
   status = compressGetMaxOutputChunkSize(max_chunk_size, &max_comp_out_bytes);
-  REQUIRE(status == hipcompSuccess);
+  REQUIRE(status == arctoSuccess);
 
   void** host_comp_out = malloc(sizeof(void*) * batch_size);
   for (size_t i = 0; i < batch_size; ++i) {
@@ -342,7 +342,7 @@ int test_generic_batch_compression_and_decompression(
       device_comp_out,
       device_comp_out_bytes,
       stream);
-  REQUIRE(status == hipcompSuccess);
+  REQUIRE(status == arctoSuccess);
   HIP_CHECK(hipStreamSynchronize(stream));
 
   HIP_CHECK(hipFree(d_comp_temp));
@@ -369,7 +369,7 @@ int test_generic_batch_compression_and_decompression(
       device_decomp_out_bytes,
       batch_size,
       stream);
-  REQUIRE(status == hipcompSuccess);
+  REQUIRE(status == arctoSuccess);
   HIP_CHECK(hipStreamSynchronize(stream));
 
   // copy the output sizes down and check them
@@ -410,7 +410,7 @@ int test_generic_batch_compression_and_decompression(
         (void* const*)device_decomp_out,
         NULL,
         stream);
-    REQUIRE(status == hipcompSuccess);
+    REQUIRE(status == arctoSuccess);
     
     // Verify correctness
     for (size_t i = 0; i < batch_size; i++) {
@@ -425,7 +425,7 @@ int test_generic_batch_compression_and_decompression(
     }
   }
 
-  hipcompStatus_t* device_statuses;
+  arctoStatus_t* device_statuses;
   HIP_CHECK(hipMalloc(
       (void**)&device_statuses, sizeof(*device_statuses) * batch_size));
   status = decompressAsync(
@@ -439,13 +439,13 @@ int test_generic_batch_compression_and_decompression(
       (void* const*)device_decomp_out,
       device_statuses,
       stream);
-  REQUIRE(status == hipcompSuccess);
+  REQUIRE(status == arctoSuccess);
 
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipStreamDestroy(stream));
 
   // check statuses
-  hipcompStatus_t* host_statuses = malloc(sizeof(*device_statuses) * batch_size);
+  arctoStatus_t* host_statuses = malloc(sizeof(*device_statuses) * batch_size);
   HIP_CHECK(hipMemcpy(
       host_statuses,
       device_statuses,
@@ -454,7 +454,7 @@ int test_generic_batch_compression_and_decompression(
   HIP_CHECK(hipFree(device_statuses));
 
   for (size_t i = 0; i < batch_size; ++i) {
-    REQUIRE(host_statuses[i] == hipcompSuccess);
+    REQUIRE(host_statuses[i] == arctoSuccess);
   }
   free(host_statuses);
 
@@ -583,7 +583,7 @@ int test_generic_batch_decompression_errors(
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  hipcompStatus_t status;
+  arctoStatus_t status;
 
   // attempt to get the size
   size_t* device_decomp_out_bytes;
@@ -602,7 +602,7 @@ int test_generic_batch_decompression_errors(
       device_decomp_out_bytes,
       batch_size,
       stream);
-  REQUIRE(status == hipcompSuccess);
+  REQUIRE(status == arctoSuccess);
   HIP_CHECK(hipStreamSynchronize(stream));
 
   // copy the output sizes down and check them
@@ -660,7 +660,7 @@ int test_generic_batch_decompression_errors(
       sizeof(*device_decomp_out) * batch_size,
       hipMemcpyHostToDevice));
 
-  hipcompStatus_t* device_statuses;
+  arctoStatus_t* device_statuses;
   HIP_CHECK(hipMalloc(
       (void**)&device_statuses, sizeof(*device_statuses) * batch_size));
   status = decompressAsync(
@@ -674,7 +674,7 @@ int test_generic_batch_decompression_errors(
       (void* const*)device_decomp_out,
       device_statuses,
       stream);
-  REQUIRE(status == hipcompSuccess);
+  REQUIRE(status == arctoSuccess);
 
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -688,7 +688,7 @@ int test_generic_batch_decompression_errors(
   free(host_in_ptrs);
 
   // check statuses
-  hipcompStatus_t* host_statuses = malloc(sizeof(*device_statuses) * batch_size);
+  arctoStatus_t* host_statuses = malloc(sizeof(*device_statuses) * batch_size);
   HIP_CHECK(hipMemcpy(
       host_statuses,
       device_statuses,
@@ -697,9 +697,9 @@ int test_generic_batch_decompression_errors(
   HIP_CHECK(hipFree(device_statuses));
 
   for (size_t i = 0; i < batch_size; ++i) {
-    if (host_statuses[i] != hipcompErrorCannotDecompress) {
+    if (host_statuses[i] != arctoErrorCannotDecompress) {
     }
-    REQUIRE(host_statuses[i] == hipcompErrorCannotDecompress);
+    REQUIRE(host_statuses[i] == arctoErrorCannotDecompress);
   }
   free(host_statuses);
   HIP_CHECK(hipFree(device_decomp_out_bytes));

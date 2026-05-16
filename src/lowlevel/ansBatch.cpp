@@ -47,13 +47,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "hipcomp/ans.h"
+#include "arcto/ans.h"
 
 #include "Check.h"
 #include "HipUtils.h"
 #include "common.h"
-#include "hipcomp.h"
-#include "hipcomp.hpp"
+#include "arcto.h"
+#include "arcto.hpp"
 #include "type_macros.h"
 
 #include <cassert>
@@ -68,11 +68,11 @@
 #include "ans.h"
 #endif
 
-using namespace hipcomp;
+using namespace arcto;
 
 #define MAYBE_UNUSED(x) (void)(x)
 
-hipcompStatus_t hipcompBatchedANSDecompressGetTempSize(
+arctoStatus_t arctoBatchedANSDecompressGetTempSize(
     const size_t num_chunks,
     const size_t max_uncompressed_chunk_size,
     size_t* const temp_bytes)
@@ -80,18 +80,18 @@ hipcompStatus_t hipcompBatchedANSDecompressGetTempSize(
 #ifdef ENABLE_ANS
   CHECK_NOT_NULL(temp_bytes);
   ans::decompressGetTempSize(num_chunks, max_uncompressed_chunk_size, temp_bytes);
-  return hipcompSuccess;
+  return arctoSuccess;
 #else
   (void)num_chunks;
   (void)max_uncompressed_chunk_size;
   (void)temp_bytes;
-  std::cerr << "ERROR: hipcomp configured without GPU ANS support\n"
+  std::cerr << "ERROR: arcto configured without GPU ANS support\n"
             << "Please check the README for configuration instructions" << std::endl;
-  return hipcompErrorNotSupported;
+  return arctoErrorNotSupported;
 #endif
 }
 
-hipcompStatus_t hipcompBatchedANSDecompressAsync(
+arctoStatus_t arctoBatchedANSDecompressAsync(
     const void* const* device_compressed_ptrs,
     const size_t* device_compressed_bytes,
     const size_t* device_uncompressed_bytes,
@@ -100,7 +100,7 @@ hipcompStatus_t hipcompBatchedANSDecompressAsync(
     void* const device_temp_ptr,
     const size_t temp_bytes,
     void* const* device_uncompressed_ptr,
-    hipcompStatus_t* device_statuses,
+    arctoStatus_t* device_statuses,
     hipStream_t stream)
 {
 #ifdef ENABLE_ANS
@@ -115,9 +115,9 @@ hipcompStatus_t hipcompBatchedANSDecompressAsync(
       device_statuses ? HipUtils::device_pointer(device_statuses) : nullptr,
       stream);
   } catch (const std::exception& e) {
-     return Check::exception_to_error(e, "hipcompBatchedANSDecompressAsync()");
+     return Check::exception_to_error(e, "arctoBatchedANSDecompressAsync()");
   }
-  return hipcompSuccess;
+  return arctoSuccess;
 #else
   (void)device_compressed_ptrs;
   (void)device_compressed_bytes;
@@ -129,51 +129,51 @@ hipcompStatus_t hipcompBatchedANSDecompressAsync(
   (void)device_uncompressed_ptr;
   (void)device_statuses;
   (void)stream;
-  std::cerr << "ERROR: hipcomp configured without GPU ANS support\n"
+  std::cerr << "ERROR: arcto configured without GPU ANS support\n"
             << "Please check the README for configuration instructions" << std::endl;
-  return hipcompErrorNotSupported;
+  return arctoErrorNotSupported;
 #endif
 }
 
-hipcompStatus_t hipcompBatchedANSCompressGetTempSize(
+arctoStatus_t arctoBatchedANSCompressGetTempSize(
     size_t batch_size,
     size_t max_chunk_size,
-    hipcompBatchedANSOpts_t /* format_opts */,
+    arctoBatchedANSOpts_t /* format_opts */,
     size_t* temp_bytes)
 {
 #ifdef ENABLE_ANS
   CHECK_NOT_NULL(temp_bytes);
   ans::compressGetTempSize(batch_size, max_chunk_size, temp_bytes);
-  return hipcompSuccess;
+  return arctoSuccess;
 #else
   (void)batch_size;
   (void)max_chunk_size;
   (void)temp_bytes;
-  std::cerr << "ERROR: hipcomp configured without GPU ANS support\n"
+  std::cerr << "ERROR: arcto configured without GPU ANS support\n"
             << "Please check the README for configuration instructions" << std::endl;
-  return hipcompErrorNotSupported;
+  return arctoErrorNotSupported;
 #endif
 }
 
-hipcompStatus_t hipcompBatchedANSCompressGetMaxOutputChunkSize(
+arctoStatus_t arctoBatchedANSCompressGetMaxOutputChunkSize(
     size_t max_chunk_size,
-    hipcompBatchedANSOpts_t /* format_opts */,
+    arctoBatchedANSOpts_t /* format_opts */,
     size_t* max_compressed_size)
 {
 #ifdef ENABLE_ANS
   CHECK_NOT_NULL(max_compressed_size);
   ans::compressGetMaxOutputChunkSize(max_chunk_size, max_compressed_size);
-  return hipcompSuccess;
+  return arctoSuccess;
 #else
   (void)max_chunk_size;
   (void)max_compressed_size;
-  std::cerr << "ERROR: hipcomp configured without GPU ANS support\n"
+  std::cerr << "ERROR: arcto configured without GPU ANS support\n"
             << "Please check the README for configuration instructions" << std::endl;
-  return hipcompErrorNotSupported;
+  return arctoErrorNotSupported;
 #endif
 }
 
-hipcompStatus_t hipcompBatchedANSCompressAsync(
+arctoStatus_t arctoBatchedANSCompressAsync(
     const void* const* device_uncompressed_ptr,
     const size_t* device_uncompressed_bytes,
     size_t max_uncompressed_chunk_bytes,
@@ -182,11 +182,11 @@ hipcompStatus_t hipcompBatchedANSCompressAsync(
     size_t temp_bytes,
     void* const* device_compressed_ptr,
     size_t* device_compressed_bytes,
-    hipcompBatchedANSOpts_t format_opts,
+    arctoBatchedANSOpts_t format_opts,
     hipStream_t stream)
 {
 #ifdef ENABLE_ANS
-  assert(format_opts.type == hipcompANSType_t::hipcomp_rANS);
+  assert(format_opts.type == arctoANSType_t::arcto_rANS);
   MAYBE_UNUSED(format_opts);
   ans::ansType_t ans_type = ans::ansType_t::rANS;
 
@@ -203,9 +203,9 @@ hipcompStatus_t hipcompBatchedANSCompressAsync(
         HipUtils::device_pointer(device_compressed_bytes),
         stream);
   } catch (const std::exception& e) {
-    return Check::exception_to_error(e, "hipcompBatchedANSCompressAsync()");
+    return Check::exception_to_error(e, "arctoBatchedANSCompressAsync()");
   }
-  return hipcompSuccess;
+  return arctoSuccess;
 #else
   (void)device_uncompressed_ptr;
   (void)device_uncompressed_bytes;
@@ -217,13 +217,13 @@ hipcompStatus_t hipcompBatchedANSCompressAsync(
   (void)device_compressed_bytes;
   (void)format_opts;
   (void)stream;
-  std::cerr << "ERROR: hipcomp configured without GPU ANS support\n"
+  std::cerr << "ERROR: arcto configured without GPU ANS support\n"
             << "Please check the README for configuration instructions" << std::endl;
-  return hipcompErrorNotSupported;
+  return arctoErrorNotSupported;
 #endif
 }
 
-hipcompStatus_t hipcompBatchedANSGetDecompressSizeAsync(
+arctoStatus_t arctoBatchedANSGetDecompressSizeAsync(
     const void* const* device_compressed_ptrs,
     const size_t* /* device_compressed_bytes */,
     size_t* device_uncompressed_bytes,
@@ -235,14 +235,14 @@ hipcompStatus_t hipcompBatchedANSGetDecompressSizeAsync(
       device_uncompressed_bytes,
       batch_size,
       stream);
-  return hipcompSuccess;
+  return arctoSuccess;
 #else
   (void)device_compressed_ptrs;
   (void)device_uncompressed_bytes;
   (void)batch_size;
   (void)stream;
-  std::cerr << "ERROR: hipcomp configured without GPU ANS support\n"
+  std::cerr << "ERROR: arcto configured without GPU ANS support\n"
             << "Please check the README for configuration instructions" << std::endl;
-  return hipcompErrorNotSupported;
+  return arctoErrorNotSupported;
 #endif
 }

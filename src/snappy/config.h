@@ -71,7 +71,7 @@
 #  define LITERAL_SECTORS 4
 #endif
 
-namespace hipcomp
+namespace arcto
 {
   namespace snappy
   {
@@ -118,6 +118,6 @@ namespace hipcomp
 
     constexpr unsigned LOG_CYCLECOUNT = 0;
   } // namespace snappy
-} // namespace hipcomp
+} // namespace arcto
 
 #endif // SNAPPY_CONFIG_HIPH

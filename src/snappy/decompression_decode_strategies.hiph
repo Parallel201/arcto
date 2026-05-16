@@ -42,7 +42,7 @@
 #include "snappy/decompression_decode_warp_scans.hiph"
 
 // Decoder stage
-namespace hipcomp {
+namespace arcto {
 namespace snappy {
 
   /**
@@ -172,7 +172,7 @@ namespace snappy {
             cur  = SHFL1(cur_t, batch_len - 1) + 2 + ((len3_mask >> (batch_len - 1)) & 1);
             //: opt?: Should be the same as cur <- SHFL1(cur_t,batch_len) if batch_len < GROUP_SIZE ??
             if (t == 0) {
-              #ifdef HIPCOMP_PRINT_DEBUG_INFO
+              #ifdef ARCTO_PRINT_DEBUG_INFO
               printf("cur=%d, batch_len=%d, v0=%lu, v1=%lu, v2=%lu, len3_mask=%lu (lane 0 state after 2-to-3)\n",cur,batch_len,v0,v1,v2,len3_mask);
               #endif
               dst_pos += blen;
@@ -344,6 +344,6 @@ namespace snappy {
   };
 
 } // namespace snappy
-} // namespace hipcomp
+} // namespace arcto
 
 #endif // SNAPPY_DECOMPRESSION_DECODER_STRATEGIES_HIPH

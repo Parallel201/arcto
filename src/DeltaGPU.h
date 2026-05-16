@@ -47,16 +47,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef HIPCOMP_DELTAGPU_H
-#define HIPCOMP_DELTAGPU_H
+#ifndef ARCTO_DELTAGPU_H
+#define ARCTO_DELTAGPU_H
 
-#include "hipcomp.h"
+#include "arcto.h"
 
 #include "hip/hip_runtime.h"
 
 #include <cstddef>
 
-namespace hipcomp
+namespace arcto
 {
 
 class DeltaGPU
@@ -78,7 +78,7 @@ public:
   static void compress(
       void* workspace,
       size_t workspaceSize,
-      hipcompType_t valueType,
+      arctoType_t valueType,
       void** const outValuesPtr,
       const void* inValues,
       const size_t* numDevice,
@@ -93,9 +93,9 @@ public:
    *
    * @return The size in bytes of the required workspace.
    */
-  static size_t requiredWorkspaceSize(size_t num, hipcompType_t type);
+  static size_t requiredWorkspaceSize(size_t num, arctoType_t type);
 };
 
-} // namespace hipcomp
+} // namespace arcto
 
 #endif

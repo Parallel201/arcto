@@ -49,9 +49,9 @@
 
 #pragma once
 
-#include "hipcomp.h"
-#include "hipcomp.hpp"
-#include "hipcomp/cascaded.h"
+#include "arcto.h"
+#include "arcto.hpp"
+#include "arcto/cascaded.h"
 
 #include "../src/common.h"
 #include "catch.hpp"
@@ -61,7 +61,7 @@
 #include <iomanip>
 #include <random>
 
-using namespace hipcomp;
+using namespace arcto;
 
 #define HIP_CHECK(func)                                                       \
   do {                                                                         \

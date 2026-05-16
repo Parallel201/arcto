@@ -63,27 +63,27 @@ make -j$(nproc)
 ### C API (Low-level Batched)
 
 ```c
-#include <hipcomp/lz4.h>
+#include <arcto/lz4.h>
 
 // Get temp buffer size
 size_t temp_bytes;
-hipcompBatchedLZ4CompressGetTempSize(
+arctoBatchedLZ4CompressGetTempSize(
     num_chunks, max_chunk_size, opts, &temp_bytes);
 
 // Get max output size per chunk
 size_t max_out_bytes;
-hipcompBatchedLZ4CompressGetMaxOutputChunkSize(
+arctoBatchedLZ4CompressGetMaxOutputChunkSize(
     max_chunk_size, opts, &max_out_bytes);
 
 // Compress asynchronously
-hipcompBatchedLZ4CompressAsync(
+arctoBatchedLZ4CompressAsync(
     device_in_ptrs, device_in_sizes, max_chunk_size, num_chunks,
     temp_buffer, temp_bytes,
     device_out_ptrs, device_out_sizes,
     opts, stream);
 
 // Decompress
-hipcompBatchedLZ4DecompressAsync(
+arctoBatchedLZ4DecompressAsync(
     device_in_ptrs, device_in_sizes,
     device_out_sizes, device_actual_out_sizes, num_chunks,
     temp_buffer, temp_bytes,
@@ -93,11 +93,11 @@ hipcompBatchedLZ4DecompressAsync(
 ### C++ API (High-level Manager)
 
 ```cpp
-#include <hipcomp/lz4.hpp>
-#include <hipcomp/hipcompManager.hpp>
+#include <arcto/lz4.hpp>
+#include <arcto/arctoManager.hpp>
 
 // Create LZ4 manager
-hipcomp::LZ4Manager manager{chunk_size, HIPCOMP_TYPE_CHAR, stream};
+arcto::LZ4Manager manager{chunk_size, ARCTO_TYPE_CHAR, stream};
 
 // Configure compression
 manager.configure_compression(uncompressed_size);
@@ -141,7 +141,7 @@ hip-compression-toolkit/
 ├── README.md
 ├── LICENSE
 ├── include/
-│   └── hipcomp/
+│   └── arcto/
 │       ├── lz4.h
 │       ├── snappy.h
 │       ├── cascaded.h

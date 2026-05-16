@@ -55,7 +55,7 @@
 #include <cassert>
 #include <limits>
 
-namespace hipcomp
+namespace arcto
 {
 
 /******************************************************************************
@@ -155,21 +155,21 @@ void deltaLaunch(
 void DeltaGPU::compress(
     void* const /* workspace */,
     const size_t /* workspaceSize*/,
-    const hipcompType_t inType,
+    const arctoType_t inType,
     void** const outPtr,
     const void* const in,
     const size_t* const numDevice,
     const size_t maxNum,
     hipStream_t stream)
 {
-  HIPCOMP_TYPE_ONE_SWITCH(
+  ARCTO_TYPE_ONE_SWITCH(
       inType, deltaLaunch, outPtr, in, numDevice, maxNum, stream);
 }
 
 size_t DeltaGPU::requiredWorkspaceSize(
-    const size_t /*num*/, const hipcompType_t /* type */)
+    const size_t /*num*/, const arctoType_t /* type */)
 {
   return 0;
 }
 
-} // namespace hipcomp
+} // namespace arcto

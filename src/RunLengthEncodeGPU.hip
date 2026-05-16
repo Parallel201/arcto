@@ -51,17 +51,17 @@
 #include "RunLengthEncodeGPU.h"
 #include "TempSpaceBroker.h"
 #include "common.h"
-#include "hipcomp.hpp"
+#include "arcto.hpp"
 #include "type_macros.h"
 #include "amd_optimizations.h"
 
-#include "hipcomp_hipcub.hiph"
+#include "arcto_hipcub.hiph"
 
 #include <cassert>
 #include <stdexcept>
 #include <string>
 
-namespace hipcomp
+namespace arcto
 {
 
 /******************************************************************************
@@ -583,16 +583,16 @@ void compressDownstreamInternal(
 void RunLengthEncodeGPU::compress(
     void* workspace,
     size_t workspaceSize,
-    hipcompType_t valueType,
+    arctoType_t valueType,
     void* const outValues,
-    hipcompType_t countType,
+    arctoType_t countType,
     void* const outCounts,
     size_t* const numOutDevice,
     const void* const in,
     const size_t num,
     hipStream_t stream)
 {
-  HIPCOMP_TYPE_TWO_SWITCH(
+  ARCTO_TYPE_TWO_SWITCH(
       valueType,
       countType,
       compressInternal,
@@ -609,9 +609,9 @@ void RunLengthEncodeGPU::compress(
 void RunLengthEncodeGPU::compressDownstream(
     void* workspace,
     size_t workspaceSize,
-    hipcompType_t valueType,
+    arctoType_t valueType,
     void** const outValuesPtr,
-    hipcompType_t countType,
+    arctoType_t countType,
     void** const outCountsPtr,
     size_t* const numOutDevice,
     const void* const in,
@@ -619,7 +619,7 @@ void RunLengthEncodeGPU::compressDownstream(
     const size_t maxNum,
     hipStream_t stream)
 {
-  HIPCOMP_TYPE_TWO_SWITCH(
+  ARCTO_TYPE_TWO_SWITCH(
       valueType,
       countType,
       compressDownstreamInternal,
@@ -635,10 +635,10 @@ void RunLengthEncodeGPU::compressDownstream(
 }
 
 size_t RunLengthEncodeGPU::requiredWorkspaceSize(
-    const size_t num, const hipcompType_t valueType, const hipcompType_t runType)
+    const size_t num, const arctoType_t valueType, const arctoType_t runType)
 {
-  HIPCOMP_TYPE_TWO_SWITCH_RETURN(
+  ARCTO_TYPE_TWO_SWITCH_RETURN(
       valueType, runType, requiredWorkspaceSizeTyped, num);
 }
 
-} // namespace hipcomp
+} // namespace arcto

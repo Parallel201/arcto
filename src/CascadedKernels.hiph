@@ -48,38 +48,38 @@
 // SOFTWARE.
 
 #include "common.h"
-#include "hipcomp.h"
-#include "hipcomp/cascaded.h"
+#include "arcto.h"
+#include "arcto/cascaded.h"
 
 #include <assert.h>
 #include <stdint.h>
 
-#include "hipcomp_hipcub.hiph"
+#include "arcto_hipcub.hiph"
 
-namespace hipcomp
+namespace arcto
 {
 
 template <typename T>
-__device__ inline hipcompType_t d_TypeOf()
+__device__ inline arctoType_t d_TypeOf()
 {
   if (std::is_same<T, int8_t>::value) {
-    return HIPCOMP_TYPE_CHAR;
+    return ARCTO_TYPE_CHAR;
   } else if (std::is_same<T, uint8_t>::value) {
-    return HIPCOMP_TYPE_UCHAR;
+    return ARCTO_TYPE_UCHAR;
   } else if (std::is_same<T, int16_t>::value) {
-    return HIPCOMP_TYPE_SHORT;
+    return ARCTO_TYPE_SHORT;
   } else if (std::is_same<T, uint16_t>::value) {
-    return HIPCOMP_TYPE_USHORT;
+    return ARCTO_TYPE_USHORT;
   } else if (std::is_same<T, int32_t>::value) {
-    return HIPCOMP_TYPE_INT;
+    return ARCTO_TYPE_INT;
   } else if (std::is_same<T, uint32_t>::value) {
-    return HIPCOMP_TYPE_UINT;
+    return ARCTO_TYPE_UINT;
   } else if (std::is_same<T, int64_t>::value) {
-    return HIPCOMP_TYPE_LONGLONG;
+    return ARCTO_TYPE_LONGLONG;
   } else if (std::is_same<T, uint64_t>::value) {
-    return HIPCOMP_TYPE_ULONGLONG;
+    return ARCTO_TYPE_ULONGLONG;
   } else {
-    return HIPCOMP_TYPE_CHAR;
+    return ARCTO_TYPE_CHAR;
   }
 
   // TODO - perform error checking and notify user if incorrect type is given
@@ -771,7 +771,7 @@ __device__ void do_cascaded_compression_kernel(
     const size_type* uncompressed_bytes,
     void* const* compressed_data,
     size_type* compressed_bytes,
-    hipcompBatchedCascadedOpts_t comp_opts)
+    arctoBatchedCascadedOpts_t comp_opts)
 {
   using run_type = uint16_t;
   constexpr int chunk_num_elements = chunk_size / sizeof(data_type);
@@ -1118,7 +1118,7 @@ __device__ void cascaded_decompression_fcn(
     const size_type* decompressed_buffer_bytes,
     size_type* actual_decompressed_bytes,
     void* shmem,
-    hipcompStatus_t* statuses)
+    arctoStatus_t* statuses)
 {
 
   using run_type = uint16_t;
@@ -1185,7 +1185,7 @@ __device__ void cascaded_decompression_fcn(
       // Compressed buffer should at least have enough space for partition
       // metadata.
       if (threadIdx.x == 0) {
-        statuses[partition_idx] = hipcompErrorCannotDecompress;
+        statuses[partition_idx] = arctoErrorCannotDecompress;
         actual_decompressed_bytes[partition_idx] = 0;
       }
       continue;
@@ -1217,7 +1217,7 @@ __device__ void cascaded_decompression_fcn(
       // elements, so we report failure.
       if (threadIdx.x == 0) {
         actual_decompressed_bytes[partition_idx] = 0;
-        statuses[partition_idx] = hipcompErrorCannotDecompress;
+        statuses[partition_idx] = arctoErrorCannotDecompress;
       }
       continue;
     }
@@ -1234,7 +1234,7 @@ __device__ void cascaded_decompression_fcn(
         // data, so we report failure.
         if (threadIdx.x == 0) {
           actual_decompressed_bytes[partition_idx] = 0;
-          statuses[partition_idx] = hipcompErrorCannotDecompress;
+          statuses[partition_idx] = arctoErrorCannotDecompress;
         }
       } else {
         const data_type* direct_compressed_buffer
@@ -1247,7 +1247,7 @@ __device__ void cascaded_decompression_fcn(
         if (threadIdx.x == 0) {
           actual_decompressed_bytes[partition_idx]
               = sizeof(data_type) * num_uncompressed_elements;
-          statuses[partition_idx] = hipcompSuccess;
+          statuses[partition_idx] = arctoSuccess;
         }
       }
       continue;
@@ -1425,10 +1425,10 @@ __device__ void cascaded_decompression_fcn(
       if (is_decompression_successful) {
         actual_decompressed_bytes[partition_idx]
             = decompressed_num_elements * sizeof(data_type);
-        statuses[partition_idx] = hipcompSuccess;
+        statuses[partition_idx] = arctoSuccess;
       } else {
         actual_decompressed_bytes[partition_idx] = 0;
-        statuses[partition_idx] = hipcompErrorCannotDecompress;
+        statuses[partition_idx] = arctoErrorCannotDecompress;
       }
     }
   }
@@ -1436,4 +1436,4 @@ __device__ void cascaded_decompression_fcn(
 
 
 
-} // namespace hipcomp
+} // namespace arcto

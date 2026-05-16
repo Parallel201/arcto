@@ -29,20 +29,20 @@
 #include "benchmark_template_chunked.cuh"
 
 #ifdef __HIP_PLATFORM_AMD__
-#include "hipcomp/ans.h"
+#include "arcto/ans.h"
 #else
 #include "nvcomp/ans.h"
 #endif
 
 #ifdef __HIP_PLATFORM_AMD__
 GENERATE_CHUNKED_BENCHMARK(
-    hipcompBatchedANSCompressGetTempSize,
-    hipcompBatchedANSCompressGetMaxOutputChunkSize,
-    hipcompBatchedANSCompressAsync,
-    hipcompBatchedANSDecompressGetTempSize,
-    hipcompBatchedANSDecompressAsync,
+    arctoBatchedANSCompressGetTempSize,
+    arctoBatchedANSCompressGetMaxOutputChunkSize,
+    arctoBatchedANSCompressAsync,
+    arctoBatchedANSDecompressGetTempSize,
+    arctoBatchedANSDecompressAsync,
     inputAlwaysValid,
-    hipcompBatchedANSDefaultOpts);
+    arctoBatchedANSDefaultOpts);
 #else
 GENERATE_CHUNKED_BENCHMARK(
     nvcompBatchedANSCompressGetTempSize,

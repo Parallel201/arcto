@@ -52,8 +52,8 @@
 #include "Check.h"
 #include "HipUtils.h"
 #include "common.h"
-#include "hipcomp_common_deps/hlif_shared_types.hpp"
-#include "hipcomp/hipcompManager.hpp"
+#include "arcto_common_deps/hlif_shared_types.hpp"
+#include "arcto/arctoManager.hpp"
 #include "highlevel/ManagerBase.hpp"
 #include "BitcompManager.hpp"
 
@@ -61,31 +61,31 @@
 
 #include <bitcomp.h>
 
-namespace hipcomp {
+namespace arcto {
 
-  // Convert the HIPCOMP type to a BITCOMP type
-  bitcompDataType_t bitcomp_data_type (hipcompType_t data_type)
+  // Convert the ARCTO type to a BITCOMP type
+  bitcompDataType_t bitcomp_data_type (arctoType_t data_type)
   {
     switch (data_type) {
-    case HIPCOMP_TYPE_CHAR:
+    case ARCTO_TYPE_CHAR:
       return BITCOMP_SIGNED_8BIT;
       break;
-    case HIPCOMP_TYPE_USHORT:
+    case ARCTO_TYPE_USHORT:
       return BITCOMP_UNSIGNED_16BIT;
       break;
-    case HIPCOMP_TYPE_SHORT:
+    case ARCTO_TYPE_SHORT:
       return BITCOMP_SIGNED_16BIT;
       break;
-    case HIPCOMP_TYPE_UINT:
+    case ARCTO_TYPE_UINT:
       return BITCOMP_UNSIGNED_32BIT;
       break;
-    case HIPCOMP_TYPE_INT:
+    case ARCTO_TYPE_INT:
       return BITCOMP_SIGNED_32BIT;
       break;
-    case HIPCOMP_TYPE_ULONGLONG:
+    case ARCTO_TYPE_ULONGLONG:
       return BITCOMP_UNSIGNED_64BIT;
       break;
-    case HIPCOMP_TYPE_LONGLONG:
+    case ARCTO_TYPE_LONGLONG:
       return BITCOMP_SIGNED_64BIT;
       break;
     default:
@@ -104,8 +104,8 @@ namespace hipcomp {
   __global__ void bitcomp_header_k (CommonHeader *common_header, uint8_t* comp_buffer, uint64_t decomp_buffer_size)
   {
     common_header->magic_number = 0;
-    common_header->major_version = HIPCOMP_MAJOR_VERSION;
-    common_header->minor_version = HIPCOMP_MINOR_VERSION;
+    common_header->major_version = ARCTO_MAJOR_VERSION;
+    common_header->minor_version = ARCTO_MINOR_VERSION;
     common_header->format = FormatType::Bitcomp;
     common_header->decomp_data_size = decomp_buffer_size;
     common_header->num_chunks = 0;
@@ -199,22 +199,22 @@ namespace hipcomp {
     return bitcompMaxBuflen (comp_config.uncompressed_buffer_size);
   }
 
-} // namespace hipcomp
+} // namespace arcto
 
 #else // ENABLE_BITCOMP
 
-namespace hipcomp {
+namespace arcto {
 void BitcompSingleStreamManager::do_compress(CommonHeader*, const uint8_t*, uint8_t*, const CompressionConfig&)
 {
-  throw HipCompException(hipcompErrorNotSupported, "Bitcomp support not available in this build.");
+  throw ArctoException(arctoErrorNotSupported, "Bitcomp support not available in this build.");
 }
 void BitcompSingleStreamManager::do_decompress(uint8_t*, const uint8_t*, const DecompressionConfig&)
 {
-  throw HipCompException(hipcompErrorNotSupported, "Bitcomp support not available in this build.");
+  throw ArctoException(arctoErrorNotSupported, "Bitcomp support not available in this build.");
 }
 size_t BitcompSingleStreamManager::calculate_max_compressed_output_size(CompressionConfig&)
 {
-  throw HipCompException(hipcompErrorNotSupported, "Bitcomp support not available in this build.");
+  throw ArctoException(arctoErrorNotSupported, "Bitcomp support not available in this build.");
 }
 }
 

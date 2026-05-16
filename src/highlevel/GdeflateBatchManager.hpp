@@ -54,21 +54,21 @@
 
 #include "Check.h"
 #include "HipUtils.h"
-#include "hipcomp/gdeflate.h"
+#include "arcto/gdeflate.h"
 #include "common.h"
-#include "hipcomp_common_deps/hlif_shared_types.hpp"
+#include "arcto_common_deps/hlif_shared_types.hpp"
 #include "BatchManager.hpp"
 
 #ifdef ENABLE_GDEFLATE
 #include "GdeflateHlifKernels.h"
 #endif
 
-namespace hipcomp {
+namespace arcto {
 
-struct GdeflateBatchManager : BatchManager<hipcompBatchedGdeflateOpts_t> {
+struct GdeflateBatchManager : BatchManager<arctoBatchedGdeflateOpts_t> {
 private:
   size_t hash_table_size;
-  hipcompBatchedGdeflateOpts_t* format_spec;
+  arctoBatchedGdeflateOpts_t* format_spec;
 
 public:
   GdeflateBatchManager(size_t uncomp_chunk_size, int algo, hipStream_t user_stream = 0, const int device_id = 0)
@@ -89,7 +89,7 @@ public:
         throw std::invalid_argument("Invalid format_opts.algo value (not 0, 1 or 2)");
     }
 
-    HipUtils::check(hipHostMalloc(&format_spec, sizeof(hipcompBatchedGdeflateOpts_t), hipHostMallocDefault));
+    HipUtils::check(hipHostMalloc(&format_spec, sizeof(arctoBatchedGdeflateOpts_t), hipHostMallocDefault));
     format_spec->algo = algo;
 
     finish_init();
@@ -106,7 +106,7 @@ public:
   size_t compute_max_compressed_chunk_size() final override 
   {
     size_t max_comp_chunk_size;
-    hipcompBatchedGdeflateCompressGetMaxOutputChunkSize(
+    arctoBatchedGdeflateCompressGetMaxOutputChunkSize(
         get_uncomp_chunk_size(), *format_spec, &max_comp_chunk_size);
     return max_comp_chunk_size;
   }
@@ -116,7 +116,7 @@ public:
 #ifdef ENABLE_GDEFLATE
     return gdeflate::hlif::batchedGdeflateCompMaxBlockOccupancy(device_id);
 #else
-    throw std::runtime_error("hipcomp configured without gdeflate support. Please check the README for configuration instructions");
+    throw std::runtime_error("arcto configured without gdeflate support. Please check the README for configuration instructions");
     return 0;
 #endif
   }
@@ -126,12 +126,12 @@ public:
 #ifdef ENABLE_GDEFLATE
     return gdeflate::hlif::batchedGdeflateDecompMaxBlockOccupancy(device_id); 
 #else
-    throw std::runtime_error("hipcomp configured without gdeflate support. Please check the README for configuration instructions");
+    throw std::runtime_error("arcto configured without gdeflate support. Please check the README for configuration instructions");
     return 0;
 #endif
   }
 
-  hipcompBatchedGdeflateOpts_t* get_format_header() final override 
+  arctoBatchedGdeflateOpts_t* get_format_header() final override 
   {
     return format_spec;
   }
@@ -145,7 +145,7 @@ public:
         user_stream);
 #else
     (void)compress_args;
-    throw std::runtime_error("hipcomp configured without gdeflate support. Please check the README for configuration instructions");
+    throw std::runtime_error("arcto configured without gdeflate support. Please check the README for configuration instructions");
 #endif
   }
 
@@ -155,7 +155,7 @@ public:
       const uint32_t num_chunks,
       const size_t* comp_chunk_offsets,
       const size_t* comp_chunk_sizes,
-      hipcompStatus_t* output_status) final override
+      arctoStatus_t* output_status) final override
   {        
 #ifdef ENABLE_GDEFLATE
     gdeflate::hlif::gdeflateHlifBatchDecompress(
@@ -176,7 +176,7 @@ public:
     (void)comp_chunk_offsets;
     (void)comp_chunk_sizes;
     (void)output_status;
-    throw std::runtime_error("hipcomp configured without gdeflate support. Please check the README for configuration instructions");
+    throw std::runtime_error("arcto configured without gdeflate support. Please check the README for configuration instructions");
 #endif
   }
 
@@ -199,4 +199,4 @@ private: // helper overrides
   void format_specific_init() final override {}
 };
 
-} // namespace hipcomp
+} // namespace arcto

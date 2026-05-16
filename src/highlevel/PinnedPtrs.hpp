@@ -53,7 +53,7 @@
 #include <vector>
 #include "HipUtils.h"
 
-namespace hipcomp {
+namespace arcto {
 
 // Static values that should be exposed.
 // These could be static members of the PinnedPtrPool 
@@ -211,4 +211,4 @@ private: // helpers that PoolTestWrapper will use
   friend struct PoolTestWrapper<T>;
 };
 
-} // namespace hipcomp
+} // namespace arcto

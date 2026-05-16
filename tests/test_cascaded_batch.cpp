@@ -51,8 +51,8 @@
 
 #include "../src/common.h"
 #include "catch.hpp"
-#include "hipcomp.hpp"
-#include "hipcomp/cascaded.h"
+#include "arcto.hpp"
+#include "arcto/cascaded.h"
 #include <hip/hip_runtime.h>
 
 #include <cstdint>
@@ -60,7 +60,7 @@
 #include <vector>
 
 using run_type = uint16_t;
-using hipcomp::roundUpToAlignment;
+using arcto::roundUpToAlignment;
 
 #define HIP_CHECK(cond)                                                       \
   do {                                                                         \
@@ -110,7 +110,7 @@ void verify_compression_output(
   REQUIRE(
       compressed_data_host[0]
       == 2 + (1 << 8) + (0 << 16)
-             + (static_cast<uint32_t>(hipcomp::TypeOf<data_type>()) << 24));
+             + (static_cast<uint32_t>(arcto::TypeOf<data_type>()) << 24));
 
   // Calculate the location of the first chunk and test array offsets
   uint32_t* chunk_start_ptr = reinterpret_cast<uint32_t*>(
@@ -291,10 +291,10 @@ void test_predefined_cases(int use_bp)
 
   // Launch batched compression
 
-  hipcompBatchedCascadedOpts_t comp_opts
-      = {batch_size, hipcomp::TypeOf<data_type>(), 2, 1, use_bp};
+  arctoBatchedCascadedOpts_t comp_opts
+      = {batch_size, arcto::TypeOf<data_type>(), 2, 1, use_bp};
 
-  auto status = hipcompBatchedCascadedCompressAsync(
+  auto status = arctoBatchedCascadedCompressAsync(
       uncompressed_ptrs_device,
       uncompressed_bytes_device,
       0, // not used
@@ -306,7 +306,7 @@ void test_predefined_cases(int use_bp)
       comp_opts,
       0);
 
-  REQUIRE(status == hipcompSuccess);
+  REQUIRE(status == arctoSuccess);
   HIP_CHECK(hipStreamSynchronize(0));
 
   // Verify compressed bytes alignment
@@ -384,14 +384,14 @@ void test_predefined_cases(int use_bp)
   HIP_CHECK(
       hipMalloc(&decompressed_bytes_device, sizeof(size_t) * batch_size));
 
-  status = hipcompBatchedCascadedGetDecompressSizeAsync(
+  status = arctoBatchedCascadedGetDecompressSizeAsync(
       compressed_ptrs_device,
       compressed_bytes_device,
       decompressed_bytes_device,
       batch_size,
       0);
 
-  REQUIRE(status == hipcompSuccess);
+  REQUIRE(status == arctoSuccess);
   HIP_CHECK(hipStreamSynchronize(0));
 
   verify_decompressed_sizes(
@@ -420,11 +420,11 @@ void test_predefined_cases(int use_bp)
 
   // Launch decompression
 
-  hipcompStatus_t* compression_statuses_device;
+  arctoStatus_t* compression_statuses_device;
   HIP_CHECK(hipMalloc(
-      &compression_statuses_device, sizeof(hipcompStatus_t) * batch_size));
+      &compression_statuses_device, sizeof(arctoStatus_t) * batch_size));
 
-  status = hipcompBatchedCascadedDecompressAsync(
+  status = arctoBatchedCascadedDecompressAsync(
       compressed_ptrs_device,
       compressed_bytes_device,
       uncompressed_bytes_device,
@@ -436,18 +436,18 @@ void test_predefined_cases(int use_bp)
       compression_statuses_device,
       0);
 
-  REQUIRE(status == hipcompSuccess);
+  REQUIRE(status == arctoSuccess);
   HIP_CHECK(hipStreamSynchronize(0));
 
-  std::vector<hipcompStatus_t> compression_statuses_host(batch_size);
+  std::vector<arctoStatus_t> compression_statuses_host(batch_size);
   HIP_CHECK(hipMemcpy(
       compression_statuses_host.data(),
       compression_statuses_device,
-      sizeof(hipcompStatus_t) * batch_size,
+      sizeof(arctoStatus_t) * batch_size,
       hipMemcpyDeviceToHost));
 
   for (auto const& compression_status : compression_statuses_host)
-    REQUIRE(compression_status == hipcompSuccess);
+    REQUIRE(compression_status == arctoSuccess);
 
   // Verify decompression outputs match the original uncompressed data
 
@@ -579,10 +579,10 @@ void test_fallback_path()
 
   // Launch batched cascaded compression
 
-  hipcompBatchedCascadedOpts_t comp_opts
-      = {batch_size, hipcomp::TypeOf<data_type>(), 2, 1, true};
+  arctoBatchedCascadedOpts_t comp_opts
+      = {batch_size, arcto::TypeOf<data_type>(), 2, 1, true};
 
-  auto status = hipcompBatchedCascadedCompressAsync(
+  auto status = arctoBatchedCascadedCompressAsync(
       uncompressed_ptrs_device,
       uncompressed_bytes_device,
       0, // not used
@@ -594,7 +594,7 @@ void test_fallback_path()
       comp_opts,
       0);
 
-  REQUIRE(status == hipcompSuccess);
+  REQUIRE(status == arctoSuccess);
   HIP_CHECK(hipStreamSynchronize(0));
 
   // Check the metadata in the compressed buffers. It should indicate no
@@ -607,7 +607,7 @@ void test_fallback_path()
         sizeof(uint32_t),
         hipMemcpyDeviceToHost));
     REQUIRE(
-        metadata == (static_cast<uint32_t>(hipcomp::TypeOf<data_type>()) << 24));
+        metadata == (static_cast<uint32_t>(arcto::TypeOf<data_type>()) << 24));
   }
 
   // Check uncompressed bytes stored in the compressed buffer
@@ -616,14 +616,14 @@ void test_fallback_path()
   HIP_CHECK(
       hipMalloc(&decompressed_bytes_device, sizeof(size_t) * batch_size));
 
-  status = hipcompBatchedCascadedGetDecompressSizeAsync(
+  status = arctoBatchedCascadedGetDecompressSizeAsync(
       compressed_ptrs_device,
       compressed_bytes_device,
       decompressed_bytes_device,
       batch_size,
       0);
 
-  REQUIRE(status == hipcompSuccess);
+  REQUIRE(status == arctoSuccess);
   HIP_CHECK(hipStreamSynchronize(0));
 
   verify_decompressed_sizes(
@@ -652,11 +652,11 @@ void test_fallback_path()
 
   // Launch decompression
 
-  hipcompStatus_t* compression_statuses_device;
+  arctoStatus_t* compression_statuses_device;
   HIP_CHECK(hipMalloc(
-      &compression_statuses_device, sizeof(hipcompStatus_t) * batch_size));
+      &compression_statuses_device, sizeof(arctoStatus_t) * batch_size));
 
-  status = hipcompBatchedCascadedDecompressAsync(
+  status = arctoBatchedCascadedDecompressAsync(
       compressed_ptrs_device,
       compressed_bytes_device,
       uncompressed_bytes_device,
@@ -668,18 +668,18 @@ void test_fallback_path()
       compression_statuses_device,
       0);
 
-  REQUIRE(status == hipcompSuccess);
+  REQUIRE(status == arctoSuccess);
   HIP_CHECK(hipStreamSynchronize(0));
 
-  std::vector<hipcompStatus_t> compression_statuses_host(batch_size);
+  std::vector<arctoStatus_t> compression_statuses_host(batch_size);
   HIP_CHECK(hipMemcpy(
       compression_statuses_host.data(),
       compression_statuses_device,
-      sizeof(hipcompStatus_t) * batch_size,
+      sizeof(arctoStatus_t) * batch_size,
       hipMemcpyDeviceToHost));
 
   for (auto const& compression_status : compression_statuses_host)
-    REQUIRE(compression_status == hipcompSuccess);
+    REQUIRE(compression_status == arctoSuccess);
 
   // Verify decompression outputs match the original uncompressed data
 
@@ -762,10 +762,10 @@ void test_out_of_bound(int use_bp)
   size_t* compressed_bytes_device;
   HIP_CHECK(hipMalloc(&compressed_bytes_device, sizeof(size_t)));
 
-  hipcompBatchedCascadedOpts_t comp_opts
-      = {batch_size, hipcomp::TypeOf<data_type>(), 2, 1, use_bp};
+  arctoBatchedCascadedOpts_t comp_opts
+      = {batch_size, arcto::TypeOf<data_type>(), 2, 1, use_bp};
 
-  auto status = hipcompBatchedCascadedCompressAsync(
+  auto status = arctoBatchedCascadedCompressAsync(
       uncompressed_ptrs_device,
       uncompressed_bytes_device,
       0, // not used
@@ -777,7 +777,7 @@ void test_out_of_bound(int use_bp)
       comp_opts,
       0);
 
-  REQUIRE(status == hipcompSuccess);
+  REQUIRE(status == arctoSuccess);
   HIP_CHECK(hipStreamSynchronize(0));
 
   size_t compressed_byte;
@@ -789,29 +789,29 @@ void test_out_of_bound(int use_bp)
 
   std::vector<size_t> test_compressed_bytes_host;
   std::vector<size_t> test_decompressed_bytes_host;
-  std::vector<hipcompStatus_t> expected_statuses;
+  std::vector<arctoStatus_t> expected_statuses;
 
   // Case 1: the compressed buffer is truncated
 
   test_compressed_bytes_host.push_back(compressed_byte / 2);
   test_decompressed_bytes_host.push_back(uncompressed_byte);
-  expected_statuses.push_back(hipcompErrorCannotDecompress);
+  expected_statuses.push_back(arctoErrorCannotDecompress);
 
   // Case 2: the decompressed buffer is too small
 
   test_compressed_bytes_host.push_back(compressed_byte);
   test_decompressed_bytes_host.push_back(uncompressed_byte / 2);
-  expected_statuses.push_back(hipcompErrorCannotDecompress);
+  expected_statuses.push_back(arctoErrorCannotDecompress);
 
   test_compressed_bytes_host.push_back(compressed_byte);
   test_decompressed_bytes_host.push_back(uncompressed_byte - 1);
-  expected_statuses.push_back(hipcompErrorCannotDecompress);
+  expected_statuses.push_back(arctoErrorCannotDecompress);
 
   // Case 3: correct decompression
 
   test_compressed_bytes_host.push_back(compressed_byte);
   test_decompressed_bytes_host.push_back(uncompressed_byte);
-  expected_statuses.push_back(hipcompSuccess);
+  expected_statuses.push_back(arctoSuccess);
 
   const size_t num_cases = expected_statuses.size();
   std::vector<void*> test_compressed_ptrs_host;
@@ -866,11 +866,11 @@ void test_out_of_bound(int use_bp)
   HIP_CHECK(
       hipMalloc(&actual_decompressed_bytes, sizeof(size_t) * num_cases));
 
-  hipcompStatus_t* decompression_statuses;
+  arctoStatus_t* decompression_statuses;
   HIP_CHECK(
-      hipMalloc(&decompression_statuses, sizeof(hipcompStatus_t) * num_cases));
+      hipMalloc(&decompression_statuses, sizeof(arctoStatus_t) * num_cases));
 
-  status = hipcompBatchedCascadedDecompressAsync(
+  status = arctoBatchedCascadedDecompressAsync(
       test_compressed_ptrs_device,
       test_compressed_bytes_device,
       test_decompressed_bytes_device,
@@ -882,14 +882,14 @@ void test_out_of_bound(int use_bp)
       decompression_statuses,
       0);
 
-  REQUIRE(status == hipcompSuccess);
+  REQUIRE(status == arctoSuccess);
   HIP_CHECK(hipStreamSynchronize(0));
 
-  std::vector<hipcompStatus_t> decompression_statuses_host(num_cases);
+  std::vector<arctoStatus_t> decompression_statuses_host(num_cases);
   HIP_CHECK(hipMemcpy(
       decompression_statuses_host.data(),
       decompression_statuses,
-      sizeof(hipcompStatus_t) * num_cases,
+      sizeof(arctoStatus_t) * num_cases,
       hipMemcpyDeviceToHost));
 
   for (size_t partition_idx = 0; partition_idx < num_cases; partition_idx++) {
@@ -916,7 +916,7 @@ void test_out_of_bound(int use_bp)
   HIP_CHECK(hipFree(decompression_statuses));
 }
 
-TEST_CASE("BatchedCascadedCompressor predefined-cases", "[hipcomp]")
+TEST_CASE("BatchedCascadedCompressor predefined-cases", "[arcto]")
 {
   test_predefined_cases<int8_t>(0);
   test_predefined_cases<int8_t>(1);
@@ -935,7 +935,7 @@ TEST_CASE("BatchedCascadedCompressor predefined-cases", "[hipcomp]")
   test_predefined_cases<uint64_t>(0);
   test_predefined_cases<uint64_t>(1);
 }
-TEST_CASE("BatchedCascadedCompressor fallback-path", "[hipcomp]")
+TEST_CASE("BatchedCascadedCompressor fallback-path", "[arcto]")
 {
   test_fallback_path<int8_t>();
   test_fallback_path<uint8_t>();
@@ -947,7 +947,7 @@ TEST_CASE("BatchedCascadedCompressor fallback-path", "[hipcomp]")
   test_fallback_path<uint64_t>();
 }
 
-TEST_CASE("BatchedCascadedCompressor invalid-decompressed-size", "[hipcomp]")
+TEST_CASE("BatchedCascadedCompressor invalid-decompressed-size", "[arcto]")
 {
   void* compressed_buffer;
   size_t* compressed_bytes;
@@ -971,10 +971,10 @@ TEST_CASE("BatchedCascadedCompressor invalid-decompressed-size", "[hipcomp]")
       sizeof(size_t),
       hipMemcpyHostToDevice));
 
-  auto status = hipcompBatchedCascadedGetDecompressSizeAsync(
+  auto status = arctoBatchedCascadedGetDecompressSizeAsync(
       &compressed_buffer, compressed_bytes, uncompressed_bytes, 1, 0);
 
-  REQUIRE(status == hipcompSuccess);
+  REQUIRE(status == arctoSuccess);
   HIP_CHECK(hipStreamSynchronize(0));
 
   HIP_CHECK(hipMemcpy(
@@ -989,7 +989,7 @@ TEST_CASE("BatchedCascadedCompressor invalid-decompressed-size", "[hipcomp]")
   HIP_CHECK(hipFree(uncompressed_bytes));
 }
 
-TEST_CASE("BatchedCascadedCompressor out-of-bound", "[hipcomp]")
+TEST_CASE("BatchedCascadedCompressor out-of-bound", "[arcto]")
 {
   test_out_of_bound<int8_t>(0);
   test_out_of_bound<int8_t>(1);

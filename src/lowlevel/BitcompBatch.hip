@@ -48,8 +48,8 @@
 // SOFTWARE.
 
 #include "common.h"
-#include "hipcomp.h"
-#include "hipcomp/bitcomp.h"
+#include "arcto.h"
+#include "arcto/bitcomp.h"
 #include "type_macros.h"
 
 #ifdef ENABLE_BITCOMP
@@ -60,25 +60,25 @@
     bitcompResult_t err = call;                                                \
     if (BITCOMP_SUCCESS != err) {                                              \
       if (err == BITCOMP_INVALID_PARAMETER)                                    \
-        return hipcompErrorInvalidValue;                                        \
+        return arctoErrorInvalidValue;                                        \
       else if (err == BITCOMP_INVALID_COMPRESSED_DATA)                         \
-        return hipcompErrorCannotDecompress;                                    \
+        return arctoErrorCannotDecompress;                                    \
       else if (err == BITCOMP_INVALID_ALIGNMENT)                               \
-        return hipcompErrorCannotDecompress;                                    \
-      return hipcompErrorInternal;                                              \
+        return arctoErrorCannotDecompress;                                    \
+      return arctoErrorInternal;                                              \
     }                                                                          \
   }
 
-hipcompStatus_t hipcompBatchedBitcompCompressGetMaxOutputChunkSize(
+arctoStatus_t arctoBatchedBitcompCompressGetMaxOutputChunkSize(
     size_t max_chunk_size,
-    hipcompBatchedBitcompFormatOpts format_opts,
+    arctoBatchedBitcompFormatOpts format_opts,
     size_t* max_compressed_size)
 {
   *max_compressed_size = bitcompMaxBuflen(max_chunk_size);
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedBitcompCompressAsync(
+arctoStatus_t arctoBatchedBitcompCompressAsync(
     const void* const* device_uncompressed_ptrs,
     const size_t* device_uncompressed_bytes,
     size_t, // max_uncompressed_chunk_bytes, not used
@@ -87,31 +87,31 @@ hipcompStatus_t hipcompBatchedBitcompCompressAsync(
     size_t, // temp_bytes, not used
     void* const* device_compressed_ptrs,
     size_t* device_compressed_bytes,
-    const hipcompBatchedBitcompFormatOpts format_opts,
+    const arctoBatchedBitcompFormatOpts format_opts,
     hipStream_t stream)
 {
-  // Convert the HIPCOMP type to a BITCOMP type
+  // Convert the ARCTO type to a BITCOMP type
   bitcompDataType_t dataType;
   switch (format_opts.data_type) {
-  case HIPCOMP_TYPE_CHAR:
+  case ARCTO_TYPE_CHAR:
     dataType = BITCOMP_SIGNED_8BIT;
     break;
-  case HIPCOMP_TYPE_USHORT:
+  case ARCTO_TYPE_USHORT:
     dataType = BITCOMP_UNSIGNED_16BIT;
     break;
-  case HIPCOMP_TYPE_SHORT:
+  case ARCTO_TYPE_SHORT:
     dataType = BITCOMP_SIGNED_16BIT;
     break;
-  case HIPCOMP_TYPE_UINT:
+  case ARCTO_TYPE_UINT:
     dataType = BITCOMP_UNSIGNED_32BIT;
     break;
-  case HIPCOMP_TYPE_INT:
+  case ARCTO_TYPE_INT:
     dataType = BITCOMP_SIGNED_32BIT;
     break;
-  case HIPCOMP_TYPE_ULONGLONG:
+  case ARCTO_TYPE_ULONGLONG:
     dataType = BITCOMP_UNSIGNED_64BIT;
     break;
-  case HIPCOMP_TYPE_LONGLONG:
+  case ARCTO_TYPE_LONGLONG:
     dataType = BITCOMP_SIGNED_64BIT;
     break;
   default:
@@ -135,32 +135,32 @@ hipcompStatus_t hipcompBatchedBitcompCompressAsync(
   // Once launched, the handle can be destroyed
   BTCHK(bitcompDestroyPlan (plan));
   
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
 // The Bitcomp batch decompression outputs bitcompResult_t statuses.
-// Need to convert them to hipcompStatus_t.
-__global__ void convertOutputStatuses (hipcompStatus_t *statuses, size_t batch_size)
+// Need to convert them to arctoStatus_t.
+__global__ void convertOutputStatuses (arctoStatus_t *statuses, size_t batch_size)
 {
   static_assert(
-      sizeof(hipcompStatus_t) == sizeof(bitcompResult_t),
+      sizeof(arctoStatus_t) == sizeof(bitcompResult_t),
       "bitcomp and nvcomp statuses must be the same size");
   size_t index = (size_t)blockIdx.x * (size_t)blockDim.x + (size_t)threadIdx.x;
   if (index >= batch_size)
       return;
   bitcompResult_t ier = reinterpret_cast<bitcompResult_t *>(statuses)[index];
-  hipcompStatus_t hipcomp_err = hipcompSuccess;
+  arctoStatus_t arcto_err = arctoSuccess;
   if (ier != BITCOMP_SUCCESS)
   {
       if (ier == BITCOMP_INVALID_PARAMETER)
-          hipcomp_err = hipcompErrorInvalidValue;
+          arcto_err = arctoErrorInvalidValue;
       else
-          hipcomp_err = hipcompErrorCannotDecompress;
+          arcto_err = arctoErrorCannotDecompress;
   }
-  statuses[index] = hipcomp_err;
+  statuses[index] = arcto_err;
 }
 
-hipcompStatus_t hipcompBatchedBitcompDecompressAsync(
+arctoStatus_t arctoBatchedBitcompDecompressAsync(
     const void* const* device_compressed_ptrs,
     const size_t*, // device_compressed_bytes, not used
     const size_t* device_uncompressed_bytes,
@@ -169,12 +169,12 @@ hipcompStatus_t hipcompBatchedBitcompDecompressAsync(
     void* const, // device_temp_ptr, not used
     size_t,      // temp_bytes, not used
     void* const* device_uncompressed_ptrs,
-    hipcompStatus_t* device_statuses,
+    arctoStatus_t* device_statuses,
     hipStream_t stream)
 {
   // Synchronize the stream to make sure the compressed data is visible
   if (hipStreamSynchronize(stream) != hipSuccess)
-    return hipcompErrorHipError;
+    return arctoErrorHipError;
 
   // Create a Bitcomp batch handle from the compressed data.
   bitcompHandle_t plan;
@@ -207,10 +207,10 @@ hipcompStatus_t hipcompBatchedBitcompDecompressAsync(
 
   // Once launched, the handle can be destroyed
   BTCHK(bitcompDestroyPlan(plan));
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedBitcompGetDecompressSizeAsync(
+arctoStatus_t arctoBatchedBitcompGetDecompressSizeAsync(
     const void* const* device_compressed_ptrs,
     const size_t* device_compressed_bytes,
     size_t* device_uncompressed_bytes,
@@ -221,37 +221,37 @@ hipcompStatus_t hipcompBatchedBitcompGetDecompressSizeAsync(
       device_compressed_ptrs,
       device_uncompressed_bytes,
       batch_size, stream));
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedBitcompCompressGetTempSize(
+arctoStatus_t arctoBatchedBitcompCompressGetTempSize(
     size_t,
     size_t,
-    hipcompBatchedBitcompFormatOpts,
+    arctoBatchedBitcompFormatOpts,
     size_t* temp_bytes)
 {
   *temp_bytes = 0;
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedBitcompDecompressGetTempSize(
+arctoStatus_t arctoBatchedBitcompDecompressGetTempSize(
     size_t,
     size_t,
     size_t* temp_bytes)
 {
   *temp_bytes = 0;
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
 #else
 
-hipcompStatus_t hipcompBatchedBitcompCompressGetMaxOutputChunkSize(
-    size_t, hipcompBatchedBitcompFormatOpts, size_t*)
+arctoStatus_t arctoBatchedBitcompCompressGetMaxOutputChunkSize(
+    size_t, arctoBatchedBitcompFormatOpts, size_t*)
 {
-  return hipcompErrorNotSupported;
+  return arctoErrorNotSupported;
 }
 
-hipcompStatus_t hipcompBatchedBitcompCompressAsync(
+arctoStatus_t arctoBatchedBitcompCompressAsync(
     const void* const*,
     const size_t*,
     size_t,
@@ -260,13 +260,13 @@ hipcompStatus_t hipcompBatchedBitcompCompressAsync(
     size_t,
     void* const*,
     size_t*,
-    const hipcompBatchedBitcompFormatOpts,
+    const arctoBatchedBitcompFormatOpts,
     hipStream_t)
 {
-  return hipcompErrorNotSupported;
+  return arctoErrorNotSupported;
 }
 
-hipcompStatus_t hipcompBatchedBitcompDecompressAsync(
+arctoStatus_t arctoBatchedBitcompDecompressAsync(
     const void* const*,
     const size_t*,
     const size_t*,
@@ -275,27 +275,27 @@ hipcompStatus_t hipcompBatchedBitcompDecompressAsync(
     void* const,
     size_t,
     void* const*,
-    hipcompStatus_t*,
+    arctoStatus_t*,
     hipStream_t)
 {
-  return hipcompErrorNotSupported;
+  return arctoErrorNotSupported;
 }
 
-hipcompStatus_t hipcompBatchedBitcompGetDecompressSizeAsync(
+arctoStatus_t arctoBatchedBitcompGetDecompressSizeAsync(
     const void* const*, const size_t*, size_t*, size_t, hipStream_t)
 {
-  return hipcompErrorNotSupported;
+  return arctoErrorNotSupported;
 }
 
-hipcompStatus_t hipcompBatchedBitcompCompressGetTempSize(
-    size_t, size_t, hipcompBatchedBitcompFormatOpts, size_t*)
+arctoStatus_t arctoBatchedBitcompCompressGetTempSize(
+    size_t, size_t, arctoBatchedBitcompFormatOpts, size_t*)
 {
-  return hipcompErrorNotSupported;
+  return arctoErrorNotSupported;
 }
 
-hipcompStatus_t hipcompBatchedBitcompDecompressGetTempSize(size_t, size_t, size_t*)
+arctoStatus_t arctoBatchedBitcompDecompressGetTempSize(size_t, size_t, size_t*)
 {
-  return hipcompErrorNotSupported;
+  return arctoErrorNotSupported;
 }
 
 #endif

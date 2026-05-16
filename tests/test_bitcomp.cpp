@@ -49,8 +49,8 @@
 
 #define CATCH_CONFIG_MAIN
 
-#include "hipcomp.hpp"
-#include "hipcomp/bitcomp.hpp"
+#include "arcto.hpp"
+#include "arcto/bitcomp.hpp"
 
 #include "catch.hpp"
 
@@ -61,7 +61,7 @@
 // Test GPU decompression with Bitcomp compression API //
 
 using namespace std;
-using namespace hipcomp;
+using namespace arcto;
 
 #define HIP_CHECK(cond)                                                       \
   do {                                                                         \
@@ -90,7 +90,7 @@ std::vector<T> buildRuns(const size_t numRuns, const size_t runSize)
 }
 
 template <typename T>
-void test_bitcomp(const std::vector<T>& input, hipcompType_t data_type)
+void test_bitcomp(const std::vector<T>& input, arctoType_t data_type)
 {
   // create GPU only input buffer
   T* d_in_data;
@@ -161,16 +161,16 @@ void test_bitcomp(const std::vector<T>& input, hipcompType_t data_type)
  * UNIT TESTS *****************************************************************
  *****************************************************************************/
 
-TEST_CASE("comp/decomp Bitcomp-small", "[hipcomp]")
+TEST_CASE("comp/decomp Bitcomp-small", "[arcto]")
 {
   using T = int;
 
   std::vector<T> input = {0, 2, 2, 3, 0, 0, 0, 0, 0, 3, 1, 1, 1, 1, 1, 2, 3, 3};
 
-  test_bitcomp(input, HIPCOMP_TYPE_INT);
+  test_bitcomp(input, ARCTO_TYPE_INT);
 }
 
-TEST_CASE("comp/decomp Bitcomp-1", "[hipcomp]")
+TEST_CASE("comp/decomp Bitcomp-1", "[arcto]")
 {
   using T = int;
 
@@ -180,66 +180,66 @@ TEST_CASE("comp/decomp Bitcomp-1", "[hipcomp]")
     input.push_back(i >> 2);
   }
 
-  test_bitcomp(input, HIPCOMP_TYPE_INT);
+  test_bitcomp(input, ARCTO_TYPE_INT);
 }
 
-TEST_CASE("comp/decomp Bitcomp-all-small-sizes", "[hipcomp][small]")
+TEST_CASE("comp/decomp Bitcomp-all-small-sizes", "[arcto][small]")
 {
   using T = uint8_t;
 
   for (int total = 1; total < 4096; ++total) {
     std::vector<T> input = buildRuns<T>(total, 1);
-    test_bitcomp(input, HIPCOMP_TYPE_UCHAR);
+    test_bitcomp(input, ARCTO_TYPE_UCHAR);
   }
 }
 
-TEST_CASE("comp/decomp Bitcomp-multichunk", "[hipcomp][large]")
+TEST_CASE("comp/decomp Bitcomp-multichunk", "[arcto][large]")
 {
   using T = int;
 
   for (int total = 10; total < (1 << 24); total = total * 2 + 7) {
     std::vector<T> input = buildRuns<T>(total, 10);
-    test_bitcomp(input, HIPCOMP_TYPE_INT);
+    test_bitcomp(input, ARCTO_TYPE_INT);
   }
 }
 
-TEST_CASE("comp/decomp Bitcomp-small-uint8", "[hipcomp][small]")
+TEST_CASE("comp/decomp Bitcomp-small-uint8", "[arcto][small]")
 {
   using T = uint8_t;
 
   for (size_t num = 1; num < 1 << 18; num = num * 2 + 1) {
     std::vector<T> input = buildRuns<T>(num, 3);
-    test_bitcomp(input, HIPCOMP_TYPE_UCHAR);
+    test_bitcomp(input, ARCTO_TYPE_UCHAR);
   }
 }
 
-TEST_CASE("comp/decomp Bitcomp-small-uint16", "[hipcomp][small]")
+TEST_CASE("comp/decomp Bitcomp-small-uint16", "[arcto][small]")
 {
   using T = uint16_t;
 
   for (size_t num = 1; num < 1 << 18; num = num * 2 + 1) {
     std::vector<T> input = buildRuns<T>(num, 3);
-    test_bitcomp(input, HIPCOMP_TYPE_USHORT);
+    test_bitcomp(input, ARCTO_TYPE_USHORT);
   }
 }
 
-TEST_CASE("comp/decomp Bitcomp-small-uint32", "[hipcomp][small]")
+TEST_CASE("comp/decomp Bitcomp-small-uint32", "[arcto][small]")
 {
   using T = uint32_t;
 
   for (size_t num = 1; num < 1 << 18; num = num * 2 + 1) {
     std::vector<T> input = buildRuns<T>(num, 3);
-    test_bitcomp(input, HIPCOMP_TYPE_UINT);
+    test_bitcomp(input, ARCTO_TYPE_UINT);
   }
 }
 
-TEST_CASE("comp/decomp Bitcomp-small-uint64", "[hipcomp][small]")
+TEST_CASE("comp/decomp Bitcomp-small-uint64", "[arcto][small]")
 {
   using T = uint64_t;
 
   for (size_t num = 1; num < 1 << 18; num = num * 2 + 1) {
     std::vector<T> input = buildRuns<T>(num, 3);
-    // HIPCOMP_TYPE_ULONGLONG currently unsupported
-    test_bitcomp(input, HIPCOMP_TYPE_UINT);
+    // ARCTO_TYPE_ULONGLONG currently unsupported
+    test_bitcomp(input, ARCTO_TYPE_UINT);
   }
 }

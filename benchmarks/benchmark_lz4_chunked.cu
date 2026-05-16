@@ -29,15 +29,15 @@
 #include "benchmark_template_chunked.cuh"
 
 #ifdef __HIP_PLATFORM_AMD__
-#include "hipcomp/lz4.h"
+#include "arcto/lz4.h"
 #else
 #include "nvcomp/lz4.h"
 #endif
 
 // Test for the asynchronous C++ interface
 #ifdef __HIP_PLATFORM_AMD__
-static hipcompBatchedLZ4Opts_t hipcompBatchedLZ4TestOpts
-    = {HIPCOMP_TYPE_CHAR};
+static arctoBatchedLZ4Opts_t arctoBatchedLZ4TestOpts
+    = {ARCTO_TYPE_CHAR};
 #else
 static nvcompBatchedLZ4Opts_t nvcompBatchedLZ4TestOpts
     = {NVCOMP_TYPE_CHAR};
@@ -46,15 +46,15 @@ static nvcompBatchedLZ4Opts_t nvcompBatchedLZ4TestOpts
 static bool isLZ4InputValid(const std::vector<std::vector<char>>& data)
 {
 #ifdef __HIP_PLATFORM_AMD__
-  hipcompType_t data_type = hipcompBatchedLZ4TestOpts.data_type;
+  arctoType_t data_type = arctoBatchedLZ4TestOpts.data_type;
 #else
   nvcompType_t data_type = nvcompBatchedLZ4TestOpts.data_type;
 #endif
 
   size_t typeSize = 0;
 #ifdef __HIP_PLATFORM_AMD__
-  if (data_type == HIPCOMP_TYPE_CHAR || data_type == HIPCOMP_TYPE_UCHAR
-      || data_type == HIPCOMP_TYPE_BITS) {
+  if (data_type == ARCTO_TYPE_CHAR || data_type == ARCTO_TYPE_UCHAR
+      || data_type == ARCTO_TYPE_BITS) {
 #else
   if (data_type == NVCOMP_TYPE_CHAR || data_type == NVCOMP_TYPE_UCHAR
       || data_type == NVCOMP_TYPE_BITS) {
@@ -62,7 +62,7 @@ static bool isLZ4InputValid(const std::vector<std::vector<char>>& data)
     typeSize = 1;
 #ifdef __HIP_PLATFORM_AMD__
   } else if (
-      data_type == HIPCOMP_TYPE_SHORT || data_type == HIPCOMP_TYPE_USHORT) {
+      data_type == ARCTO_TYPE_SHORT || data_type == ARCTO_TYPE_USHORT) {
 #else
   } else if (
       data_type == NVCOMP_TYPE_SHORT || data_type == NVCOMP_TYPE_USHORT) {
@@ -70,7 +70,7 @@ static bool isLZ4InputValid(const std::vector<std::vector<char>>& data)
     typeSize = 2;
 #ifdef __HIP_PLATFORM_AMD__
   } else if (
-      data_type == HIPCOMP_TYPE_INT || data_type == HIPCOMP_TYPE_UINT) {
+      data_type == ARCTO_TYPE_INT || data_type == ARCTO_TYPE_UINT) {
 #else
   } else if (
       data_type == NVCOMP_TYPE_INT || data_type == NVCOMP_TYPE_UINT) {
@@ -93,13 +93,13 @@ static bool isLZ4InputValid(const std::vector<std::vector<char>>& data)
 
 #ifdef __HIP_PLATFORM_AMD__
 GENERATE_CHUNKED_BENCHMARK(
-    hipcompBatchedLZ4CompressGetTempSize,
-    hipcompBatchedLZ4CompressGetMaxOutputChunkSize,
-    hipcompBatchedLZ4CompressAsync,
-    hipcompBatchedLZ4DecompressGetTempSize,
-    hipcompBatchedLZ4DecompressAsync,
+    arctoBatchedLZ4CompressGetTempSize,
+    arctoBatchedLZ4CompressGetMaxOutputChunkSize,
+    arctoBatchedLZ4CompressAsync,
+    arctoBatchedLZ4DecompressGetTempSize,
+    arctoBatchedLZ4DecompressAsync,
     isLZ4InputValid,
-    hipcompBatchedLZ4TestOpts);
+    arctoBatchedLZ4TestOpts);
 #else
 GENERATE_CHUNKED_BENCHMARK(
     nvcompBatchedLZ4CompressGetTempSize,

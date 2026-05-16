@@ -210,15 +210,15 @@ void compress_single_batch_snappy(
       sizeof(size_t),
       hipMemcpyHostToDevice));
 
-  hipcomp::gpu_snappy_status_s* d_out_status;
-  HIP_CHECK(hipMalloc(&d_out_status, sizeof(hipcomp::gpu_snappy_status_s)));
+  arcto::gpu_snappy_status_s* d_out_status;
+  HIP_CHECK(hipMalloc(&d_out_status, sizeof(arcto::gpu_snappy_status_s)));
 
   const int num_chunks = 1;
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  hipcomp::gpu_snap(
+  arcto::gpu_snap(
       d_in_data,
       d_in_bytes,
       d_out_data,
@@ -230,11 +230,11 @@ void compress_single_batch_snappy(
 
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  hipcomp::gpu_snappy_status_s final_status;
+  arcto::gpu_snappy_status_s final_status;
   HIP_CHECK(hipMemcpy(
       &final_status,
       d_out_status,
-      sizeof(hipcomp::gpu_snappy_status_s),
+      sizeof(arcto::gpu_snappy_status_s),
       hipMemcpyDeviceToHost));
   REQUIRE(final_status.status == 0);
 
@@ -311,15 +311,15 @@ void decompress_single_batch_snappy(
       sizeof(size_t),
       hipMemcpyHostToDevice));
 
-  hipcompStatus_t* d_out_status;
-  HIP_CHECK(hipMalloc(&d_out_status, sizeof(hipcompStatus_t)));
+  arctoStatus_t* d_out_status;
+  HIP_CHECK(hipMalloc(&d_out_status, sizeof(arctoStatus_t)));
 
   const int num_chunks = 1;
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  hipcomp::gpu_unsnap(
+  arcto::gpu_unsnap(
       d_in_data,
       d_in_bytes,
       d_out_data,
@@ -331,13 +331,13 @@ void decompress_single_batch_snappy(
 
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  hipcompStatus_t final_status;
+  arctoStatus_t final_status;
   HIP_CHECK(hipMemcpy(
       &final_status,
       d_out_status,
-      sizeof(hipcompStatus_t),
+      sizeof(arctoStatus_t),
       hipMemcpyDeviceToHost));
-  REQUIRE(final_status == hipcompSuccess);
+  REQUIRE(final_status == arctoSuccess);
 
   size_t gpu_decompressed_size;
   HIP_CHECK(hipMemcpy(

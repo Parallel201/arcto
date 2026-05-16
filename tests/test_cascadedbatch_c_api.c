@@ -47,7 +47,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "hipcomp/cascaded.h"
+#include "arcto/cascaded.h"
 #include "test_batch_c_api.h"
 
 GENERATE_TESTS(Cascaded);

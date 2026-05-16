@@ -52,7 +52,7 @@
 #include "../common.h"
 #include "LZ4Types.h"
 
-namespace hipcomp
+namespace arcto
 {
 namespace lowlevel
 {
@@ -83,7 +83,7 @@ void lz4BatchCompress(
     size_t temp_bytes,
     uint8_t* const* comp_data_device,
     size_t* const comp_sizes_device,
-    hipcompType_t data_type,
+    arctoType_t data_type,
     hipStream_t stream);
 
 void lz4BatchDecompress(
@@ -95,7 +95,7 @@ void lz4BatchDecompress(
     const size_t temp_bytes,
     uint8_t* const* device_out_ptrs,
     size_t* device_actual_uncompressed_bytes,
-    hipcompStatus_t* device_status_ptrs,
+    arctoStatus_t* device_status_ptrs,
     hipStream_t stream);
 
 /**
@@ -136,4 +136,4 @@ size_t lz4GetHashTableSize(size_t max_chunk_size);
 
 } // namespace lowlevel
 
-} // namespace hipcomp
+} // namespace arcto

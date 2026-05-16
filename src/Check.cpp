@@ -49,7 +49,7 @@
 
 #include "Check.h"
 
-namespace hipcomp
+namespace arcto
 {
 
 /******************************************************************************
@@ -69,15 +69,15 @@ void Check::not_null(
 }
 
 void Check::api_call(
-    const hipcompStatus_t err, const std::string& filename, const int line)
+    const arctoStatus_t err, const std::string& filename, const int line)
 {
-  if (err != hipcompSuccess) {
+  if (err != arctoSuccess) {
     print_fail_position(filename, line);
-    throw HipCompException(err, "API CALL FAILED");
+    throw ArctoException(err, "API CALL FAILED");
   }
 }
 
-hipcompStatus_t Check::exception_to_error(
+arctoStatus_t Check::exception_to_error(
     const std::exception& e, const std::string& function_name)
 {
   std::string context;
@@ -86,11 +86,11 @@ hipcompStatus_t Check::exception_to_error(
   }
 
   // generic error
-  hipcompStatus_t err = hipcompErrorInvalidValue;
+  arctoStatus_t err = arctoErrorInvalidValue;
 
   // NOTE: this depends on RTTI being enabled.
-  if (dynamic_cast<const HipCompException*>(&e)) {
-    const HipCompException& nve = dynamic_cast<const HipCompException&>(e);
+  if (dynamic_cast<const ArctoException*>(&e)) {
+    const ArctoException& nve = dynamic_cast<const ArctoException&>(e);
     err = nve.get_error();
   }
 
@@ -103,4 +103,4 @@ void Check::print_fail_position(const std::string& filename, const int line)
   std::cerr << "CHECK FAILED: " << filename << ":" << line << std::endl;
 }
 
-} // namespace hipcomp
+} // namespace arcto

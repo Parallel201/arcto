@@ -24,7 +24,7 @@ releases are not part of this repo (yet).
 > architectures, use ';' to separate them.
 
 ```bash
-cd hipcomp-core/
+cd arcto-core/
 mkdir build/
 cd build/
 CMAKE_PREFIX_PATH=/opt/rocm/lib/cmake cmake ../ -D CMAKE_HIP_ARCHITECTURES="gfxABC[; gfxBCD[; gfx...]]"
@@ -44,7 +44,7 @@ make
 Like HIP/AMD but with additional `-D CUDA_BACKEND=1` option:
 
 ```bash
-cd hipcomp-core/
+cd arcto-core/
 mkdir build/
 cd build/
 CMAKE_PREFIX_PATH=/opt/rocm/lib/cmake cmake ../ -D CUDA_BACKEND=1
@@ -66,7 +66,7 @@ To create debug builds append the following option:
 After completing the build, run:
 
 ```bash
-cd hipcomp-core/
+cd arcto-core/
 cd build/
 make test
 ```

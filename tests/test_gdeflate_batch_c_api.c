@@ -48,7 +48,7 @@
 // SOFTWARE.
 
 #ifdef ENABLE_GDEFLATE
-#include "hipcomp/gdeflate.h"
+#include "arcto/gdeflate.h"
 #include "test_batch_c_api.h"
 
 #define SUPPORT_NULLPTR_APIS

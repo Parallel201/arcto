@@ -42,7 +42,7 @@
 #include "snappy/types.h"
 #include "snappy/compression_state.hiph"
 
-namespace hipcomp {
+namespace arcto {
 namespace snappy {
 
 static inline __device__ uint32_t get_max_compressed_length(uint32_t source_bytes)
@@ -385,6 +385,6 @@ do_snap(
 }
 
 } // namespace snappy
-} // namespace hipcomp
+} // namespace arcto
 
 #endif // SNAPPY_COMPRESSION_HIPH

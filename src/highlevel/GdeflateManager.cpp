@@ -48,9 +48,9 @@
 // SOFTWARE.
 
 #include "GdeflateBatchManager.hpp"
-#include "hipcomp/gdeflate.hpp"
+#include "arcto/gdeflate.hpp"
 
-namespace hipcomp {
+namespace arcto {
 
 // GdeflateManager implementation
 
@@ -69,4 +69,4 @@ GdeflateManager::GdeflateManager(
 GdeflateManager::~GdeflateManager() 
 {}
 
-} // namespace hipcomp
+} // namespace arcto

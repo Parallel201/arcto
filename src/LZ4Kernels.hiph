@@ -54,7 +54,7 @@
 #include "common.h"
 
 #include "hip/hip_runtime.h"
-#include "hipcomp_hipcub.hiph"
+#include "arcto_hipcub.hiph"
 #include "LZ4Types.h"
 
 #include <cassert>
@@ -129,7 +129,7 @@ const int LZ4_DECOMP_CHUNKS_PER_BLOCK = 2;
 
 #define OOB_CHECKING 1 // Prevent's crashing of corrupt lz4 sequences
 
-namespace hipcomp {
+namespace arcto {
 
 /**
  * @brief The size of the shared memory buffer to use per decompression stream.
@@ -975,7 +975,7 @@ inline __device__ void decompressStream(
     const position_type comp_end,
     const position_type buf_end,
     size_t* decompSize,
-        hipcompStatus_t* decompStatus,
+        arctoStatus_t* decompStatus,
     bool output_decompressed)
 {
   BufferControl ctrl(buffer, compData, comp_end);
@@ -1091,9 +1091,9 @@ inline __device__ void decompressStream(
     }
     if (output_decompressed && decompStatus != nullptr) {
       decompStatus[0]
-            = corrupted_sequence ? hipcompErrorCannotDecompress : hipcompSuccess;
+            = corrupted_sequence ? arctoErrorCannotDecompress : arctoSuccess;
     }
   }
 }
 
-} // namespace hipcomp
+} // namespace arcto

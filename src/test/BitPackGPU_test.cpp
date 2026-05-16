@@ -52,7 +52,7 @@
 #include "tests/catch.hpp"
 #include "BitPackGPU.h"
 #include "common.h"
-#include "hipcomp.hpp"
+#include "arcto.hpp"
 #include "unpack.h"
 
 #include "hip/hip_runtime.h"
@@ -79,7 +79,7 @@
   }
 #endif
 
-using namespace hipcomp;
+using namespace arcto;
 
 /******************************************************************************
  * HELPER FUNCTIONS ***********************************************************
@@ -164,7 +164,7 @@ void runBitPackingOnGPU(
   size_t workspaceBytes = BitPackGPU::requiredWorkspaceSize(n, TypeOf<T>());
   HIP_RT_CALL(hipMalloc(&workspace, workspaceBytes));
 
-  const hipcompType_t inType = TypeOf<T>();
+  const arctoType_t inType = TypeOf<T>();
 
   hipStream_t stream;
   HIP_RT_CALL(hipStreamCreate(&stream));

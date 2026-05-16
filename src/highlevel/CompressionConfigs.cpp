@@ -49,26 +49,26 @@
 
 #include "CompressionConfigs.hpp"
 
-namespace hipcomp {
+namespace arcto {
 
-CompressionConfig::CompressionConfigImpl::CompressionConfigImpl(PinnedPtrPool<hipcompStatus_t>& pool)
+CompressionConfig::CompressionConfigImpl::CompressionConfigImpl(PinnedPtrPool<arctoStatus_t>& pool)
   : status(pool.allocate())
 {
-  *get_status() = hipcompSuccess;
+  *get_status() = arctoSuccess;
 }
 
-hipcompStatus_t* CompressionConfig::CompressionConfigImpl::get_status() const {
+arctoStatus_t* CompressionConfig::CompressionConfigImpl::get_status() const {
   return status->get_ptr();
 }
 
-CompressionConfig::CompressionConfig(PinnedPtrPool<hipcompStatus_t>& pool, size_t uncompressed_buffer_size)
+CompressionConfig::CompressionConfig(PinnedPtrPool<arctoStatus_t>& pool, size_t uncompressed_buffer_size)
   : impl(std::make_shared<CompressionConfig::CompressionConfigImpl>(pool)),
     uncompressed_buffer_size(uncompressed_buffer_size),
     max_compressed_buffer_size(0),
     num_chunks(0)
 {}
 
-hipcompStatus_t* CompressionConfig::get_status() const {
+arctoStatus_t* CompressionConfig::get_status() const {
   return impl->get_status();
 }
 
@@ -107,30 +107,30 @@ CompressionConfig& CompressionConfig::operator=(CompressionConfig&& other)
 }
 
 /**
- * @brief Construct the config given an hipcompStatus_t memory pool
+ * @brief Construct the config given an arctoStatus_t memory pool
  */
-DecompressionConfig::DecompressionConfigImpl::DecompressionConfigImpl(PinnedPtrPool<hipcompStatus_t>& pool)
+DecompressionConfig::DecompressionConfigImpl::DecompressionConfigImpl(PinnedPtrPool<arctoStatus_t>& pool)
   : status(pool.allocate()),
     decomp_data_size(),
     num_chunks()
 {
-  *get_status() = hipcompSuccess;
+  *get_status() = arctoSuccess;
 }
 
 /**
- * @brief Get the raw hipcompStatus_t*
+ * @brief Get the raw arctoStatus_t*
  */
-hipcompStatus_t* DecompressionConfig::DecompressionConfigImpl::get_status() const {
+arctoStatus_t* DecompressionConfig::DecompressionConfigImpl::get_status() const {
   return status->get_ptr();
 }
 
-DecompressionConfig::DecompressionConfig(PinnedPtrPool<hipcompStatus_t>& pool)
+DecompressionConfig::DecompressionConfig(PinnedPtrPool<arctoStatus_t>& pool)
   : impl(std::make_shared<DecompressionConfig::DecompressionConfigImpl>(pool)),
     decomp_data_size(0),
     num_chunks(0)
 {}
 
-hipcompStatus_t* DecompressionConfig::get_status() const {
+arctoStatus_t* DecompressionConfig::get_status() const {
   return impl->get_status();
 }
 
@@ -164,4 +164,4 @@ DecompressionConfig::DecompressionConfig(const DecompressionConfig& other)
     num_chunks(other.num_chunks)
 {}
 
-} // namespace hipcomp
+} // namespace arcto

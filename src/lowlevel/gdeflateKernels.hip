@@ -47,13 +47,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "hipcomp/gdeflate.h"
+#include "arcto/gdeflate.h"
 
 #include "Check.h"
 #include "HipUtils.h"
 #include "common.h"
-#include "hipcomp.h"
-#include "hipcomp.hpp"
+#include "arcto.h"
+#include "arcto.hpp"
 #include "type_macros.h"
 
 #include <cassert>
@@ -62,14 +62,14 @@
 #include "gdeflate.h"
 #include "gdeflateKernels.h"
 
-namespace hipcomp
+namespace arcto
 {
 
 // The Bitcomp batch decompression outputs bitcompResult_t statuses.
-// Need to convert them to hipcompStatus_t.
-__global__ void convertGdeflateOutputStatusesKernel(hipcompStatus_t *statuses, size_t batch_size) {
+// Need to convert them to arctoStatus_t.
+__global__ void convertGdeflateOutputStatusesKernel(arctoStatus_t *statuses, size_t batch_size) {
   static_assert(
-      sizeof(hipcompStatus_t) == sizeof(gdeflate::gdeflateStatus_t),
+      sizeof(arctoStatus_t) == sizeof(gdeflate::gdeflateStatus_t),
       "gdeflate and nvcomp statuses must be the same size");
 
   size_t index = (size_t)blockIdx.x * (size_t)blockDim.x + (size_t)threadIdx.x;
@@ -77,14 +77,14 @@ __global__ void convertGdeflateOutputStatusesKernel(hipcompStatus_t *statuses, s
     return;
 
   auto ier = reinterpret_cast<gdeflate::gdeflateStatus_t *>(statuses)[index];
-  hipcompStatus_t hipcomp_err = hipcompSuccess;
+  arctoStatus_t arcto_err = arctoSuccess;
   if (ier != gdeflate::gdeflateSuccess)
-    hipcomp_err = hipcompErrorCannotDecompress;
-  statuses[index] = hipcomp_err;
+    arcto_err = arctoErrorCannotDecompress;
+  statuses[index] = arcto_err;
 }
 
 void convertGdeflateOutputStatuses(
-    hipcompStatus_t *statuses,
+    arctoStatus_t *statuses,
     size_t batch_size,
     hipStream_t stream) {
     const int threads = 512;
@@ -92,6 +92,6 @@ void convertGdeflateOutputStatuses(
     convertGdeflateOutputStatusesKernel<<<blocks,threads,0,stream>>>(statuses, batch_size);
 }
 
-} // namespace hipcomp
+} // namespace arcto
 
 #endif

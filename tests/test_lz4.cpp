@@ -49,8 +49,8 @@
 
 #define CATCH_CONFIG_MAIN
 
-#include "hipcomp.hpp"
-#include "hipcomp/lz4.hpp"
+#include "arcto.hpp"
+#include "arcto/lz4.hpp"
 
 #include "catch.hpp"
 
@@ -61,7 +61,7 @@
 // Test GPU decompression with cascaded compression API //
 
 using namespace std;
-using namespace hipcomp;
+using namespace arcto;
 
 #define HIP_CHECK(cond)                                                       \
   do {                                                                         \
@@ -90,7 +90,7 @@ std::vector<T> buildRuns(const size_t numRuns, const size_t runSize)
 }
 
 template <typename T>
-void test_lz4(const std::vector<T>& input, hipcompType_t data_type, const size_t chunk_size = 1 << 16)
+void test_lz4(const std::vector<T>& input, arctoType_t data_type, const size_t chunk_size = 1 << 16)
 {
   // create GPU only input buffer
   T* d_in_data;
@@ -161,16 +161,16 @@ void test_lz4(const std::vector<T>& input, hipcompType_t data_type, const size_t
  * UNIT TESTS *****************************************************************
  *****************************************************************************/
 
-TEST_CASE("comp/decomp LZ4-small", "[hipcomp]")
+TEST_CASE("comp/decomp LZ4-small", "[arcto]")
 {
   using T = int;
 
   std::vector<T> input = {0, 2, 2, 3, 0, 0, 0, 0, 0, 3, 1, 1, 1, 1, 1, 2, 3, 3};
 
-  test_lz4(input, HIPCOMP_TYPE_INT);
+  test_lz4(input, ARCTO_TYPE_INT);
 }
 
-TEST_CASE("comp/decomp LZ4-1", "[hipcomp]")
+TEST_CASE("comp/decomp LZ4-1", "[arcto]")
 {
   using T = int;
 
@@ -180,71 +180,71 @@ TEST_CASE("comp/decomp LZ4-1", "[hipcomp]")
     input.push_back(i >> 2);
   }
 
-  test_lz4(input, HIPCOMP_TYPE_INT);
+  test_lz4(input, ARCTO_TYPE_INT);
 }
 
-TEST_CASE("comp/decomp LZ4-all-small-sizes", "[hipcomp][small]")
+TEST_CASE("comp/decomp LZ4-all-small-sizes", "[arcto][small]")
 {
   using T = uint8_t;
 
   for (int total = 1; total < 4096; ++total) {
     std::vector<T> input = buildRuns<T>(total, 1);
-    test_lz4(input, HIPCOMP_TYPE_UCHAR);
+    test_lz4(input, ARCTO_TYPE_UCHAR);
   }
 }
 
-TEST_CASE("comp/decomp LZ4-multichunk", "[hipcomp][large]")
+TEST_CASE("comp/decomp LZ4-multichunk", "[arcto][large]")
 {
   using T = int;
 
   for (int total = 10; total < (1 << 24); total = total * 2 + 7) {
     std::vector<T> input = buildRuns<T>(total, 10);
-    test_lz4(input, HIPCOMP_TYPE_INT);
+    test_lz4(input, ARCTO_TYPE_INT);
   }
 }
 
-TEST_CASE("comp/decomp LZ4-small-uint8", "[hipcomp][small]")
+TEST_CASE("comp/decomp LZ4-small-uint8", "[arcto][small]")
 {
   using T = uint8_t;
 
   for (size_t num = 1; num < 1 << 18; num = num * 2 + 1) {
     std::vector<T> input = buildRuns<T>(num, 3);
-    test_lz4(input, HIPCOMP_TYPE_UCHAR);
+    test_lz4(input, ARCTO_TYPE_UCHAR);
   }
 }
 
-TEST_CASE("comp/decomp LZ4-small-uint16", "[hipcomp][small]")
+TEST_CASE("comp/decomp LZ4-small-uint16", "[arcto][small]")
 {
   using T = uint16_t;
 
   for (size_t num = 1; num < 1 << 18; num = num * 2 + 1) {
     std::vector<T> input = buildRuns<T>(num, 3);
-    test_lz4(input, HIPCOMP_TYPE_USHORT);
+    test_lz4(input, ARCTO_TYPE_USHORT);
   }
 }
 
-TEST_CASE("comp/decomp LZ4-small-uint32", "[hipcomp][small]")
+TEST_CASE("comp/decomp LZ4-small-uint32", "[arcto][small]")
 {
   using T = uint32_t;
 
   for (size_t num = 1; num < 1 << 18; num = num * 2 + 1) {
     std::vector<T> input = buildRuns<T>(num, 3);
-    test_lz4(input, HIPCOMP_TYPE_UINT);
+    test_lz4(input, ARCTO_TYPE_UINT);
   }
 }
 
-TEST_CASE("comp/decomp LZ4-small-uint64", "[hipcomp][small]")
+TEST_CASE("comp/decomp LZ4-small-uint64", "[arcto][small]")
 {
   using T = uint64_t;
 
   for (size_t num = 1; num < 1 << 18; num = num * 2 + 1) {
     std::vector<T> input = buildRuns<T>(num, 3);
-    // HIPCOMP_TYPE_ULONGLONG currently unsupported
-    test_lz4(input, HIPCOMP_TYPE_UINT);
+    // ARCTO_TYPE_ULONGLONG currently unsupported
+    test_lz4(input, ARCTO_TYPE_UINT);
   }
 }
 
-TEST_CASE("comp/decomp LZ4-chunksizes-uint64", "[hipcomp][small]")
+TEST_CASE("comp/decomp LZ4-chunksizes-uint64", "[arcto][small]")
 {
   using T = uint64_t;
 
@@ -257,19 +257,19 @@ TEST_CASE("comp/decomp LZ4-chunksizes-uint64", "[hipcomp][small]")
 
   for (const size_t chunk : chunk_sizes) {
     std::vector<T> input = buildRuns<T>(num, 5);
-    test_lz4(input, HIPCOMP_TYPE_CHAR, chunk);
+    test_lz4(input, ARCTO_TYPE_CHAR, chunk);
   }
 }
 
-TEST_CASE("comp/decomp LZ4-none-aligned-sizes", "[hipcomp][small]")
+TEST_CASE("comp/decomp LZ4-none-aligned-sizes", "[arcto][small]")
 {
   std::vector<size_t> input_sizes = { 1, 33, 1021 };
 
-  std::vector<hipcompType_t> data_types = {
-    HIPCOMP_TYPE_BITS,
-    HIPCOMP_TYPE_CHAR,
-    HIPCOMP_TYPE_SHORT,
-    HIPCOMP_TYPE_INT
+  std::vector<arctoType_t> data_types = {
+    ARCTO_TYPE_BITS,
+    ARCTO_TYPE_CHAR,
+    ARCTO_TYPE_SHORT,
+    ARCTO_TYPE_INT
   };
   for (auto size : input_sizes) {
     std::vector<uint8_t> input = buildRuns<uint8_t>(1, size);

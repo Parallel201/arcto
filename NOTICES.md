@@ -13,23 +13,23 @@ This project contains work derived from NVIDIA nvCOMP v2.2 that is licensed unde
 
 * FILES (Copyright years may differ per file):
   * ``CMakeLists.txt``
-  * ``include/hipcomp/ans.h``
-  * ``include/hipcomp/ans.hpp``
-  * ``include/hipcomp/bitcomp.h``
-  * ``include/hipcomp/bitcomp.hpp``
-  * ``include/hipcomp/cascaded.h``
-  * ``include/hipcomp/cascaded.hpp``
-  * ``include/hipcomp/gdeflate.h``
-  * ``include/hipcomp/gdeflate.hpp``
-  * ``include/hipcomp.h``
-  * ``include/hipcomp/hipcompManagerFactory.hpp``
-  * ``include/hipcomp/hipcompManager.hpp``
-  * ``include/hipcomp.hpp``
-  * ``include/hipcomp/lz4.h``
-  * ``include/hipcomp/lz4.hpp``
-  * ``include/hipcomp/shared_types.h``
-  * ``include/hipcomp/snappy.h``
-  * ``include/hipcomp/snappy.hpp``
+  * ``include/arcto/ans.h``
+  * ``include/arcto/ans.hpp``
+  * ``include/arcto/bitcomp.h``
+  * ``include/arcto/bitcomp.hpp``
+  * ``include/arcto/cascaded.h``
+  * ``include/arcto/cascaded.hpp``
+  * ``include/arcto/gdeflate.h``
+  * ``include/arcto/gdeflate.hpp``
+  * ``include/arcto.h``
+  * ``include/arcto/arctoManagerFactory.hpp``
+  * ``include/arcto/arctoManager.hpp``
+  * ``include/arcto.hpp``
+  * ``include/arcto/lz4.h``
+  * ``include/arcto/lz4.hpp``
+  * ``include/arcto/shared_types.h``
+  * ``include/arcto/snappy.h``
+  * ``include/arcto/snappy.hpp``
   * ``scripts/build_dev_debug.sh``
   * ``scripts/build_dev_release.sh``
   * ``share/snappy/len3_mask_64.cpp``
@@ -55,7 +55,7 @@ This project contains work derived from NVIDIA nvCOMP v2.2 that is licensed unde
   * ``src/highlevel/CompressionConfigs.hpp``
   * ``src/highlevel/GdeflateBatchManager.hpp``
   * ``src/highlevel/GdeflateManager.cpp``
-  * ``src/highlevel/hipcompManagerFactory.cpp``
+  * ``src/highlevel/arctoManagerFactory.cpp``
   * ``src/highlevel/LZ4HlifKernels.h``
   * ``src/highlevel/LZ4HlifKernels.hip``
   * ``src/highlevel/LZ4Manager.cpp``
@@ -67,10 +67,10 @@ This project contains work derived from NVIDIA nvCOMP v2.2 that is licensed unde
   * ``src/highlevel/SnappyManager.cpp``
   * ``src/highlevel/SnappyManager.hpp``
   * ``src/highlevel/test/PinnedPtrPool_test.cpp``
-  * ``src/hipcomp_api.cpp``
-  * ``src/hipcomp_common_deps/hlif_shared.hiph``
-  * ``src/hipcomp_common_deps/hlif_shared_types.hpp``
-  * ``src/hipcomp_hipcub.hiph``
+  * ``src/arcto_api.cpp``
+  * ``src/arcto_common_deps/hlif_shared.hiph``
+  * ``src/arcto_common_deps/hlif_shared_types.hpp``
+  * ``src/arcto_hipcub.hiph``
   * ``src/HipUtils.h``
   * ``src/HipUtils.hip``
   * ``src/lowlevel/ansBatch.cpp``
@@ -117,23 +117,23 @@ This project contains work derived from NVIDIA nvCOMP v2.2 that is licensed unde
   * ``tests/test_random_lz4.cpp``
   * ``tests/test_snappy_batch_c_api.c``
   * ``CMakeLists.txt``
-  * ``include/hipcomp/ans.h``
-  * ``include/hipcomp/ans.hpp``
-  * ``include/hipcomp/bitcomp.h``
-  * ``include/hipcomp/bitcomp.hpp``
-  * ``include/hipcomp/cascaded.h``
-  * ``include/hipcomp/cascaded.hpp``
-  * ``include/hipcomp/gdeflate.h``
-  * ``include/hipcomp/gdeflate.hpp``
-  * ``include/hipcomp.h``
-  * ``include/hipcomp/hipcompManagerFactory.hpp``
-  * ``include/hipcomp/hipcompManager.hpp``
-  * ``include/hipcomp.hpp``
-  * ``include/hipcomp/lz4.h``
-  * ``include/hipcomp/lz4.hpp``
-  * ``include/hipcomp/shared_types.h``
-  * ``include/hipcomp/snappy.h``
-  * ``include/hipcomp/snappy.hpp``
+  * ``include/arcto/ans.h``
+  * ``include/arcto/ans.hpp``
+  * ``include/arcto/bitcomp.h``
+  * ``include/arcto/bitcomp.hpp``
+  * ``include/arcto/cascaded.h``
+  * ``include/arcto/cascaded.hpp``
+  * ``include/arcto/gdeflate.h``
+  * ``include/arcto/gdeflate.hpp``
+  * ``include/arcto.h``
+  * ``include/arcto/arctoManagerFactory.hpp``
+  * ``include/arcto/arctoManager.hpp``
+  * ``include/arcto.hpp``
+  * ``include/arcto/lz4.h``
+  * ``include/arcto/lz4.hpp``
+  * ``include/arcto/shared_types.h``
+  * ``include/arcto/snappy.h``
+  * ``include/arcto/snappy.hpp``
   * ``scripts/build_dev_debug.sh``
   * ``scripts/build_dev_release.sh``
   * ``share/snappy/len3_mask_64.cpp``
@@ -159,7 +159,7 @@ This project contains work derived from NVIDIA nvCOMP v2.2 that is licensed unde
   * ``src/highlevel/CompressionConfigs.hpp``
   * ``src/highlevel/GdeflateBatchManager.hpp``
   * ``src/highlevel/GdeflateManager.cpp``
-  * ``src/highlevel/hipcompManagerFactory.cpp``
+  * ``src/highlevel/arctoManagerFactory.cpp``
   * ``src/highlevel/LZ4HlifKernels.h``
   * ``src/highlevel/LZ4HlifKernels.hip``
   * ``src/highlevel/LZ4Manager.cpp``
@@ -171,10 +171,10 @@ This project contains work derived from NVIDIA nvCOMP v2.2 that is licensed unde
   * ``src/highlevel/SnappyManager.cpp``
   * ``src/highlevel/SnappyManager.hpp``
   * ``src/highlevel/test/PinnedPtrPool_test.cpp``
-  * ``src/hipcomp_api.cpp``
-  * ``src/hipcomp_common_deps/hlif_shared.hiph``
-  * ``src/hipcomp_common_deps/hlif_shared_types.hpp``
-  * ``src/hipcomp_hipcub.hiph``
+  * ``src/arcto_api.cpp``
+  * ``src/arcto_common_deps/hlif_shared.hiph``
+  * ``src/arcto_common_deps/hlif_shared_types.hpp``
+  * ``src/arcto_hipcub.hiph``
   * ``src/HipUtils.h``
   * ``src/HipUtils.hip``
   * ``src/lowlevel/ansBatch.cpp``
@@ -247,7 +247,7 @@ This project contains work derived from NVIDIA nvCOMP v2.2 that is licensed unde
 * HOMEPAGE: https://github.com/NVIDIA/nvcomp/tree/branch-2.2
 
 * FILES:
-  * ``cmake/hipcomp-config.cmake.in``
+  * ``cmake/arcto-config.cmake.in``
   * ``src/SnappyBlockUtils.hiph``
   * ``src/SnappyKernels.hip``
 

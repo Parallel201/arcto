@@ -51,19 +51,19 @@
 
 #include <assert.h>
 
-#include "hipcomp/bitcomp.hpp"
+#include "arcto/bitcomp.hpp"
 #include "HipUtils.h"
-#include "hipcomp_common_deps/hlif_shared_types.hpp"
+#include "arcto_common_deps/hlif_shared_types.hpp"
 #include "highlevel/ManagerBase.hpp"
 
-namespace hipcomp {
+namespace arcto {
 
 struct BitcompSingleStreamManager : ManagerBase<BitcompFormatSpecHeader> {
 private:
   BitcompFormatSpecHeader* format_spec;
 
 public:
-  BitcompSingleStreamManager(hipcompType_t data_type, int bitcomp_algo = 0, hipStream_t user_stream = 0, const int device_id = 0)
+  BitcompSingleStreamManager(arctoType_t data_type, int bitcomp_algo = 0, hipStream_t user_stream = 0, const int device_id = 0)
     : ManagerBase(user_stream, device_id),      
       format_spec()
   {
@@ -75,7 +75,7 @@ public:
     //: TODO check if this actually compiles
     HipUtils::check(hipDeviceGetAttribute (&major, hipDevAttrComputeCapabilityMajor, device_id));
     if (major < 7)
-      throw HipCompException(hipcompErrorNotSupported, "Bitcomp requires GPU architectures >= 70");
+      throw ArctoException(arctoErrorNotSupported, "Bitcomp requires GPU architectures >= 70");
     #endif
     //: TODO decide on behavior for AMD
     finish_init();
@@ -158,7 +158,7 @@ public:
 // BitcompManager implementation
 
 BitcompManager::BitcompManager(
-    hipcompType_t data_type,
+    arctoType_t data_type,
     int bitcomp_algo,
     hipStream_t user_stream,
     const int device_id)
@@ -167,11 +167,11 @@ BitcompManager::BitcompManager(
   impl = std::make_unique<BitcompSingleStreamManager>(
       data_type, bitcomp_algo, user_stream, device_id);
 #else
-  throw HipCompException(hipcompErrorNotSupported, "Bitcomp support not available in this build.");
+  throw ArctoException(arctoErrorNotSupported, "Bitcomp support not available in this build.");
 #endif
 }
 
 BitcompManager::~BitcompManager() 
 {}
 
-} // namespace hipcomp
+} // namespace arcto

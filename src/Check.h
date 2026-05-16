@@ -47,17 +47,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef HIPCOMP_CHECK_H
-#define HIPCOMP_CHECK_H
+#ifndef ARCTO_CHECK_H
+#define ARCTO_CHECK_H
 
-#include "hipcomp.h"
-#include "hipcomp.hpp"
+#include "arcto.h"
+#include "arcto.hpp"
 
 #include <iostream>
 #include <stdexcept>
 #include <string>
 
-namespace hipcomp
+namespace arcto
 {
 
 class Check
@@ -82,24 +82,24 @@ public:
       print_fail_position(filename, line);
       std::cerr << a_name << "(" << a << ")"
                 << " != " << b_name << "(" << b << ")" << std::endl;
-      throw HipCompException(hipcompErrorInternal, "CHECK_EQ Failed");
+      throw ArctoException(arctoErrorInternal, "CHECK_EQ Failed");
     }
   }
 
   static void
-  api_call(hipcompStatus_t err, const std::string& filename, const int line);
+  api_call(arctoStatus_t err, const std::string& filename, const int line);
 
   // NOTE: there is no C++11/C++14 standard way to get the function name.
   // In the future we could try to handle major compilers, and get the
   // name that way, as well as use the c++20 method.
-  static hipcompStatus_t
+  static arctoStatus_t
   exception_to_error(const std::exception& e, const std::string& function_name);
 
 private:
   static void print_fail_position(const std::string& filename, const int line);
 };
 
-} // namespace hipcomp
+} // namespace arcto
 
 #define CHECK_API_CALL(call) Check::api_call(call, __FILE__, __LINE__)
 

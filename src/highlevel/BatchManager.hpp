@@ -52,11 +52,11 @@
 #include "ManagerBase.hpp"
 #include "common.h"
 
-namespace hipcomp {
+namespace arcto {
 
 /**
  * Base class for compression formats that are able to use the 
- * hipcomp shared HLIF logic code. 
+ * arcto shared HLIF logic code. 
  * 
  * This class does compression by splitting the uncompressed buffer into chunks. 
  * It compresses each chunk independently and outputs the chunks into a gapless 
@@ -178,7 +178,7 @@ private: // pure virtual functions
       const uint32_t num_chunks,
       const size_t* comp_chunk_offsets,
       const size_t* comp_chunk_sizes,
-      hipcompStatus_t* output_status) = 0;
+      arctoStatus_t* output_status) = 0;
 
 protected: // derived helpers
   void finish_init() {
@@ -280,4 +280,4 @@ private: // helper API overrides
 
 };
 
-} // namespace hipcomp
+} // namespace arcto

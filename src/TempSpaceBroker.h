@@ -52,7 +52,7 @@
 
 #include <cstddef>
 
-namespace hipcomp
+namespace arcto
 {
 
 class TempSpaceBroker
@@ -113,6 +113,6 @@ private:
   void* reserve(const size_t alignment, const size_t num, const size_t size);
 };
 
-} // namespace hipcomp
+} // namespace arcto
 
 #endif

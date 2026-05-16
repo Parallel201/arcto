@@ -38,7 +38,7 @@
 #ifndef SNAPPY_DECOMPRESSION_DECODER_WARP_SCANS_HIPH
 #define SNAPPY_DECOMPRESSION_DECODER_WARP_SCANS_HIPH
 
-namespace hipcomp
+namespace arcto
 {
 
 namespace snappy
@@ -415,6 +415,6 @@ namespace snappy
 
 } // namespace snappy
 
-} // namespace hipcomp
+} // namespace arcto
 
 #endif // SNAPPY_DECOMPRESSION_DECODER_WARP_SCANS_HIPH

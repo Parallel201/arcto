@@ -75,7 +75,7 @@
   }
 #endif
 
-using namespace hipcomp;
+using namespace arcto;
 
 struct Test32BStruct
 {

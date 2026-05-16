@@ -53,9 +53,9 @@
 #include "TempSpaceBroker.h"
 #include "common.h"
 
-#include "hipcomp_common_deps/hlif_shared.hiph"
+#include "arcto_common_deps/hlif_shared.hiph"
 #include "hip/hip_runtime.h"
-#include "hipcomp_hipcub.hiph"
+#include "arcto_hipcub.hiph"
 
 #include <cassert>
 #include <fstream>
@@ -67,7 +67,7 @@ using item_type = uint32_t;
 
 #define OOB_CHECKING 1 // Prevent's crashing of corrupt lz4 sequences
 
-namespace hipcomp {
+namespace arcto {
 
 struct LZ4CompressorArgs {
   const position_type hash_table_size;
@@ -78,14 +78,14 @@ struct lz4_compress_wrapper : hlif_compress_wrapper {
 private: 
   const position_type hash_table_size;
   offset_type* hash_table;
-  hipcompStatus_t* status;
+  arctoStatus_t* status;
 
 public:
   __device__ lz4_compress_wrapper(
       const LZ4CompressorArgs input,
       uint8_t* tmp_buffer,
       uint8_t*, /*share_buffer*/
-      hipcompStatus_t* status)
+      arctoStatus_t* status)
     : hash_table_size(input.hash_table_size),
       status(status)
   {
@@ -110,7 +110,7 @@ public:
         comp_chunk_size);
   }
 
-  __device__ hipcompStatus_t get_output_status() {
+  __device__ arctoStatus_t get_output_status() {
     return *status;
   }
 
@@ -124,10 +124,10 @@ struct lz4_decompress_wrapper : hlif_decompress_wrapper {
 
 private:
   uint8_t* this_shared_buffer;
-  hipcompStatus_t* status;
+  arctoStatus_t* status;
 
 public:
-  __device__ lz4_decompress_wrapper(uint8_t* shared_buffer, hipcompStatus_t* status)
+  __device__ lz4_decompress_wrapper(uint8_t* shared_buffer, arctoStatus_t* status)
     : this_shared_buffer(reinterpret_cast<uint8_t*>(shared_buffer) + threadIdx.y * DECOMP_INPUT_BUFFER_SIZE),
       status(status)
   {}
@@ -149,7 +149,7 @@ public:
         true /* output decompressed */);
   }
 
-  __device__ hipcompStatus_t get_output_status() {
+  __device__ arctoStatus_t get_output_status() {
     return *status;
   }
 };
@@ -158,28 +158,28 @@ void lz4HlifBatchCompress(
     const CompressArgs& compress_args,
     const position_type hash_table_size,
     const uint32_t max_ctas,
-    hipcompType_t data_type,
+    arctoType_t data_type,
     hipStream_t stream) 
 {
   const dim3 grid(max_ctas);
   const dim3 block(LZ4_COMP_THREADS_PER_CHUNK);
 
   switch (data_type) {
-    case HIPCOMP_TYPE_BITS:
-    case HIPCOMP_TYPE_CHAR:
-    case HIPCOMP_TYPE_UCHAR:
+    case ARCTO_TYPE_BITS:
+    case ARCTO_TYPE_CHAR:
+    case ARCTO_TYPE_UCHAR:
       HlifCompressBatchKernel<lz4_compress_wrapper<uint8_t>><<<grid, block, 0, stream>>>(
           compress_args,
           LZ4CompressorArgs{hash_table_size});
       break;
-    case HIPCOMP_TYPE_SHORT:
-    case HIPCOMP_TYPE_USHORT:
+    case ARCTO_TYPE_SHORT:
+    case ARCTO_TYPE_USHORT:
       HlifCompressBatchKernel<lz4_compress_wrapper<uint16_t>><<<grid, block, 0, stream>>>(
           compress_args,
           LZ4CompressorArgs{hash_table_size});
       break;
-    case HIPCOMP_TYPE_INT:
-    case HIPCOMP_TYPE_UINT:
+    case ARCTO_TYPE_INT:
+    case ARCTO_TYPE_UINT:
       HlifCompressBatchKernel<lz4_compress_wrapper<uint32_t>><<<grid, block, 0, stream>>>(
           compress_args,
           LZ4CompressorArgs{hash_table_size});
@@ -201,7 +201,7 @@ void lz4HlifBatchDecompress(
     const size_t* comp_chunk_sizes,
     const uint32_t max_ctas,
     hipStream_t stream,
-    hipcompStatus_t* output_status) 
+    arctoStatus_t* output_status) 
 {
   const dim3 grid(max_ctas);
   const dim3 block(LZ4_DECOMP_THREADS_PER_CHUNK, LZ4_DECOMP_CHUNKS_PER_BLOCK);
@@ -219,31 +219,31 @@ void lz4HlifBatchDecompress(
   HipUtils::check_last_error();
 }
 
-size_t batchedLZ4CompMaxBlockOccupancy(hipcompType_t data_type, const int device_id)
+size_t batchedLZ4CompMaxBlockOccupancy(arctoType_t data_type, const int device_id)
 {
   hipDeviceProp_t device_prop;
   hipGetDeviceProperties(&device_prop, device_id);
   int num_blocks_per_sm;
   switch (data_type) {
-    case HIPCOMP_TYPE_BITS:
-    case HIPCOMP_TYPE_CHAR:
-    case HIPCOMP_TYPE_UCHAR:
+    case ARCTO_TYPE_BITS:
+    case ARCTO_TYPE_CHAR:
+    case ARCTO_TYPE_UCHAR:
       hipOccupancyMaxActiveBlocksPerMultiprocessor(
           &num_blocks_per_sm, 
           HlifCompressBatchKernel<lz4_compress_wrapper<uint8_t>, LZ4CompressorArgs>, 
           LZ4_COMP_THREADS_PER_CHUNK, 
           0);
       break;
-    case HIPCOMP_TYPE_SHORT:
-    case HIPCOMP_TYPE_USHORT:
+    case ARCTO_TYPE_SHORT:
+    case ARCTO_TYPE_USHORT:
       hipOccupancyMaxActiveBlocksPerMultiprocessor(
           &num_blocks_per_sm, 
           HlifCompressBatchKernel<lz4_compress_wrapper<uint16_t>, LZ4CompressorArgs>, 
           LZ4_COMP_THREADS_PER_CHUNK, 
           0);
       break;
-    case HIPCOMP_TYPE_INT:
-    case HIPCOMP_TYPE_UINT:
+    case ARCTO_TYPE_INT:
+    case ARCTO_TYPE_UINT:
       hipOccupancyMaxActiveBlocksPerMultiprocessor(
           &num_blocks_per_sm, 
           HlifCompressBatchKernel<lz4_compress_wrapper<uint32_t>, LZ4CompressorArgs>, 
@@ -257,7 +257,7 @@ size_t batchedLZ4CompMaxBlockOccupancy(hipcompType_t data_type, const int device
   return device_prop.multiProcessorCount * num_blocks_per_sm;
 }
 
-size_t batchedLZ4DecompMaxBlockOccupancy(hipcompType_t data_type, const int device_id)
+size_t batchedLZ4DecompMaxBlockOccupancy(arctoType_t data_type, const int device_id)
 {
   hipDeviceProp_t device_prop;
   hipGetDeviceProperties(&device_prop, device_id);
@@ -272,4 +272,4 @@ size_t batchedLZ4DecompMaxBlockOccupancy(hipcompType_t data_type, const int devi
   return device_prop.multiProcessorCount * num_blocks_per_sm;
 }
 
-} // namespace hipcomp
+} // namespace arcto

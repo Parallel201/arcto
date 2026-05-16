@@ -52,7 +52,7 @@
 #include "tests/catch.hpp"
 #include "RunLengthEncodeGPU.h"
 #include "common.h"
-#include "hipcomp.hpp"
+#include "arcto.hpp"
 
 #include "hip/hip_runtime.h"
 
@@ -77,7 +77,7 @@
   }
 #endif
 
-using namespace hipcomp;
+using namespace arcto;
 
 /******************************************************************************
  * HELPER FUNCTIONS ***********************************************************

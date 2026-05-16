@@ -46,7 +46,7 @@
 #include "snappy/decompression_state.hiph"
 #include "snappy/decompression_decode_strategies.hiph"
 
-namespace hipcomp {
+namespace arcto {
 namespace snappy {
 
 /**
@@ -289,7 +289,7 @@ public:
   }
 };
 
-} // namespace hipcomp
+} // namespace arcto
 } // namespace snappy
 
 #endif // SNAPPY_DECOMPRESSION_DECODE_HIPH

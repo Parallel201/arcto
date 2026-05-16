@@ -51,17 +51,17 @@
 
 #include <memory>
 
-#include "hipcomp/snappy.h"
-#include "hipcomp/snappy.hpp"
+#include "arcto/snappy.h"
+#include "arcto/snappy.hpp"
 
 #include "Check.h"
 #include "HipUtils.h"
 #include "common.h"
 #include "highlevel/BatchManager.hpp"
 #include "highlevel/SnappyHlifKernels.h"
-#include "hipcomp_common_deps/hlif_shared_types.hpp"
+#include "arcto_common_deps/hlif_shared_types.hpp"
 
-namespace hipcomp {
+namespace arcto {
 
 struct SnappyBatchManager : BatchManager<SnappyFormatSpecHeader> {
 private:
@@ -88,8 +88,8 @@ public:
   size_t compute_max_compressed_chunk_size() final override 
   {
     size_t max_comp_chunk_size;
-    hipcompBatchedSnappyCompressGetMaxOutputChunkSize(
-        get_uncomp_chunk_size(), hipcompBatchedSnappyDefaultOpts, &max_comp_chunk_size);
+    arctoBatchedSnappyCompressGetMaxOutputChunkSize(
+        get_uncomp_chunk_size(), arctoBatchedSnappyDefaultOpts, &max_comp_chunk_size);
     return max_comp_chunk_size;
   }
 
@@ -122,7 +122,7 @@ public:
       const uint32_t num_chunks,
       const size_t* comp_chunk_offsets,
       const size_t* comp_chunk_sizes,
-      hipcompStatus_t* output_status) final override
+      arctoStatus_t* output_status) final override
   {        
     snappyHlifBatchDecompress(
         comp_data_buffer,
@@ -150,4 +150,4 @@ SnappyManager::SnappyManager(size_t uncomp_chunk_size, hipStream_t user_stream, 
 SnappyManager::~SnappyManager() 
 {}
 
-} // namespace hipcomp
+} // namespace arcto

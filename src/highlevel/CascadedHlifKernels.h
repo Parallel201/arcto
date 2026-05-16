@@ -47,19 +47,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "hipcomp.h"
+#include "arcto.h"
 #include "common.h"
-#include "hipcomp/cascaded.h"
-#include "hipcomp_common_deps/hlif_shared_types.hpp"
+#include "arcto/cascaded.h"
+#include "arcto_common_deps/hlif_shared_types.hpp"
 
-namespace hipcomp
+namespace arcto
 {
 
 void cascadedHlifBatchCompress(
     const CompressArgs& compress_args,
     const uint32_t max_ctas,
     hipStream_t stream,
-    const hipcompBatchedCascadedOpts_t* options);
+    const arctoBatchedCascadedOpts_t* options);
 
 void cascadedHlifBatchDecompress(
     const uint8_t* comp_buffer,
@@ -71,12 +71,12 @@ void cascadedHlifBatchDecompress(
     const size_t* comp_chunk_sizes,
     const uint32_t max_ctas,
     hipStream_t stream,
-    hipcompStatus_t* output_status,
-    const hipcompBatchedCascadedOpts_t* options);
+    arctoStatus_t* output_status,
+    const arctoBatchedCascadedOpts_t* options);
 
 size_t
-cascadedHlifDecompMaxBlockOccupancy(const int device_id, hipcompType_t type);
+cascadedHlifDecompMaxBlockOccupancy(const int device_id, arctoType_t type);
 size_t
-cascadedHlifCompMaxBlockOccupancy(const int device_id, hipcompType_t type);
+cascadedHlifCompMaxBlockOccupancy(const int device_id, arctoType_t type);
 
-} // namespace hipcomp
+} // namespace arcto

@@ -49,20 +49,20 @@
 
 
 #include "highlevel/SnappyHlifKernels.h"
-#include "hipcomp_common_deps/hlif_shared.hiph"
+#include "arcto_common_deps/hlif_shared.hiph"
 #include "snappy/compression.hiph"
 #include "snappy/decompression.hiph"
 #include "HipUtils.h"
 
-namespace hipcomp {
+namespace arcto {
 
 struct snappy_compress_wrapper : hlif_compress_wrapper {
 
 private:
-  hipcompStatus_t* status;
+  arctoStatus_t* status;
 
 public:
-  __device__ snappy_compress_wrapper(uint8_t* /*tmp_buffer*/, uint8_t* /*share_buffer*/, hipcompStatus_t* status)
+  __device__ snappy_compress_wrapper(uint8_t* /*tmp_buffer*/, uint8_t* /*share_buffer*/, arctoStatus_t* status)
    : status(status)
   {}
       
@@ -82,7 +82,7 @@ public:
         comp_chunk_size);
   }
 
-  __device__ hipcompStatus_t get_output_status() {
+  __device__ arctoStatus_t get_output_status() {
     return *status;
   }
 
@@ -94,10 +94,10 @@ public:
 struct snappy_decompress_wrapper : hlif_decompress_wrapper {
 
 private:
-  hipcompStatus_t* status;
+  arctoStatus_t* status;
 
 public:
-  __device__ snappy_decompress_wrapper(uint8_t* /*shared_buffer*/, hipcompStatus_t* status)
+  __device__ snappy_decompress_wrapper(uint8_t* /*shared_buffer*/, arctoStatus_t* status)
     : status(status)
   {}
       
@@ -116,7 +116,7 @@ public:
         nullptr); // device_uncompressed_bytes -- unnecessary for HLIF
   }
 
-  __device__ hipcompStatus_t get_output_status() {
+  __device__ arctoStatus_t get_output_status() {
     return *status;
   }
 };
@@ -143,7 +143,7 @@ void snappyHlifBatchDecompress(
     const size_t* comp_chunk_sizes,
     const uint32_t max_ctas,
     hipStream_t stream,
-    hipcompStatus_t* output_status) 
+    arctoStatus_t* output_status) 
 {
   const dim3 grid(max_ctas);
   const dim3 block(DECOMP_THREADS_PER_BLOCK);
@@ -188,4 +188,4 @@ size_t snappyHlifDecompMaxBlockOccupancy(const int device_id)
   return device_prop.multiProcessorCount * num_blocks_per_sm;
 }
 
-} // hipcomp namespace
+} // arcto namespace

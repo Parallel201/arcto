@@ -47,24 +47,24 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef HIPCOMP_GDEFLATE_KERNELS_H
-#define HIPCOMP_GDEFLATE_KERNELS_H
+#ifndef ARCTO_GDEFLATE_KERNELS_H
+#define ARCTO_GDEFLATE_KERNELS_H
 
-#include "hipcomp.h"
-#include "hipcomp.hpp"
+#include "arcto.h"
+#include "arcto.hpp"
 
 #include <hip.h>
 
 #ifdef ENABLE_GDEFLATE
 #include "gdeflate.h"
 
-namespace hipcomp
+namespace arcto
 {
   void convertGdeflateOutputStatuses(
-      hipcompStatus_t *statuses,
+      arctoStatus_t *statuses,
       size_t batch_size,
       hipStream_t stream);
 }
 
 #endif // ENABLE_GDEFLATE
-#endif // HIPCOMP_GDEFLATE_KERNELS_H
+#endif // ARCTO_GDEFLATE_KERNELS_H

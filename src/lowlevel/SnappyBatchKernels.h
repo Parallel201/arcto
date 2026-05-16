@@ -49,10 +49,10 @@
 
 #pragma once
 
-#include "hipcomp.h"
+#include "arcto.h"
 #include "snappy/types.h"
 
-namespace hipcomp {
+namespace arcto {
 
 /**
  * @brief Interface for compressing data with Snappy
@@ -115,7 +115,7 @@ void gpu_unsnap(
     const size_t* device_in_bytes,
     void* const* device_out_ptr,
     const size_t* device_out_available_bytes,
-    hipcompStatus_t* outputs,
+    arctoStatus_t* outputs,
     size_t* device_out_bytes,
     int count,
     hipStream_t stream);
@@ -147,4 +147,4 @@ void gpu_get_uncompressed_sizes(
   int count,
   hipStream_t stream);
 
-} // namespace hipcomp
+} // namespace arcto

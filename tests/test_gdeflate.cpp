@@ -49,8 +49,8 @@
 
 #define CATCH_CONFIG_MAIN
 
-#include "hipcomp.hpp"
-#include "hipcomp/gdeflate.hpp"
+#include "arcto.hpp"
+#include "arcto/gdeflate.hpp"
 
 #include "catch.hpp"
 
@@ -61,7 +61,7 @@
 // Test GPU decompression with cascaded compression API //
 
 using namespace std;
-using namespace hipcomp;
+using namespace arcto;
 
 #define CUDA_CHECK(cond)                                                       \
   do {                                                                         \
@@ -162,7 +162,7 @@ void test_gdeflate(const std::vector<T>& input, const size_t chunk_size = 1 << 1
  * UNIT TESTS *****************************************************************
  *****************************************************************************/
 
-TEST_CASE("comp/decomp Gdeflate-small", "[hipcomp]")
+TEST_CASE("comp/decomp Gdeflate-small", "[arcto]")
 {
   using T = int;
 
@@ -171,7 +171,7 @@ TEST_CASE("comp/decomp Gdeflate-small", "[hipcomp]")
   test_gdeflate(input);
 }
 
-TEST_CASE("comp/decomp Gdeflate-1", "[hipcomp]")
+TEST_CASE("comp/decomp Gdeflate-1", "[arcto]")
 {
   using T = int;
 
@@ -184,7 +184,7 @@ TEST_CASE("comp/decomp Gdeflate-1", "[hipcomp]")
   test_gdeflate(input);
 }
 
-TEST_CASE("comp/decomp Gdeflate-all-small-sizes", "[hipcomp][small]")
+TEST_CASE("comp/decomp Gdeflate-all-small-sizes", "[arcto][small]")
 {
   using T = uint8_t;
 
@@ -194,7 +194,7 @@ TEST_CASE("comp/decomp Gdeflate-all-small-sizes", "[hipcomp][small]")
   }
 }
 
-TEST_CASE("comp/decomp Gdeflate-multichunk", "[hipcomp][large]")
+TEST_CASE("comp/decomp Gdeflate-multichunk", "[arcto][large]")
 {
   using T = uint8_t;
 
@@ -204,7 +204,7 @@ TEST_CASE("comp/decomp Gdeflate-multichunk", "[hipcomp][large]")
   }
 }
 
-TEST_CASE("comp/decomp Gdeflate-small-1", "[hipcomp][small]")
+TEST_CASE("comp/decomp Gdeflate-small-1", "[arcto][small]")
 {
   using T = uint8_t;
 
@@ -214,7 +214,7 @@ TEST_CASE("comp/decomp Gdeflate-small-1", "[hipcomp][small]")
   }
 }
 
-TEST_CASE("comp/decomp Gdeflate-chunksizes", "[hipcomp][small]")
+TEST_CASE("comp/decomp Gdeflate-chunksizes", "[arcto][small]")
 {
   using T = uint8_t;
 
@@ -231,7 +231,7 @@ TEST_CASE("comp/decomp Gdeflate-chunksizes", "[hipcomp][small]")
   }
 }
 
-TEST_CASE("comp/decomp Gdeflate-none-aligned-sizes", "[hipcomp][small]")
+TEST_CASE("comp/decomp Gdeflate-none-aligned-sizes", "[arcto][small]")
 {
   std::vector<size_t> input_sizes = { 1, 33, 1021 };
 

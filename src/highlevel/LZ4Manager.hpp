@@ -51,8 +51,8 @@
 
 #include <memory>
 
-#include "hipcomp/lz4.hpp"
-#include "hipcomp/lz4.h"
+#include "arcto/lz4.hpp"
+#include "arcto/lz4.h"
 
 #include "BatchManager.hpp"
 #include "Check.h"
@@ -60,9 +60,9 @@
 #include "LZ4HlifKernels.h"
 #include "common.h"
 #include "lowlevel/LZ4CompressionKernels.h"
-#include "hipcomp_common_deps/hlif_shared_types.hpp"
+#include "arcto_common_deps/hlif_shared_types.hpp"
 
-namespace hipcomp {
+namespace arcto {
 
 struct LZ4BatchManager : BatchManager<LZ4FormatSpecHeader> {
 private:
@@ -70,7 +70,7 @@ private:
   LZ4FormatSpecHeader* format_spec;
 
 public:
-  LZ4BatchManager(size_t uncomp_chunk_size, hipcompType_t data_type, hipStream_t user_stream, const int device_id)
+  LZ4BatchManager(size_t uncomp_chunk_size, arctoType_t data_type, hipStream_t user_stream, const int device_id)
     : BatchManager(uncomp_chunk_size, user_stream, device_id),      
       hash_table_size(),
       format_spec()
@@ -92,8 +92,8 @@ public:
   size_t compute_max_compressed_chunk_size() final override 
   {
     size_t max_comp_chunk_size;
-    hipcompBatchedLZ4CompressGetMaxOutputChunkSize(
-        get_uncomp_chunk_size(), hipcompBatchedLZ4DefaultOpts, &max_comp_chunk_size);
+    arctoBatchedLZ4CompressGetMaxOutputChunkSize(
+        get_uncomp_chunk_size(), arctoBatchedLZ4DefaultOpts, &max_comp_chunk_size);
     return max_comp_chunk_size;
   }
 
@@ -128,7 +128,7 @@ public:
       const uint32_t num_chunks,
       const size_t* comp_chunk_offsets,
       const size_t* comp_chunk_sizes,
-      hipcompStatus_t* output_status) final override
+      arctoStatus_t* output_status) final override
   {        
     lz4HlifBatchDecompress(
         comp_data_buffer,
@@ -160,7 +160,7 @@ private: // helper overrides
 
 LZ4Manager::LZ4Manager(
     size_t uncomp_chunk_size, 
-    hipcompType_t data_type, 
+    arctoType_t data_type, 
     hipStream_t user_stream, 
     const int device_id)
 {
@@ -173,4 +173,4 @@ LZ4Manager::LZ4Manager(
 LZ4Manager::~LZ4Manager() 
 {}
 
-} // namespace hipcomp
+} // namespace arcto

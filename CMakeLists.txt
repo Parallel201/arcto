@@ -47,7 +47,7 @@
 # SOFTWARE.
 cmake_minimum_required(VERSION 3.21) # HIP language support requires 3.21
 cmake_policy(VERSION 3.21.3...3.27)
-project(hipcomp VERSION 2.2.0 LANGUAGES C CXX)
+project(arcto VERSION 2.2.0 LANGUAGES C CXX)
 
 option(CUDA_BACKEND "Build for CUDA devices. Default configuration builds for AMD devices." OFF)
 option(BUILD_TESTS "Build unit and end-to-end tests." OFF)
@@ -95,7 +95,7 @@ macro(setup_cuda_build)
 
   # HIP definitions
   add_compile_definitions(__HIP_PLATFORM_NVCC__ __HIP_PLATFORM_NVIDIA__)
-  include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include/hipcomp) # contains a hip subfolder
+  include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include/arcto) # contains a hip subfolder
 
   # Using '-G' can cause the register count to overflow for some kernels
   # and cause launch failures
@@ -170,9 +170,9 @@ else()
   set(CMAKE_BUILD_TYPE "Release")
 endif()
 
-set(HIPCOMP_FIND_QUIET "QUIET")
+set(ARCTO_FIND_QUIET "QUIET")
 if(DEFINED DEVEL AND NOT DEVEL EQUAL 0)
-  unset(HIPCOMP_FIND_QUIET )
+  unset(ARCTO_FIND_QUIET )
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
     # g++ warnings
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
@@ -204,30 +204,30 @@ if (MSVC)
 endif()
 
 
-if(NOT DEFINED HIPCOMP_EXTS_ROOT AND DEFINED ENV{HIPCOMP_EXTS_ROOT})
-  set(HIPCOMP_EXTS_ROOT "$ENV{HIPCOMP_EXTS_ROOT}")
+if(NOT DEFINED ARCTO_EXTS_ROOT AND DEFINED ENV{ARCTO_EXTS_ROOT})
+  set(ARCTO_EXTS_ROOT "$ENV{ARCTO_EXTS_ROOT}")
 endif()
 
-if( DEFINED HIPCOMP_EXTS_ROOT )
-  unset( HIPCOMP_FIND_QUIET )
-  set( ENV{ans_ROOT} ${HIPCOMP_EXTS_ROOT} )
-  set( ENV{gdeflate_ROOT} ${HIPCOMP_EXTS_ROOT} )
-  set( ENV{bitcomp_ROOT} ${HIPCOMP_EXTS_ROOT} )
+if( DEFINED ARCTO_EXTS_ROOT )
+  unset( ARCTO_FIND_QUIET )
+  set( ENV{ans_ROOT} ${ARCTO_EXTS_ROOT} )
+  set( ENV{gdeflate_ROOT} ${ARCTO_EXTS_ROOT} )
+  set( ENV{bitcomp_ROOT} ${ARCTO_EXTS_ROOT} )
 endif()
 
-find_package(ans ${HIPCOMP_FIND_QUIET})
+find_package(ans ${ARCTO_FIND_QUIET})
 if (ans_FOUND)
   message (STATUS "Found ans")
   add_definitions(-DENABLE_ANS)
 endif()
 
-find_package(bitcomp ${HIPCOMP_FIND_QUIET})
+find_package(bitcomp ${ARCTO_FIND_QUIET})
 if (bitcomp_FOUND)
   message (STATUS "Found bitcomp")
   add_definitions(-DENABLE_BITCOMP)
 endif()
 
-find_package(gdeflate ${HIPCOMP_FIND_QUIET})
+find_package(gdeflate ${ARCTO_FIND_QUIET})
 if (gdeflate_FOUND)
   message (STATUS "Found gdeflate")
   add_definitions(-DENABLE_GDEFLATE)
@@ -242,17 +242,17 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 file(COPY include/ DESTINATION ${CMAKE_BINARY_DIR}/include)
 
 # determine version
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/include/hipcomp.h" MAIN_HEADER)
-string(REGEX MATCH "#define HIPCOMP_MAJOR_VERSION ([0-9]+)" _ "${MAIN_HEADER}")
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/include/arcto.h" MAIN_HEADER)
+string(REGEX MATCH "#define ARCTO_MAJOR_VERSION ([0-9]+)" _ "${MAIN_HEADER}")
 set(VER_MAJOR "${CMAKE_MATCH_1}")
-string(REGEX MATCH "#define HIPCOMP_MINOR_VERSION ([0-9]+)" _ "${MAIN_HEADER}")
+string(REGEX MATCH "#define ARCTO_MINOR_VERSION ([0-9]+)" _ "${MAIN_HEADER}")
 set(VER_MINOR "${CMAKE_MATCH_1}")
-string(REGEX MATCH "#define HIPCOMP_PATCH_VERSION ([0-9]+)" _ "${MAIN_HEADER}")
+string(REGEX MATCH "#define ARCTO_PATCH_VERSION ([0-9]+)" _ "${MAIN_HEADER}")
 set(VER_PATCH "${CMAKE_MATCH_1}")
 
-set(HIPCOMP_VERSION "${VER_MAJOR}.${VER_MINOR}.${VER_PATCH}")
+set(ARCTO_VERSION "${VER_MAJOR}.${VER_MINOR}.${VER_PATCH}")
 
-message(STATUS "Build hipCOMP version ${HIPCOMP_VERSION}")
+message(STATUS "Build ARCTO version ${ARCTO_VERSION}")
 
 if (BUILD_TESTS)
   enable_testing()
@@ -272,55 +272,55 @@ if (BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif()
 
-set(INSTALL_CONFIGDIR ${CMAKE_INSTALL_LIBDIR}/cmake/hipcomp)
+set(INSTALL_CONFIGDIR ${CMAKE_INSTALL_LIBDIR}/cmake/arcto)
 if(CUDA_BACKEND)
-  set(HIPCOMP_PKG_CONFIG_TEMPLATE ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipcomp-config.cmake.nvidia.in)
+  set(ARCTO_PKG_CONFIG_TEMPLATE ${CMAKE_CURRENT_SOURCE_DIR}/cmake/arcto-config.cmake.nvidia.in)
 else(CUDA_BACKEND)
-  set(HIPCOMP_PKG_CONFIG_TEMPLATE ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipcomp-config.cmake.amd.in)
+  set(ARCTO_PKG_CONFIG_TEMPLATE ${CMAKE_CURRENT_SOURCE_DIR}/cmake/arcto-config.cmake.amd.in)
 endif(CUDA_BACKEND)
 
 
 #------
 # Build directory exporting
 include(CMakePackageConfigHelpers)
-configure_package_config_file("${HIPCOMP_PKG_CONFIG_TEMPLATE}"
-                              "${CMAKE_CURRENT_BINARY_DIR}/hipcomp-config.cmake"
+configure_package_config_file("${ARCTO_PKG_CONFIG_TEMPLATE}"
+                              "${CMAKE_CURRENT_BINARY_DIR}/arcto-config.cmake"
                               INSTALL_DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
-export(TARGETS hipcomp
-       FILE "${CMAKE_CURRENT_BINARY_DIR}/hipcomp-targets.cmake"
+export(TARGETS arcto
+       FILE "${CMAKE_CURRENT_BINARY_DIR}/arcto-targets.cmake"
        )
 
 
 #------
 # Install directory setup
-configure_package_config_file("${HIPCOMP_PKG_CONFIG_TEMPLATE}"
-                              "${CMAKE_CURRENT_BINARY_DIR}/cmake/hipcomp-config.cmake"
+configure_package_config_file("${ARCTO_PKG_CONFIG_TEMPLATE}"
+                              "${CMAKE_CURRENT_BINARY_DIR}/cmake/arcto-config.cmake"
                               INSTALL_DESTINATION "${INSTALL_CONFIGDIR}")
 write_basic_package_version_file(
-    ${CMAKE_CURRENT_BINARY_DIR}/cmake/hipcomp-config-version.cmake
-    VERSION "${HIPCOMP_VERSION}"
+    ${CMAKE_CURRENT_BINARY_DIR}/cmake/arcto-config-version.cmake
+    VERSION "${ARCTO_VERSION}"
     COMPATIBILITY SameMinorVersion)
 
-install(TARGETS hipcomp EXPORT hipcomp-exports DESTINATION lib)
-install(EXPORT hipcomp-exports
-        FILE          hipcomp-targets.cmake
-        NAMESPACE     hipcomp::
+install(TARGETS arcto EXPORT arcto-exports DESTINATION lib)
+install(EXPORT arcto-exports
+        FILE          arcto-targets.cmake
+        NAMESPACE     arcto::
         DESTINATION   "${INSTALL_CONFIGDIR}")
 
 
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/hipcomp/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hipcomp)
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/hipcomp.hpp
-              ${CMAKE_CURRENT_SOURCE_DIR}/include/hipcomp.h
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/arcto/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/arcto)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/arcto.hpp
+              ${CMAKE_CURRENT_SOURCE_DIR}/include/arcto.h
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake/hipcomp-config.cmake"
-              "${CMAKE_CURRENT_BINARY_DIR}/cmake/hipcomp-config-version.cmake"
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake/arcto-config.cmake"
+              "${CMAKE_CURRENT_BINARY_DIR}/cmake/arcto-config-version.cmake"
         DESTINATION "${INSTALL_CONFIGDIR}")
 
 #------
 # Packaging
 # NOTE For the time being, we put lib and dev files into the same package.
 # NOTE We need to consider to move to ROCm CMake from raw CPACK
-set(CPACK_PACKAGE_NAME "rocm-hipcomp-core")
+set(CPACK_PACKAGE_NAME "rocm-arcto-core")
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "${CPACK_PACKAGE_VENDOR}")
 set(CPACK_OUTPUT_FILE_PREFIX "dist" CACHE PATH "Package output file prefix.")

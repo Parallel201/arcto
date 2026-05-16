@@ -1,4 +1,0 @@
-dataset,spatial_dims,n_timesteps,file_size_gb,timestep_mb,data_format,ts_begin_zero_pct,ts_mid_zero_pct,ts_end_zero_pct,ts_begin_std,ts_mid_std,ts_end_std,recommended_start_fraction
-small/TTI,256x256x256,11,0.69,64.0,native_float,100.0,91.2,82.1,0.0000e+00,2.3086e-04,3.8266e-03,0.91
-medium/TTI,256x256x256,101,6.31,64.0,native_float,100.0,7.7,7.6,0.0000e+00,2.4016e-03,9.5986e-04,0.39
-large/TTI,448x448x448,201,67.33,343.0,native_float,100.0,4.9,4.9,0.0000e+00,7.9922e-04,4.3895e-04,0.38

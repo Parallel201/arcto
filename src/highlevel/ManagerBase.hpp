@@ -52,17 +52,17 @@
 #include <memory>
 #include <vector>
 
-#include "hipcomp/hipcompManager.hpp"
+#include "arcto/arctoManager.hpp"
 
 #include "Check.h"
 #include "HipUtils.h"
 #include "PinnedPtrs.hpp"
-#include "hipcomp_common_deps/hlif_shared_types.hpp"
+#include "arcto_common_deps/hlif_shared_types.hpp"
 
-namespace hipcomp {
+namespace arcto {
 
 /**
- * @brief ManagerBase contains shared functionality amongst the different hipcompManager types
+ * @brief ManagerBase contains shared functionality amongst the different arctoManager types
  * 
  * - Intended that all Managers will inherit from this class directly or indirectly.
  *
@@ -78,7 +78,7 @@ namespace hipcomp {
 #include <assert.h>
 
 template <typename FormatSpecHeader>
-struct ManagerBase : hipcompManagerBase {
+struct ManagerBase : arctoManagerBase {
 
 protected: // members
   CommonHeader* common_header_cpu;
@@ -86,7 +86,7 @@ protected: // members
   uint8_t* scratch_buffer;
   size_t scratch_buffer_size;
   int device_id;
-  PinnedPtrPool<hipcompStatus_t> status_pool;
+  PinnedPtrPool<arctoStatus_t> status_pool;
   bool manager_filled_scratch_buffer;
 
 private: // members
@@ -323,4 +323,4 @@ private: // helpers
 
 };
 
-} // namespace hipcomp
+} // namespace arcto

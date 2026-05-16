@@ -48,8 +48,8 @@
 // SOFTWARE.
 
 #include "common.h"
-#include "hipcomp.h"
-#include "hipcomp/cascaded.h"
+#include "arcto.h"
+#include "arcto/cascaded.h"
 #include "type_macros.h"
 #include "CascadedKernels.hiph"
 #include "Check.h"
@@ -57,17 +57,17 @@
 
 #include <cstdint>
 
-using hipcomp::larger_t;
-using hipcomp::roundUpDiv;
-using hipcomp::roundUpTo;
-using hipcomp::roundUpToAlignment;
-using hipcomp::default_chunk_size;
-using hipcomp::cascaded_compress_threadblock_size;
-using hipcomp::cascaded_decompress_threadblock_size;
-using hipcomp::partition_metadata_size;
-using hipcomp::compute_smem_size;
-using hipcomp::Check;
-using hipcomp::HipUtils;
+using arcto::larger_t;
+using arcto::roundUpDiv;
+using arcto::roundUpTo;
+using arcto::roundUpToAlignment;
+using arcto::default_chunk_size;
+using arcto::cascaded_compress_threadblock_size;
+using arcto::cascaded_decompress_threadblock_size;
+using arcto::partition_metadata_size;
+using arcto::compute_smem_size;
+using arcto::Check;
+using arcto::HipUtils;
 
 namespace
 {
@@ -105,9 +105,9 @@ __global__ void cascaded_compression_kernel(
     const size_type* uncompressed_bytes,
     void* const* compressed_data,
     size_type* compressed_bytes,
-    hipcompBatchedCascadedOpts_t comp_opts)
+    arctoBatchedCascadedOpts_t comp_opts)
 {
-  hipcomp::do_cascaded_compression_kernel<
+  arcto::do_cascaded_compression_kernel<
       data_type,
       size_type,
       threadblock_size,
@@ -160,21 +160,21 @@ __global__ void cascaded_decompression_kernel_type_check(
     void* const* decompressed_data,
     const size_type* decompressed_buffer_bytes,
     size_type* actual_decompressed_bytes,
-    hipcompStatus_t* statuses)
+    arctoStatus_t* statuses)
 {
   // Extract datatype from compressed data
   const auto partition_metadata_ptr
       = reinterpret_cast<const uint8_t*>(compressed_data[0]);
-  const auto type = static_cast<hipcompType_t>(partition_metadata_ptr[3]);
+  const auto type = static_cast<arctoType_t>(partition_metadata_ptr[3]);
 
   switch (bitwidth_test) {
   case 1:
-    if (type == HIPCOMP_TYPE_CHAR || type == HIPCOMP_TYPE_UCHAR) {
+    if (type == ARCTO_TYPE_CHAR || type == ARCTO_TYPE_UCHAR) {
       // allocate shmem and run fcn for 1-byte type
       const int shmem_size = compute_smem_size<chunk_size, 1, 4>();
       __shared__ uint8_t shmem[shmem_size];
 
-      hipcomp::template cascaded_decompression_fcn<
+      arcto::template cascaded_decompression_fcn<
           uint8_t,
           size_type,
           threadblock_size>(
@@ -191,12 +191,12 @@ __global__ void cascaded_decompression_kernel_type_check(
     }
     break;
   case 2:
-    if (type == HIPCOMP_TYPE_SHORT || type == HIPCOMP_TYPE_USHORT) {
+    if (type == ARCTO_TYPE_SHORT || type == ARCTO_TYPE_USHORT) {
       // allocate shmem and run fcn for 2-byte type
       const int shmem_size = compute_smem_size<chunk_size, 2, 4>();
       __shared__ uint8_t shmem[shmem_size];
 
-      hipcomp::template cascaded_decompression_fcn<
+      arcto::template cascaded_decompression_fcn<
           uint16_t,
           size_type,
           threadblock_size>(
@@ -213,12 +213,12 @@ __global__ void cascaded_decompression_kernel_type_check(
     }
     break;
   case 4:
-    if (type == HIPCOMP_TYPE_INT || type == HIPCOMP_TYPE_UINT) {
+    if (type == ARCTO_TYPE_INT || type == ARCTO_TYPE_UINT) {
       // allocate shmem and run fcn for 4-byte type
       const int shmem_size = compute_smem_size<chunk_size, 4, 4>();
       __shared__ uint8_t shmem[shmem_size];
 
-      hipcomp::template cascaded_decompression_fcn<
+      arcto::template cascaded_decompression_fcn<
           uint32_t,
           size_type,
           threadblock_size>(
@@ -235,12 +235,12 @@ __global__ void cascaded_decompression_kernel_type_check(
     }
     break;
   case 8:
-    if (type == HIPCOMP_TYPE_LONGLONG || type == HIPCOMP_TYPE_ULONGLONG) {
+    if (type == ARCTO_TYPE_LONGLONG || type == ARCTO_TYPE_ULONGLONG) {
       // allocate shmem and run fcn for 8-byte type
       const int shmem_size = compute_smem_size<chunk_size, 8, 8>();
       __shared__ uint8_t shmem[shmem_size];
 
-      hipcomp::template cascaded_decompression_fcn<
+      arcto::template cascaded_decompression_fcn<
           uint64_t,
           size_type,
           threadblock_size>(
@@ -282,7 +282,7 @@ __global__ void get_decompress_size_kernel(
 
 template <typename data_type>
 void cascaded_batched_compression_typed(
-    const hipcompBatchedCascadedOpts_t format_opts,
+    const arctoBatchedCascadedOpts_t format_opts,
     const void* const* device_uncompressed_ptrs,
     const size_t* device_uncompressed_bytes,
     size_t batch_size,
@@ -303,30 +303,30 @@ void cascaded_batched_compression_typed(
 
 } // namespace
 
-hipcompStatus_t hipcompBatchedCascadedCompressGetTempSize(
+arctoStatus_t arctoBatchedCascadedCompressGetTempSize(
     size_t batch_size,
     size_t max_uncompressed_chunk_bytes,
-    hipcompBatchedCascadedOpts_t format_opts,
+    arctoBatchedCascadedOpts_t format_opts,
     size_t* temp_bytes)
 {
 
   *temp_bytes = 0;
 
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedCascadedCompressGetMaxOutputChunkSize(
+arctoStatus_t arctoBatchedCascadedCompressGetMaxOutputChunkSize(
     size_t max_uncompressed_chunk_bytes,
-    hipcompBatchedCascadedOpts_t format_opts,
+    arctoBatchedCascadedOpts_t format_opts,
     size_t* max_compressed_bytes)
 {
 
   *max_compressed_bytes = roundUpTo(max_uncompressed_chunk_bytes, 4) + 8;
 
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedCascadedCompressAsync(
+arctoStatus_t arctoBatchedCascadedCompressAsync(
     const void* const* device_uncompressed_ptrs,
     const size_t* device_uncompressed_bytes,
     size_t max_uncompressed_chunk_bytes, // not used
@@ -335,11 +335,11 @@ hipcompStatus_t hipcompBatchedCascadedCompressAsync(
     size_t temp_bytes,     // not used
     void* const* device_compressed_ptrs,
     size_t* device_compressed_bytes,
-    const hipcompBatchedCascadedOpts_t format_opts,
+    const arctoBatchedCascadedOpts_t format_opts,
     hipStream_t stream)
 {
   try {
-    HIPCOMP_TYPE_ONE_SWITCH(
+    ARCTO_TYPE_ONE_SWITCH(
         format_opts.type,
         cascaded_batched_compression_typed,
         format_opts,
@@ -350,20 +350,20 @@ hipcompStatus_t hipcompBatchedCascadedCompressAsync(
         device_compressed_bytes,
         stream);
   } catch (const std::exception& e) {
-    return Check::exception_to_error(e, "hipcompBatchedCascadedCompressAsync()");
+    return Check::exception_to_error(e, "arctoBatchedCascadedCompressAsync()");
   }
 
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedCascadedDecompressGetTempSize(
+arctoStatus_t arctoBatchedCascadedDecompressGetTempSize(
     size_t num_chunks, size_t max_uncompressed_chunk_bytes, size_t* temp_bytes)
 {
   *temp_bytes = 0;
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedCascadedDecompressAsync(
+arctoStatus_t arctoBatchedCascadedDecompressAsync(
     const void* const* device_compressed_ptrs,
     const size_t* device_compressed_bytes,
     const size_t* device_uncompressed_bytes,
@@ -372,7 +372,7 @@ hipcompStatus_t hipcompBatchedCascadedDecompressAsync(
     void* const device_temp_ptr, // can be nullptr
     size_t temp_bytes,
     void* const* device_uncompressed_ptrs,
-    hipcompStatus_t* device_statuses,
+    arctoStatus_t* device_statuses,
     hipStream_t stream)
 {
   try {
@@ -429,13 +429,13 @@ hipcompStatus_t hipcompBatchedCascadedDecompressAsync(
     HipUtils::check_last_error();
   } catch (const std::exception& e) {
     return Check::exception_to_error(
-        e, "hipcompBatchedCascadedDecompressAsync()");
+        e, "arctoBatchedCascadedDecompressAsync()");
   }
 
-  return hipcompSuccess;
+  return arctoSuccess;
 }
 
-hipcompStatus_t hipcompBatchedCascadedGetDecompressSizeAsync(
+arctoStatus_t arctoBatchedCascadedGetDecompressSizeAsync(
     const void* const* device_compressed_ptrs,
     const size_t* device_compressed_bytes,
     size_t* device_uncompressed_bytes,
@@ -455,8 +455,8 @@ hipcompStatus_t hipcompBatchedCascadedGetDecompressSizeAsync(
     HipUtils::check_last_error();
   } catch (const std::exception& e) {
     return Check::exception_to_error(
-        e, "hipcompBatchedCascadedGetDecompressSizeAsync()");
+        e, "arctoBatchedCascadedGetDecompressSizeAsync()");
   }
 
-  return hipcompSuccess;
+  return arctoSuccess;
 }

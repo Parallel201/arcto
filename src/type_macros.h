@@ -47,8 +47,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef HIPCOMP_TYPEMACROS_H
-#define HIPCOMP_TYPEMACROS_H
+#ifndef ARCTO_TYPEMACROS_H
+#define ARCTO_TYPEMACROS_H
 
 #include <stdexcept>
 #include <string>
@@ -57,62 +57,62 @@
  * DEFINES ********************************************************************
  *****************************************************************************/
 
-#define HIPCOMP_TYPE_THREE_SWITCH_FIRST_ONLY(                                   \
+#define ARCTO_TYPE_THREE_SWITCH_FIRST_ONLY(                                   \
     type_var, second_type, third_arg, func, ...)                               \
   do {                                                                         \
     switch (type_var) {                                                        \
-    case HIPCOMP_TYPE_CHAR:                                                     \
+    case ARCTO_TYPE_CHAR:                                                     \
       func<int8_t, second_type, third_arg>(__VA_ARGS__);                       \
       break;                                                                   \
-    case HIPCOMP_TYPE_UCHAR:                                                    \
+    case ARCTO_TYPE_UCHAR:                                                    \
       func<uint8_t, second_type, third_arg>(__VA_ARGS__);                      \
       break;                                                                   \
-    case HIPCOMP_TYPE_SHORT:                                                    \
+    case ARCTO_TYPE_SHORT:                                                    \
       func<int16_t, second_type, third_arg>(__VA_ARGS__);                      \
       break;                                                                   \
-    case HIPCOMP_TYPE_USHORT:                                                   \
+    case ARCTO_TYPE_USHORT:                                                   \
       func<uint16_t, second_type, third_arg>(__VA_ARGS__);                     \
       break;                                                                   \
-    case HIPCOMP_TYPE_INT:                                                      \
+    case ARCTO_TYPE_INT:                                                      \
       func<int32_t, second_type, third_arg>(__VA_ARGS__);                      \
       break;                                                                   \
-    case HIPCOMP_TYPE_UINT:                                                     \
+    case ARCTO_TYPE_UINT:                                                     \
       func<uint32_t, second_type, third_arg>(__VA_ARGS__);                     \
       break;                                                                   \
-    case HIPCOMP_TYPE_LONGLONG:                                                 \
+    case ARCTO_TYPE_LONGLONG:                                                 \
       func<int64_t, second_type, third_arg>(__VA_ARGS__);                      \
       break;                                                                   \
-    case HIPCOMP_TYPE_ULONGLONG:                                                \
+    case ARCTO_TYPE_ULONGLONG:                                                \
       func<uint64_t, second_type, third_arg>(__VA_ARGS__);                     \
       break;                                                                   \
     }                                                                          \
   } while (0)
 
-#define HIPCOMP_TYPE_TWO_SWITCH_FIRST_ONLY(type_var, second_type, func, ...)    \
+#define ARCTO_TYPE_TWO_SWITCH_FIRST_ONLY(type_var, second_type, func, ...)    \
   do {                                                                         \
     switch (type_var) {                                                        \
-    case HIPCOMP_TYPE_CHAR:                                                     \
+    case ARCTO_TYPE_CHAR:                                                     \
       func<int8_t, second_type>(__VA_ARGS__);                                  \
       break;                                                                   \
-    case HIPCOMP_TYPE_UCHAR:                                                    \
+    case ARCTO_TYPE_UCHAR:                                                    \
       func<uint8_t, second_type>(__VA_ARGS__);                                 \
       break;                                                                   \
-    case HIPCOMP_TYPE_SHORT:                                                    \
+    case ARCTO_TYPE_SHORT:                                                    \
       func<int16_t, second_type>(__VA_ARGS__);                                 \
       break;                                                                   \
-    case HIPCOMP_TYPE_USHORT:                                                   \
+    case ARCTO_TYPE_USHORT:                                                   \
       func<uint16_t, second_type>(__VA_ARGS__);                                \
       break;                                                                   \
-    case HIPCOMP_TYPE_INT:                                                      \
+    case ARCTO_TYPE_INT:                                                      \
       func<int32_t, second_type>(__VA_ARGS__);                                 \
       break;                                                                   \
-    case HIPCOMP_TYPE_UINT:                                                     \
+    case ARCTO_TYPE_UINT:                                                     \
       func<uint32_t, second_type>(__VA_ARGS__);                                \
       break;                                                                   \
-    case HIPCOMP_TYPE_LONGLONG:                                                 \
+    case ARCTO_TYPE_LONGLONG:                                                 \
       func<int64_t, second_type>(__VA_ARGS__);                                 \
       break;                                                                   \
-    case HIPCOMP_TYPE_ULONGLONG:                                                \
+    case ARCTO_TYPE_ULONGLONG:                                                \
       func<uint64_t, second_type>(__VA_ARGS__);                                \
       break;                                                                   \
     default:                                                                   \
@@ -120,38 +120,38 @@
     }                                                                          \
   } while (0)
 
-#define HIPCOMP_TYPE_TWO_SWITCH(type1_var, type2_var, func, ...)                \
+#define ARCTO_TYPE_TWO_SWITCH(type1_var, type2_var, func, ...)                \
   do {                                                                         \
     switch (type2_var) {                                                       \
-    case HIPCOMP_TYPE_CHAR:                                                     \
-      HIPCOMP_TYPE_TWO_SWITCH_FIRST_ONLY(type1_var, int8_t, func, __VA_ARGS__); \
+    case ARCTO_TYPE_CHAR:                                                     \
+      ARCTO_TYPE_TWO_SWITCH_FIRST_ONLY(type1_var, int8_t, func, __VA_ARGS__); \
       break;                                                                   \
-    case HIPCOMP_TYPE_UCHAR:                                                    \
-      HIPCOMP_TYPE_TWO_SWITCH_FIRST_ONLY(                                       \
+    case ARCTO_TYPE_UCHAR:                                                    \
+      ARCTO_TYPE_TWO_SWITCH_FIRST_ONLY(                                       \
           type1_var, uint8_t, func, __VA_ARGS__);                              \
       break;                                                                   \
-    case HIPCOMP_TYPE_SHORT:                                                    \
-      HIPCOMP_TYPE_TWO_SWITCH_FIRST_ONLY(                                       \
+    case ARCTO_TYPE_SHORT:                                                    \
+      ARCTO_TYPE_TWO_SWITCH_FIRST_ONLY(                                       \
           type1_var, int16_t, func, __VA_ARGS__);                              \
       break;                                                                   \
-    case HIPCOMP_TYPE_USHORT:                                                   \
-      HIPCOMP_TYPE_TWO_SWITCH_FIRST_ONLY(                                       \
+    case ARCTO_TYPE_USHORT:                                                   \
+      ARCTO_TYPE_TWO_SWITCH_FIRST_ONLY(                                       \
           type1_var, uint16_t, func, __VA_ARGS__);                             \
       break;                                                                   \
-    case HIPCOMP_TYPE_INT:                                                      \
-      HIPCOMP_TYPE_TWO_SWITCH_FIRST_ONLY(                                       \
+    case ARCTO_TYPE_INT:                                                      \
+      ARCTO_TYPE_TWO_SWITCH_FIRST_ONLY(                                       \
           type1_var, int32_t, func, __VA_ARGS__);                              \
       break;                                                                   \
-    case HIPCOMP_TYPE_UINT:                                                     \
-      HIPCOMP_TYPE_TWO_SWITCH_FIRST_ONLY(                                       \
+    case ARCTO_TYPE_UINT:                                                     \
+      ARCTO_TYPE_TWO_SWITCH_FIRST_ONLY(                                       \
           type1_var, uint32_t, func, __VA_ARGS__);                             \
       break;                                                                   \
-    case HIPCOMP_TYPE_LONGLONG:                                                 \
-      HIPCOMP_TYPE_TWO_SWITCH_FIRST_ONLY(                                       \
+    case ARCTO_TYPE_LONGLONG:                                                 \
+      ARCTO_TYPE_TWO_SWITCH_FIRST_ONLY(                                       \
           type1_var, int64_t, func, __VA_ARGS__);                              \
       break;                                                                   \
-    case HIPCOMP_TYPE_ULONGLONG:                                                \
-      HIPCOMP_TYPE_TWO_SWITCH_FIRST_ONLY(                                       \
+    case ARCTO_TYPE_ULONGLONG:                                                \
+      ARCTO_TYPE_TWO_SWITCH_FIRST_ONLY(                                       \
           type1_var, uint64_t, func, __VA_ARGS__);                             \
       break;                                                                   \
     default:                                                                   \
@@ -159,88 +159,88 @@
     }                                                                          \
   } while (0)
 
-#define HIPCOMP_TYPE_TWO_SWITCH_FIRST_ONLY_RETURN(                              \
+#define ARCTO_TYPE_TWO_SWITCH_FIRST_ONLY_RETURN(                              \
     type_var, second_type, func, ...)                                          \
   do {                                                                         \
     switch (type_var) {                                                        \
-    case HIPCOMP_TYPE_CHAR:                                                     \
+    case ARCTO_TYPE_CHAR:                                                     \
       return func<int8_t, second_type>(__VA_ARGS__);                           \
-    case HIPCOMP_TYPE_UCHAR:                                                    \
+    case ARCTO_TYPE_UCHAR:                                                    \
       return func<uint8_t, second_type>(__VA_ARGS__);                          \
-    case HIPCOMP_TYPE_SHORT:                                                    \
+    case ARCTO_TYPE_SHORT:                                                    \
       return func<int16_t, second_type>(__VA_ARGS__);                          \
-    case HIPCOMP_TYPE_USHORT:                                                   \
+    case ARCTO_TYPE_USHORT:                                                   \
       return func<uint16_t, second_type>(__VA_ARGS__);                         \
-    case HIPCOMP_TYPE_INT:                                                      \
+    case ARCTO_TYPE_INT:                                                      \
       return func<int32_t, second_type>(__VA_ARGS__);                          \
-    case HIPCOMP_TYPE_UINT:                                                     \
+    case ARCTO_TYPE_UINT:                                                     \
       return func<uint32_t, second_type>(__VA_ARGS__);                         \
-    case HIPCOMP_TYPE_LONGLONG:                                                 \
+    case ARCTO_TYPE_LONGLONG:                                                 \
       return func<int64_t, second_type>(__VA_ARGS__);                          \
-    case HIPCOMP_TYPE_ULONGLONG:                                                \
+    case ARCTO_TYPE_ULONGLONG:                                                \
       return func<uint64_t, second_type>(__VA_ARGS__);                         \
     default:                                                                   \
       throw std::runtime_error("Unknown type: " + std::to_string(type_var));   \
     }                                                                          \
   } while (0)
 
-#define HIPCOMP_TYPE_TWO_SWITCH_RETURN(type1_var, type2_var, func, ...)         \
+#define ARCTO_TYPE_TWO_SWITCH_RETURN(type1_var, type2_var, func, ...)         \
   do {                                                                         \
     switch (type2_var) {                                                       \
-    case HIPCOMP_TYPE_CHAR:                                                     \
-      HIPCOMP_TYPE_TWO_SWITCH_FIRST_ONLY_RETURN(                                \
+    case ARCTO_TYPE_CHAR:                                                     \
+      ARCTO_TYPE_TWO_SWITCH_FIRST_ONLY_RETURN(                                \
           type1_var, int8_t, func, __VA_ARGS__);                               \
-    case HIPCOMP_TYPE_UCHAR:                                                    \
-      HIPCOMP_TYPE_TWO_SWITCH_FIRST_ONLY_RETURN(                                \
+    case ARCTO_TYPE_UCHAR:                                                    \
+      ARCTO_TYPE_TWO_SWITCH_FIRST_ONLY_RETURN(                                \
           type1_var, uint8_t, func, __VA_ARGS__);                              \
-    case HIPCOMP_TYPE_SHORT:                                                    \
-      HIPCOMP_TYPE_TWO_SWITCH_FIRST_ONLY_RETURN(                                \
+    case ARCTO_TYPE_SHORT:                                                    \
+      ARCTO_TYPE_TWO_SWITCH_FIRST_ONLY_RETURN(                                \
           type1_var, int16_t, func, __VA_ARGS__);                              \
-    case HIPCOMP_TYPE_USHORT:                                                   \
-      HIPCOMP_TYPE_TWO_SWITCH_FIRST_ONLY_RETURN(                                \
+    case ARCTO_TYPE_USHORT:                                                   \
+      ARCTO_TYPE_TWO_SWITCH_FIRST_ONLY_RETURN(                                \
           type1_var, uint16_t, func, __VA_ARGS__);                             \
-    case HIPCOMP_TYPE_INT:                                                      \
-      HIPCOMP_TYPE_TWO_SWITCH_FIRST_ONLY_RETURN(                                \
+    case ARCTO_TYPE_INT:                                                      \
+      ARCTO_TYPE_TWO_SWITCH_FIRST_ONLY_RETURN(                                \
           type1_var, int32_t, func, __VA_ARGS__);                              \
-    case HIPCOMP_TYPE_UINT:                                                     \
-      HIPCOMP_TYPE_TWO_SWITCH_FIRST_ONLY_RETURN(                                \
+    case ARCTO_TYPE_UINT:                                                     \
+      ARCTO_TYPE_TWO_SWITCH_FIRST_ONLY_RETURN(                                \
           type1_var, uint32_t, func, __VA_ARGS__);                             \
-    case HIPCOMP_TYPE_LONGLONG:                                                 \
-      HIPCOMP_TYPE_TWO_SWITCH_FIRST_ONLY_RETURN(                                \
+    case ARCTO_TYPE_LONGLONG:                                                 \
+      ARCTO_TYPE_TWO_SWITCH_FIRST_ONLY_RETURN(                                \
           type1_var, int64_t, func, __VA_ARGS__);                              \
-    case HIPCOMP_TYPE_ULONGLONG:                                                \
-      HIPCOMP_TYPE_TWO_SWITCH_FIRST_ONLY_RETURN(                                \
+    case ARCTO_TYPE_ULONGLONG:                                                \
+      ARCTO_TYPE_TWO_SWITCH_FIRST_ONLY_RETURN(                                \
           type1_var, uint64_t, func, __VA_ARGS__);                             \
     default:                                                                   \
       throw std::runtime_error("Unknown type: " + std::to_string(type2_var));  \
     }                                                                          \
   } while (0)
 
-#define HIPCOMP_TYPE_ONE_SWITCH(type_var, func, ...)                            \
+#define ARCTO_TYPE_ONE_SWITCH(type_var, func, ...)                            \
   do {                                                                         \
     switch (type_var) {                                                        \
-    case HIPCOMP_TYPE_CHAR:                                                     \
+    case ARCTO_TYPE_CHAR:                                                     \
       func<int8_t>(__VA_ARGS__);                                               \
       break;                                                                   \
-    case HIPCOMP_TYPE_UCHAR:                                                    \
+    case ARCTO_TYPE_UCHAR:                                                    \
       func<uint8_t>(__VA_ARGS__);                                              \
       break;                                                                   \
-    case HIPCOMP_TYPE_SHORT:                                                    \
+    case ARCTO_TYPE_SHORT:                                                    \
       func<int16_t>(__VA_ARGS__);                                              \
       break;                                                                   \
-    case HIPCOMP_TYPE_USHORT:                                                   \
+    case ARCTO_TYPE_USHORT:                                                   \
       func<uint16_t>(__VA_ARGS__);                                             \
       break;                                                                   \
-    case HIPCOMP_TYPE_INT:                                                      \
+    case ARCTO_TYPE_INT:                                                      \
       func<int32_t>(__VA_ARGS__);                                              \
       break;                                                                   \
-    case HIPCOMP_TYPE_UINT:                                                     \
+    case ARCTO_TYPE_UINT:                                                     \
       func<uint32_t>(__VA_ARGS__);                                             \
       break;                                                                   \
-    case HIPCOMP_TYPE_LONGLONG:                                                 \
+    case ARCTO_TYPE_LONGLONG:                                                 \
       func<int64_t>(__VA_ARGS__);                                              \
       break;                                                                   \
-    case HIPCOMP_TYPE_ULONGLONG:                                                \
+    case ARCTO_TYPE_ULONGLONG:                                                \
       func<uint64_t>(__VA_ARGS__);                                             \
       break;                                                                   \
     default:                                                                   \
@@ -248,24 +248,24 @@
     }                                                                          \
   } while (0)
 
-#define HIPCOMP_TYPE_ONE_SWITCH_RETURN(type_var, func, ...)                     \
+#define ARCTO_TYPE_ONE_SWITCH_RETURN(type_var, func, ...)                     \
   do {                                                                         \
     switch (type_var) {                                                        \
-    case HIPCOMP_TYPE_CHAR:                                                     \
+    case ARCTO_TYPE_CHAR:                                                     \
       return func<int8_t>(__VA_ARGS__);                                        \
-    case HIPCOMP_TYPE_UCHAR:                                                    \
+    case ARCTO_TYPE_UCHAR:                                                    \
       return func<uint8_t>(__VA_ARGS__);                                       \
-    case HIPCOMP_TYPE_SHORT:                                                    \
+    case ARCTO_TYPE_SHORT:                                                    \
       return func<int16_t>(__VA_ARGS__);                                       \
-    case HIPCOMP_TYPE_USHORT:                                                   \
+    case ARCTO_TYPE_USHORT:                                                   \
       return func<uint16_t>(__VA_ARGS__);                                      \
-    case HIPCOMP_TYPE_INT:                                                      \
+    case ARCTO_TYPE_INT:                                                      \
       return func<int32_t>(__VA_ARGS__);                                       \
-    case HIPCOMP_TYPE_UINT:                                                     \
+    case ARCTO_TYPE_UINT:                                                     \
       return func<uint32_t>(__VA_ARGS__);                                      \
-    case HIPCOMP_TYPE_LONGLONG:                                                 \
+    case ARCTO_TYPE_LONGLONG:                                                 \
       return func<int64_t>(__VA_ARGS__);                                       \
-    case HIPCOMP_TYPE_ULONGLONG:                                                \
+    case ARCTO_TYPE_ULONGLONG:                                                \
       return func<uint64_t>(__VA_ARGS__);                                      \
     default:                                                                   \
       throw std::runtime_error("Unknown type: " + std::to_string(type_var));   \

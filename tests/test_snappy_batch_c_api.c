@@ -50,7 +50,7 @@
 #define CRASH_SAFE
 #define SUPPORT_NULLPTR_APIS
 
-#include "hipcomp/snappy.h"
+#include "arcto/snappy.h"
 #include "test_batch_c_api.h"
 
 GENERATE_TESTS(Snappy);

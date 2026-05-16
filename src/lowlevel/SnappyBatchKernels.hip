@@ -52,7 +52,7 @@
 #include "snappy/decompression.hiph"
 #include "HipUtils.h"
 
-namespace hipcomp {
+namespace arcto {
 
 /**
  * @brief Snappy compression kernel
@@ -147,7 +147,7 @@ __global__ void __launch_bounds__(DECOMP_THREADS_PER_BLOCK) unsnap_kernel(
     const uint64_t* __restrict__ device_in_bytes,
     void* const* __restrict__ device_out_ptr,
     const uint64_t* __restrict__ device_out_available_bytes,
-    hipcompStatus_t* const __restrict__ outputs,
+    arctoStatus_t* const __restrict__ outputs,
     uint64_t* __restrict__ device_out_bytes)
 {
   const int ix_chunk = blockIdx.x;
@@ -182,7 +182,7 @@ void gpu_unsnap(
     const size_t* device_in_bytes,
     void* const* device_out_ptr,
     const size_t* device_out_available_bytes,
-    hipcompStatus_t* outputs,
+    arctoStatus_t* outputs,
     size_t* device_out_bytes,
     int count,
     hipStream_t stream)
@@ -212,4 +212,4 @@ void gpu_get_uncompressed_sizes(
   HipUtils::check_last_error("Failed to run Snappy kernel gpu_get_uncompressed_sizes");
 }
 
-} // hipcomp namespace
+} // arcto namespace

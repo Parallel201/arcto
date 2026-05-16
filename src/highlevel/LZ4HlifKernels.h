@@ -49,17 +49,17 @@
 
 #pragma once
 
-#include "hipcomp_common_deps/hlif_shared_types.hpp"
+#include "arcto_common_deps/hlif_shared_types.hpp"
 
 #include "LZ4Types.h"
 
-namespace hipcomp {
+namespace arcto {
 
 void lz4HlifBatchCompress(
     const CompressArgs& compress_args,
     const position_type hash_table_size,
     const uint32_t max_ctas,
-    hipcompType_t data_type,
+    arctoType_t data_type,
     hipStream_t stream);
 
 void lz4HlifBatchDecompress(
@@ -72,10 +72,10 @@ void lz4HlifBatchDecompress(
     const size_t* comp_chunk_sizes,
     const uint32_t max_ctas,
     hipStream_t stream,
-    hipcompStatus_t* output_status);
+    arctoStatus_t* output_status);
 
-size_t batchedLZ4DecompMaxBlockOccupancy(hipcompType_t data_type, const int device_id);
+size_t batchedLZ4DecompMaxBlockOccupancy(arctoType_t data_type, const int device_id);
 
-size_t batchedLZ4CompMaxBlockOccupancy(hipcompType_t data_type, const int device_id);
+size_t batchedLZ4CompMaxBlockOccupancy(arctoType_t data_type, const int device_id);
 
-} // namespace hipcomp
+} // namespace arcto

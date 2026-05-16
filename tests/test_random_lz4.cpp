@@ -54,7 +54,7 @@
 #endif
 
 #include "test_common.h"
-#include "hipcomp/lz4.hpp"
+#include "arcto/lz4.hpp"
 
 // Test method that takes an input data, compresses it (on the CPU),
 // decompresses it on the GPU, and verifies it is correct.
@@ -62,7 +62,7 @@
 template <typename T>
 void test_lz4(const std::vector<T>& data, size_t /*chunk_size*/)
 {
-  const hipcompType_t type = hipcomp::TypeOf<T>();
+  const arctoType_t type = arcto::TypeOf<T>();
 
   size_t chunk_size = 1 << 16;
 
@@ -96,7 +96,7 @@ void test_lz4(const std::vector<T>& data, size_t /*chunk_size*/)
     HIP_CHECK(
         hipMemcpy(d_in_data, data.data(), in_bytes, hipMemcpyHostToDevice));
 
-    LZ4Manager lz4_manager(chunk_size, HIPCOMP_TYPE_CHAR, stream);
+    LZ4Manager lz4_manager(chunk_size, ARCTO_TYPE_CHAR, stream);
     
     auto comp_config = lz4_manager.configure_compression(in_bytes);
     HIP_CHECK(hipMalloc(&d_comp_out, comp_config.max_compressed_buffer_size));
@@ -125,7 +125,7 @@ void test_lz4(const std::vector<T>& data, size_t /*chunk_size*/)
     // the compressed data and the stream is passed
     // between compression and decompression
 
-    LZ4Manager lz4_manager(chunk_size, HIPCOMP_TYPE_CHAR, stream);
+    LZ4Manager lz4_manager(chunk_size, ARCTO_TYPE_CHAR, stream);
     
     auto decomp_config = lz4_manager.configure_decompression(d_comp_out);
 
