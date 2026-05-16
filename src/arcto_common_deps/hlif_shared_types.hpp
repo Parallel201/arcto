@@ -62,7 +62,13 @@ enum FormatType : uint8_t {
   GDeflate = 3,
   Cascaded = 4,
   Bitcomp = 5,
-  NotSupportedError = 6  
+  // ZFP is accessed through the direct single-cube API
+  // (arctoZFP3DCompressAsync / arctoZFP3DDecompressAsync); its on-disk
+  // format does not embed a CommonHeader, so the create_manager factory
+  // cannot autodetect a ZFP buffer. The enum entry is reserved for
+  // future use if the format is unified.
+  ZFP = 6,
+  NotSupportedError = 7
 };
 
 struct CommonHeader {

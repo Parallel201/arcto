@@ -57,8 +57,10 @@
 #include "arcto/gdeflate.hpp"
 #include "arcto/cascaded.hpp"
 #include "arcto/bitcomp.hpp"
+#include "arcto/zfp.hpp"
 #include "arcto_common_deps/hlif_shared_types.hpp"
 #include "HipUtils.h"
+#include "highlevel/ZFPManager.hpp"
 
 namespace arcto {
 
@@ -136,6 +138,21 @@ std::shared_ptr<arctoManagerBase> create_manager(const uint8_t* comp_buffer, hip
       assert(cpu_common_header.uncomp_chunk_size == format_spec.options.chunk_size);
 
       res = std::make_shared<CascadedManager>(format_spec.options, stream, device_id);
+      break;
+    }
+    case FormatType::ZFP:
+    {
+      // Reserved for a future BatchManager<ZFPFormatSpecHeader> integration.
+      // The current ZFP on-disk format does not embed a CommonHeader, so a
+      // buffer that reaches this case is misconfigured; route through the
+      // ZFPManager whose constructor throws with a clear message pointing
+      // callers to the direct arctoZFP3DCompressAsync entry point.
+      res = std::make_shared<ZFPManager>(
+          ARCTO_ZFP_MODE_FIXED_RATE,
+          ARCTO_ZFP_DIM_3D,
+          0.0,
+          0u, 0u, 0u,
+          stream, device_id);
       break;
     }
     case FormatType::NotSupportedError:
