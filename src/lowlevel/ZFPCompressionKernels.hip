@@ -51,10 +51,21 @@ constexpr int      kThreadsPerChunkCTA = 256;
 constexpr uint32_t kZfpHeaderBytes     = 8;   // 1D / REVERSIBLE
 constexpr uint32_t kZfpHeader3DBytes   = 24;  // FIXED_RATE_3D
 constexpr uint32_t kZfpFormatVersion   = 1;
-constexpr uint8_t  kZfpModeReversible  = 0;
-constexpr uint8_t  kZfpModeFixedRate   = 1;
-constexpr uint8_t  kZfpDimLinear       = 0;  // back-compat: legacy 1D blocks
-constexpr uint8_t  kZfpDim3D           = 3;  // 3D cube with header-embedded shape
+constexpr uint8_t  kZfpModeReversible    = 0;
+constexpr uint8_t  kZfpModeFixedRate     = 1;
+constexpr uint8_t  kZfpModeReversible3D  = 2;
+constexpr uint8_t  kZfpDimLinear         = 0;  // back-compat: legacy 1D blocks
+constexpr uint8_t  kZfpDim3D             = 3;  // 3D cube with header-embedded shape
+
+// REVERSIBLE_3D-specific: BFP scaling with kZfpEbiasReversible enough
+// headroom that the REV lift's bit growth stays inside int64, and the cast
+// (float * 2^(ebias - emax)) preserves float32 mantissa precision.
+// kZfpEbiasReversible = 30 → scaled magnitude up to 2^30, lift growth ~5
+// bits → ~2^35 (safe within int64). Float32 has 23 explicit mantissa bits
+// so 30 - 23 = 7 bits of representational headroom for sign + sub-LSB.
+constexpr int kZfpEbiasReversible = 30;
+constexpr uint32_t kZfpHeader3DRevExtra = 8;  // 8 extra bytes after the 24-byte 3D header
+                                              // (1 byte K_global, 1 byte mode flags, 6 reserved)
 
 // -- REVERSIBLE -------------------------------------------------------------
 constexpr uint32_t kZfpReversiblePreambleBytes = 4;
@@ -249,6 +260,133 @@ __device__ __forceinline__ uint32_t zfp_int_to_negabinary(int32_t x)
 __device__ __forceinline__ int32_t zfp_negabinary_to_int(uint32_t x)
 {
   return static_cast<int32_t>((x ^ 0xAAAAAAAAu) - 0xAAAAAAAAu);
+}
+
+// int64 variants for REVERSIBLE_3D (need more bits to preserve float32
+// precision through the lift transform without truncation).
+__device__ __forceinline__ uint64_t zfp_int_to_negabinary64(int64_t x)
+{
+  return (static_cast<uint64_t>(x) + 0xAAAAAAAAAAAAAAAAull)
+       ^ 0xAAAAAAAAAAAAAAAAull;
+}
+
+__device__ __forceinline__ int64_t zfp_negabinary_to_int64(uint64_t x)
+{
+  return static_cast<int64_t>((x ^ 0xAAAAAAAAAAAAAAAAull)
+                            -  0xAAAAAAAAAAAAAAAAull);
+}
+
+__device__ __forceinline__ int bits64_for_max(uint64_t m)
+{
+  if (m == 0) return 0;
+  // 64 - clzll(m). HIP exposes __clzll for int64.
+  return 64 - __clzll(static_cast<long long>(m));
+}
+
+// ZFP reversible (strictly invertible) integer lift on a 4-vector with
+// stride s. Verified by forward/inverse pair on small examples — the >>1
+// truncation is undone by the matching inverse because the lift uses
+// the SAME shifted value on both sides.
+__device__ __forceinline__ void zfp_rev_fwd_lift64(int64_t* p, int s)
+{
+  int64_t x = p[0*s], y = p[1*s], z = p[2*s], w = p[3*s];
+  w -= x;
+  z -= y;
+  y -= (w >> 1);
+  x -= (z >> 1);
+  y += x;
+  z += w;
+  p[0*s] = x; p[1*s] = y; p[2*s] = z; p[3*s] = w;
+}
+
+__device__ __forceinline__ void zfp_rev_inv_lift64(int64_t* p, int s)
+{
+  int64_t x = p[0*s], y = p[1*s], z = p[2*s], w = p[3*s];
+  z -= w;
+  y -= x;
+  x += (z >> 1);
+  y += (w >> 1);
+  z += y;
+  w += x;
+  p[0*s] = x; p[1*s] = y; p[2*s] = z; p[3*s] = w;
+}
+
+__device__ static void zfp_rev_fwd_xform_3d64(int64_t b[kZfpValuesPerBlock])
+{
+  #pragma unroll
+  for (int z = 0; z < 4; z++)
+    #pragma unroll
+    for (int y = 0; y < 4; y++)
+      zfp_rev_fwd_lift64(b + 16*z + 4*y, 1);
+  #pragma unroll
+  for (int z = 0; z < 4; z++)
+    #pragma unroll
+    for (int x = 0; x < 4; x++)
+      zfp_rev_fwd_lift64(b + 16*z + x, 4);
+  #pragma unroll
+  for (int y = 0; y < 4; y++)
+    #pragma unroll
+    for (int x = 0; x < 4; x++)
+      zfp_rev_fwd_lift64(b + 4*y + x, 16);
+}
+
+__device__ static void zfp_rev_inv_xform_3d64(int64_t b[kZfpValuesPerBlock])
+{
+  // Reverse axis order.
+  #pragma unroll
+  for (int y = 0; y < 4; y++)
+    #pragma unroll
+    for (int x = 0; x < 4; x++)
+      zfp_rev_inv_lift64(b + 4*y + x, 16);
+  #pragma unroll
+  for (int z = 0; z < 4; z++)
+    #pragma unroll
+    for (int x = 0; x < 4; x++)
+      zfp_rev_inv_lift64(b + 16*z + x, 4);
+  #pragma unroll
+  for (int z = 0; z < 4; z++)
+    #pragma unroll
+    for (int y = 0; y < 4; y++)
+      zfp_rev_inv_lift64(b + 16*z + 4*y, 1);
+}
+
+// BFP cast to int64 with kZfpEbiasReversible-bit scale. Lossless for any
+// finite float32 input whose binary exponent fits in [-127, 127].
+__device__ static void zfp_rev_fwd_cast64(
+    const float src[kZfpValuesPerBlock],
+    int64_t     dst[kZfpValuesPerBlock],
+    int         emax)
+{
+  if (emax == INT_MIN) {
+    #pragma unroll
+    for (int i = 0; i < kZfpValuesPerBlock; i++) dst[i] = 0;
+    return;
+  }
+  const double scale = ldexp(1.0, kZfpEbiasReversible - emax);
+  #pragma unroll
+  for (int i = 0; i < kZfpValuesPerBlock; i++) {
+    const float f = src[i];
+    if (!isfinite(f)) { dst[i] = 0; continue; }
+    const double s = static_cast<double>(f) * scale;
+    dst[i] = static_cast<int64_t>(llround(s));
+  }
+}
+
+__device__ static void zfp_rev_inv_cast64(
+    const int64_t src[kZfpValuesPerBlock],
+    float         dst[kZfpValuesPerBlock],
+    int           emax)
+{
+  if (emax == INT_MIN) {
+    #pragma unroll
+    for (int i = 0; i < kZfpValuesPerBlock; i++) dst[i] = 0.0f;
+    return;
+  }
+  const double scale = ldexp(1.0, emax - kZfpEbiasReversible);
+  #pragma unroll
+  for (int i = 0; i < kZfpValuesPerBlock; i++) {
+    dst[i] = static_cast<float>(static_cast<double>(src[i]) * scale);
+  }
 }
 
 // ===========================================================================
@@ -852,6 +990,353 @@ __global__ void zfp_get_decompress_size_3d_kernel(
 }
 
 // ===========================================================================
+// REVERSIBLE_3D (Phase 1d): block-FP + ZFP REV lift + per-cube global K
+// Output format (32 byte header + per-block emax + global-K packed body):
+//   bytes 0-3:   actual_uncomp_size (= nx*ny*nz*sizeof(float))
+//   byte  4:     unused
+//   byte  5:     version
+//   byte  6:     mode = REVERSIBLE_3D
+//   byte  7:     dim = 3
+//   bytes 8-23:  nx, ny, nz, reserved
+//   byte  24:    K_global (1..64)
+//   bytes 25-27: flags / reserved (always 0)
+//   bytes 28-31: num_blocks (uint32)
+//   bytes 32..32+num_blocks-1:      per-block int8 emax
+//   bytes 32+num_blocks..:          K_global * 8 bytes packed per block
+//
+// Two kernel passes: pass 1 reduces K_global via atomicMax and stores the
+// per-block emax; pass 2 re-runs the BFP+lift+negabinary pipeline and packs
+// each block's K_global*64 bits at deterministic offsets.
+// ===========================================================================
+
+__device__ static void zfp_rev3d_load_transform(
+    const uint8_t* in_cube,
+    uint32_t nx, uint32_t ny, uint32_t nz,
+    uint32_t bx, uint32_t by, uint32_t bz,
+    uint64_t neg[kZfpValuesPerBlock],
+    int& emax)
+{
+  float v[kZfpValuesPerBlock];
+  #pragma unroll
+  for (int dz = 0; dz < 4; dz++) {
+    #pragma unroll
+    for (int dy = 0; dy < 4; dy++) {
+      #pragma unroll
+      for (int dx = 0; dx < 4; dx++) {
+        const uint32_t x = bx * 4u + dx;
+        const uint32_t y = by * 4u + dy;
+        const uint32_t z = bz * 4u + dz;
+        const int idx = 16 * dz + 4 * dy + dx;
+        if (x < nx && y < ny && z < nz) {
+          const size_t lin = (static_cast<size_t>(z) * ny + y) * nx + x;
+          float f;
+          std::memcpy(&f, in_cube + lin * sizeof(float), sizeof(float));
+          v[idx] = f;
+        } else {
+          v[idx] = 0.0f;
+        }
+      }
+    }
+  }
+
+  emax = zfp_compute_emax(v);
+
+  int64_t aligned[kZfpValuesPerBlock];
+  zfp_rev_fwd_cast64(v, aligned, emax);
+  zfp_rev_fwd_xform_3d64(aligned);
+
+  #pragma unroll
+  for (int i = 0; i < kZfpValuesPerBlock; i++) {
+    neg[i] = zfp_int_to_negabinary64(aligned[i]);
+  }
+}
+
+__device__ static void zfp_rev3d_inv_transform_store(
+    const uint64_t neg[kZfpValuesPerBlock],
+    int emax,
+    uint8_t* out_cube,
+    uint32_t nx, uint32_t ny, uint32_t nz,
+    uint32_t bx, uint32_t by, uint32_t bz)
+{
+  int64_t aligned[kZfpValuesPerBlock];
+  #pragma unroll
+  for (int i = 0; i < kZfpValuesPerBlock; i++) {
+    aligned[i] = zfp_negabinary_to_int64(neg[i]);
+  }
+  zfp_rev_inv_xform_3d64(aligned);
+
+  float v[kZfpValuesPerBlock];
+  zfp_rev_inv_cast64(aligned, v, emax);
+
+  #pragma unroll
+  for (int dz = 0; dz < 4; dz++) {
+    #pragma unroll
+    for (int dy = 0; dy < 4; dy++) {
+      #pragma unroll
+      for (int dx = 0; dx < 4; dx++) {
+        const uint32_t x = bx * 4u + dx;
+        const uint32_t y = by * 4u + dy;
+        const uint32_t z = bz * 4u + dz;
+        if (x < nx && y < ny && z < nz) {
+          const int idx = 16 * dz + 4 * dy + dx;
+          const size_t lin = (static_cast<size_t>(z) * ny + y) * nx + x;
+          std::memcpy(out_cube + lin * sizeof(float), &v[idx], sizeof(float));
+        }
+      }
+    }
+  }
+}
+
+// Pack the LOW K bits of each negabinary coefficient. (For lossless, we
+// need ALL bits — K_global is set to bits64_for_max across the cube, so
+// no information is dropped.) Total packed bytes per block = K * 8.
+__device__ static void zfp_rev3d_pack_bits(
+    const uint64_t neg[kZfpValuesPerBlock],
+    int K, // 0..64
+    uint8_t* out_bits)
+{
+  // We pack K bits per coefficient, low-order first. Use a 64-bit
+  // accumulator and flush bytes as it overflows.
+  uint64_t acc = 0;
+  int      acc_bits = 0;
+  int      byte_idx = 0;
+  const uint64_t mask = (K >= 64) ? ~uint64_t(0) : ((uint64_t(1) << K) - 1);
+  #pragma unroll
+  for (int i = 0; i < kZfpValuesPerBlock; i++) {
+    const uint64_t lo = neg[i] & mask;
+    // Insert into acc at position acc_bits. May straddle a 64-bit boundary.
+    acc |= (lo << acc_bits);
+    int produced = (acc_bits + K >= 64) ? (64 - acc_bits) : K;
+    if (acc_bits + K < 64) {
+      acc_bits += K;
+    } else {
+      // Flush 8 bytes of acc
+      for (int b = 0; b < 8; b++) out_bits[byte_idx++] = static_cast<uint8_t>(acc >> (8 * b));
+      // Remaining K - produced bits go into a fresh acc
+      acc = (K > produced) ? (lo >> produced) : 0;
+      acc_bits = K - produced;
+    }
+  }
+  // Flush remaining bytes (ceil(acc_bits/8))
+  while (acc_bits > 0) {
+    out_bits[byte_idx++] = static_cast<uint8_t>(acc & 0xffu);
+    acc >>= 8;
+    acc_bits -= 8;
+  }
+}
+
+__device__ static void zfp_rev3d_unpack_bits(
+    const uint8_t* in_bits,
+    int K,
+    uint64_t neg[kZfpValuesPerBlock])
+{
+  uint64_t acc = 0;
+  int      acc_bits = 0;
+  int      byte_idx = 0;
+  const uint64_t mask = (K >= 64) ? ~uint64_t(0) : ((uint64_t(1) << K) - 1);
+  #pragma unroll
+  for (int i = 0; i < kZfpValuesPerBlock; i++) {
+    while (acc_bits < K) {
+      acc |= (static_cast<uint64_t>(in_bits[byte_idx++]) << acc_bits);
+      acc_bits += 8;
+      if (acc_bits >= 64) {
+        // 64-bit acc full; grab K bits worth, save spill into next round
+        const uint64_t lo = acc & mask;
+        neg[i] = lo;
+        const int produced = K;
+        acc = 0; acc_bits = 0;
+        // Bytes already consumed; subsequent K bits come from next bytes.
+        // (Simpler: handled by the outer loop's acc_bits<K check.)
+        goto next_i;
+      }
+    }
+    {
+      const uint64_t lo = acc & mask;
+      neg[i] = lo;
+      acc      >>= K;
+      acc_bits  -= K;
+    }
+    next_i:;
+  }
+}
+
+__device__ __forceinline__ uint32_t* rev3d_K_slot(uint8_t* out) {
+  // bytes 24..27 of the header, used as the atomicMax target.
+  return reinterpret_cast<uint32_t*>(out + 24);
+}
+
+__global__ void zfp_rev3d_compute_K_kernel(
+    const uint8_t* __restrict__ in_cube,
+    uint32_t nx, uint32_t ny, uint32_t nz,
+    uint8_t* __restrict__ out,
+    uint64_t num_blocks)
+{
+  const uint64_t gid    = static_cast<uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const uint64_t stride = static_cast<uint64_t>(gridDim.x) * blockDim.x;
+  const uint32_t bx_count = div_ceil_4(nx);
+  const uint32_t by_count = div_ceil_4(ny);
+
+  // Thread 0 writes the fixed header bytes (skip K slot 24..27 — it was
+  // memset to 0 by the host launcher and is updated below by atomicMax).
+  if (gid == 0) {
+    store_u32_le(out + 0, nx * ny * nz * static_cast<uint32_t>(sizeof(float)));
+    out[4] = 0;
+    out[5] = static_cast<uint8_t>(kZfpFormatVersion);
+    out[6] = kZfpModeReversible3D;
+    out[7] = kZfpDim3D;
+    store_u32_le(out +  8, nx);
+    store_u32_le(out + 12, ny);
+    store_u32_le(out + 16, nz);
+    store_u32_le(out + 20, 0);
+    store_u32_le(out + 28, static_cast<uint32_t>(num_blocks));
+  }
+
+  uint8_t* per_block_emax = out + kZfpHeader3DBytes + kZfpHeader3DRevExtra;
+
+  for (uint64_t b = gid; b < num_blocks; b += stride) {
+    const uint32_t bx = static_cast<uint32_t>(b % bx_count);
+    const uint32_t by = static_cast<uint32_t>((b / bx_count) % by_count);
+    const uint32_t bz = static_cast<uint32_t>(b / (static_cast<uint64_t>(bx_count) * by_count));
+
+    uint64_t neg[kZfpValuesPerBlock];
+    int      emax;
+    zfp_rev3d_load_transform(in_cube, nx, ny, nz, bx, by, bz, neg, emax);
+
+    uint64_t block_max = 0;
+    #pragma unroll
+    for (int i = 0; i < kZfpValuesPerBlock; i++) {
+      if (neg[i] > block_max) block_max = neg[i];
+    }
+    const int K_block = bits64_for_max(block_max);
+    atomicMax(rev3d_K_slot(out), static_cast<uint32_t>(K_block));
+
+    int8_t emax_byte;
+    if (emax == INT_MIN)        emax_byte = -128;
+    else if (emax >  127)       emax_byte =  127;
+    else if (emax < -127)       emax_byte = -127;
+    else                        emax_byte = static_cast<int8_t>(emax);
+    per_block_emax[b] = static_cast<uint8_t>(emax_byte);
+  }
+}
+
+__global__ void zfp_rev3d_pack_kernel(
+    const uint8_t* __restrict__ in_cube,
+    uint8_t* __restrict__ out,
+    size_t out_capacity,
+    size_t* __restrict__ out_size,
+    uint64_t num_blocks)
+{
+  const uint32_t nx = load_u32_le(out +  8);
+  const uint32_t ny = load_u32_le(out + 12);
+  const uint32_t nz = load_u32_le(out + 16);
+  const uint32_t K  = load_u32_le(out + 24);
+  const uint32_t bx_count = div_ceil_4(nx);
+  const uint32_t by_count = div_ceil_4(ny);
+
+  const size_t header_total = kZfpHeader3DBytes + kZfpHeader3DRevExtra;
+  const size_t emax_bytes   = num_blocks; // 1 byte per block
+  const size_t bytes_per_block_body = static_cast<size_t>(K) * 8u; // K * 64 / 8
+  const size_t total = header_total + emax_bytes + num_blocks * bytes_per_block_body;
+
+  const uint64_t gid    = static_cast<uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const uint64_t stride = static_cast<uint64_t>(gridDim.x) * blockDim.x;
+
+  if (gid == 0) {
+    *out_size = (total <= out_capacity) ? total : 0;
+  }
+
+  if (total > out_capacity) return;
+
+  uint8_t* const body_packed = out + header_total + emax_bytes;
+  for (uint64_t b = gid; b < num_blocks; b += stride) {
+    const uint32_t bx = static_cast<uint32_t>(b % bx_count);
+    const uint32_t by = static_cast<uint32_t>((b / bx_count) % by_count);
+    const uint32_t bz = static_cast<uint32_t>(b / (static_cast<uint64_t>(bx_count) * by_count));
+
+    uint64_t neg[kZfpValuesPerBlock];
+    int      unused_emax;
+    zfp_rev3d_load_transform(in_cube, nx, ny, nz, bx, by, bz, neg, unused_emax);
+
+    zfp_rev3d_pack_bits(neg, static_cast<int>(K),
+                        body_packed + b * bytes_per_block_body);
+  }
+}
+
+__global__ void zfp_rev3d_decompress_kernel(
+    const uint8_t* __restrict__ in,
+    size_t in_size,
+    uint8_t* __restrict__ out_cube,
+    size_t out_capacity,
+    size_t* __restrict__ actual_out_size,
+    arctoStatus_t* __restrict__ status)
+{
+  const uint64_t gid    = static_cast<uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const uint64_t stride = static_cast<uint64_t>(gridDim.x) * blockDim.x;
+
+  if (in_size < kZfpHeader3DBytes + kZfpHeader3DRevExtra
+   || in[5] != kZfpFormatVersion
+   || in[6] != kZfpModeReversible3D
+   || in[7] != kZfpDim3D) {
+    if (gid == 0) {
+      if (status)          *status          = arctoErrorCannotDecompress;
+      if (actual_out_size) *actual_out_size = 0;
+    }
+    return;
+  }
+
+  const uint32_t actual_size = load_u32_le(in + 0);
+  const uint32_t nx          = load_u32_le(in +  8);
+  const uint32_t ny          = load_u32_le(in + 12);
+  const uint32_t nz          = load_u32_le(in + 16);
+  const uint32_t K           = load_u32_le(in + 24);
+  const uint32_t num_blocks  = load_u32_le(in + 28);
+
+  if (actual_size > out_capacity || K < 1 || K > 64) {
+    if (gid == 0) {
+      if (status)          *status          = arctoErrorCannotDecompress;
+      if (actual_out_size) *actual_out_size = 0;
+    }
+    return;
+  }
+
+  const uint32_t bx_count = div_ceil_4(nx);
+  const uint32_t by_count = div_ceil_4(ny);
+  const size_t bytes_per_block_body = static_cast<size_t>(K) * 8u;
+  const size_t header_total = kZfpHeader3DBytes + kZfpHeader3DRevExtra;
+  const size_t expected = header_total + num_blocks + num_blocks * bytes_per_block_body;
+  if (in_size < expected) {
+    if (gid == 0) {
+      if (status)          *status          = arctoErrorCannotDecompress;
+      if (actual_out_size) *actual_out_size = 0;
+    }
+    return;
+  }
+
+  const uint8_t* per_block_emax = in + header_total;
+  const uint8_t* body_packed    = per_block_emax + num_blocks;
+
+  for (uint64_t b = gid; b < num_blocks; b += stride) {
+    const uint32_t bx = static_cast<uint32_t>(b % bx_count);
+    const uint32_t by = static_cast<uint32_t>((b / bx_count) % by_count);
+    const uint32_t bz = static_cast<uint32_t>(b / (static_cast<uint64_t>(bx_count) * by_count));
+
+    uint64_t neg[kZfpValuesPerBlock];
+    zfp_rev3d_unpack_bits(body_packed + b * bytes_per_block_body,
+                          static_cast<int>(K), neg);
+
+    const int8_t emax_byte = static_cast<int8_t>(per_block_emax[b]);
+    const int    emax      = (emax_byte == -128) ? INT_MIN : static_cast<int>(emax_byte);
+
+    zfp_rev3d_inv_transform_store(neg, emax, out_cube, nx, ny, nz, bx, by, bz);
+  }
+
+  if (gid == 0) {
+    if (status)          *status          = arctoSuccess;
+    if (actual_out_size) *actual_out_size = actual_size;
+  }
+}
+
+// ===========================================================================
 // Unified decompress kernel: reads the mode byte from each chunk header and
 // dispatches. All threads of a CTA process the same chunk, so the dispatch
 // branch is uniform across the warp.
@@ -1052,8 +1537,6 @@ size_t zfpComputeMaxSize(size_t chunk_size, arctoBatchedZFPOpts_t opts)
 
 size_t zfp3DComputeMaxOutputSize(arctoBatchedZFPOpts_t opts)
 {
-  // Only FIXED_RATE is supported in this entry point.
-  const int K = clamp_rate(opts.param);
   const uint32_t nx = opts.shape[0];
   const uint32_t ny = opts.shape[1];
   const uint32_t nz = opts.shape[2];
@@ -1061,6 +1544,17 @@ size_t zfp3DComputeMaxOutputSize(arctoBatchedZFPOpts_t opts)
       static_cast<size_t>((nx + 3u) / 4u)
     * static_cast<size_t>((ny + 3u) / 4u)
     * static_cast<size_t>((nz + 3u) / 4u);
+
+  if (opts.mode == ARCTO_ZFP_MODE_REVERSIBLE_3D) {
+    // Worst case: K_global == 64 (all bit-planes used). Per-block payload
+    // = 1 emax + 64 * 8 = 513 bytes. Plus the 32-byte header and the
+    // num_blocks-byte emax array (counted in the 1 above is per block).
+    return kZfpHeader3DBytes + kZfpHeader3DRevExtra
+         + num_blocks * (1u /*emax*/ + 64u * 8u /*K_max body*/);
+  }
+
+  // FIXED_RATE: deterministic, fixed per-block size.
+  const int K = clamp_rate(opts.param);
   const size_t per_block_out = 1 + static_cast<size_t>((K * kZfpValuesPerBlock + 7) / 8);
   return kZfpHeader3DBytes + num_blocks * per_block_out;
 }
@@ -1073,7 +1567,6 @@ void zfp3DCompress(
     size_t* device_output_size,
     hipStream_t stream)
 {
-  const int      K  = clamp_rate(opts.param);
   const uint32_t nx = opts.shape[0];
   const uint32_t ny = opts.shape[1];
   const uint32_t nz = opts.shape[2];
@@ -1083,13 +1576,28 @@ void zfp3DCompress(
     * static_cast<uint64_t>((ny + 3u) / 4u)
     * static_cast<uint64_t>((nz + 3u) / 4u);
 
-  // One thread per block, grid-strided. Cap grid at something reasonable
-  // so very large cubes don't try to launch millions of CTAs.
   const unsigned threads_per_cta = kThreadsPerChunkCTA;
   const uint64_t ctas_needed     = (num_blocks + threads_per_cta - 1) / threads_per_cta;
   const unsigned grid            = static_cast<unsigned>(
       ctas_needed > 65535u ? 65535u : (ctas_needed == 0u ? 1u : ctas_needed));
 
+  if (opts.mode == ARCTO_ZFP_MODE_REVERSIBLE_3D) {
+    // Two-pass: zero the K_global slot, run compute-K reduction, then pack.
+    HipUtils::check(hipMemsetAsync(device_output + 24, 0, 4, stream),
+                    "zfp3DCompress: clear K_global slot");
+    zfp_rev3d_compute_K_kernel<<<grid, threads_per_cta, 0, stream>>>(
+        device_input, nx, ny, nz, device_output, num_blocks);
+    HipUtils::check_last_error("zfp_rev3d_compute_K_kernel launch");
+
+    zfp_rev3d_pack_kernel<<<grid, threads_per_cta, 0, stream>>>(
+        device_input, device_output,
+        device_output_capacity, device_output_size, num_blocks);
+    HipUtils::check_last_error("zfp_rev3d_pack_kernel launch");
+    return;
+  }
+
+  // Default: FIXED_RATE_3D
+  const int K = clamp_rate(opts.param);
   zfp_fixed_rate_3d_compress_kernel<<<grid, threads_per_cta, 0, stream>>>(
       device_input, nx, ny, nz, K,
       device_output, device_output_capacity, device_output_size);
@@ -1105,10 +1613,28 @@ void zfp3DDecompress(
     arctoStatus_t* device_status,
     hipStream_t stream)
 {
-  // Use the same grid sizing as compress; the kernel will reject mismatched
-  // headers and emit a status code without touching the output cube.
+  // We don't know the mode without reading the device buffer; rather than
+  // sync, peek the mode byte from a tiny D2H copy. Stream-ordered so the
+  // caller sees a single coherent submission.
+  uint8_t mode_byte = 0;
+  HipUtils::check(hipMemcpyAsync(&mode_byte, device_input + 6, 1,
+                                 hipMemcpyDeviceToHost, stream),
+                  "zfp3DDecompress: peek mode byte");
+  HipUtils::check(hipStreamSynchronize(stream),
+                  "zfp3DDecompress: sync for mode peek");
+
   const unsigned threads_per_cta = kThreadsPerChunkCTA;
   const unsigned grid            = 65535u;
+
+  if (mode_byte == kZfpModeReversible3D) {
+    zfp_rev3d_decompress_kernel<<<grid, threads_per_cta, 0, stream>>>(
+        device_input, input_size,
+        device_output, device_output_capacity,
+        device_actual_output_size, device_status);
+    HipUtils::check_last_error("zfp_rev3d_decompress_kernel launch");
+    return;
+  }
+
   zfp_fixed_rate_3d_decompress_kernel<<<grid, threads_per_cta, 0, stream>>>(
       device_input, input_size,
       device_output, device_output_capacity,

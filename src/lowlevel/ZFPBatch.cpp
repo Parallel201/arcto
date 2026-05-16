@@ -164,7 +164,8 @@ namespace {
 
 bool valid_3d_opts(const arctoBatchedZFPOpts_t& opts)
 {
-  return opts.mode == ARCTO_ZFP_MODE_FIXED_RATE
+  return (opts.mode == ARCTO_ZFP_MODE_FIXED_RATE
+       || opts.mode == ARCTO_ZFP_MODE_REVERSIBLE_3D)
       && opts.dim  == ARCTO_ZFP_DIM_3D
       && opts.shape[0] > 0
       && opts.shape[1] > 0

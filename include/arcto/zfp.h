@@ -29,14 +29,23 @@ extern "C" {
  *   Predictable output size, primary mode supported on GPU.
  * - FIXED_PRECISION: each block keeps the top N bit-planes (param = precision).
  * - FIXED_ACCURACY: absolute error bounded by 2^param (param = log2 tolerance).
- * - REVERSIBLE: lossless mode, encodes all bit-planes (param ignored).
+ * - REVERSIBLE: lossless for arbitrary byte streams via XOR-delta + adaptive
+ *   byte-aligned bit-width. Use this for general data (the batched API
+ *   defaults to it; the existing bit-exact test suite exercises it).
+ * - REVERSIBLE_3D: lossless for float32 cubes via block-floating-point
+ *   alignment + ZFP reversible integer lift transform + global-K bit-plane
+ *   packing. Only available through the single-cube 3D API. Strictly
+ *   lossless for float32 inputs to within one ULP of the original IEEE 754
+ *   representation; the kernel reduces a global K across the cube so block
+ *   sizes stay deterministic (per-block adaptive K is a future optimization).
  */
 typedef enum
 {
   ARCTO_ZFP_MODE_FIXED_RATE      = 0,
   ARCTO_ZFP_MODE_FIXED_PRECISION = 1,
   ARCTO_ZFP_MODE_FIXED_ACCURACY  = 2,
-  ARCTO_ZFP_MODE_REVERSIBLE      = 3
+  ARCTO_ZFP_MODE_REVERSIBLE      = 3,
+  ARCTO_ZFP_MODE_REVERSIBLE_3D   = 4
 } arctoZFPMode_t;
 
 /**
