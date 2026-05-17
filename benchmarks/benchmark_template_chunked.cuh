@@ -438,8 +438,16 @@ run_benchmark_template(
   // hipMemcpyAsync, hitting PCIe peak (~27 GB/s, RX 7900 XT). The two
   // optimizations are multiplicative -- see compression-experiments@458d5ad
   // for the standalone characterization.
+  //
+  // We run this block during warmup too (timings discarded) so the
+  // process-lifetime static pinned batch is allocated on the warmup
+  // invocation. On gfx1100 hipHostMalloc has a ~13-iter side effect on
+  // subsequent compress kernels (see RX7900XT_BYTE_PINNED_ROOTCAUSE_*/
+  // FINDINGS.md); paying it once during warmup ensures the measurement
+  // run's H2D reuses the already-allocated batch and the measured iters
+  // start clean.
   float h2d_ms = 0.0f;
-  if (!warmup && total_bytes > 0) {
+  if (total_bytes > 0) {
     void* d_transfer_buf;
     GPU_CHECK(hipMalloc(&d_transfer_buf, total_bytes));
     hipEvent_t ts, te;
@@ -447,12 +455,26 @@ run_benchmark_template(
     GPU_CHECK(hipEventCreate(&te));
 
     if (pinned_input) {
-      std::vector<size_t> chunk_sizes(data.size());
-      for (size_t i = 0; i < data.size(); ++i) chunk_sizes[i] = data[i].size();
-      arctoHostBatch_t* batch = nullptr;
-      benchmark::benchmark_assert(
-          arctoHostBatchCreate(data.size(), chunk_sizes.data(), &batch) == arctoSuccess,
-          "arctoHostBatchCreate failed");
+      // Reuse the pinned host batch across calls. hipHostMalloc has a
+      // ~13-iter side effect on subsequent compress kernels (see
+      // RX7900XT_BYTE_PINNED_*/FINDINGS.md root-cause section); paying
+      // it only ONCE per process amortizes it across warmup + measurement.
+      // Process-lifetime static -- never freed, harmless on exit.
+      static arctoHostBatch_t* batch = nullptr;
+      static size_t            batch_total = 0;
+      const size_t want = total_bytes;
+      if (batch != nullptr && batch_total != want) {
+        arctoHostBatchDestroy(batch);
+        batch = nullptr;
+      }
+      if (batch == nullptr) {
+        std::vector<size_t> chunk_sizes(data.size());
+        for (size_t i = 0; i < data.size(); ++i) chunk_sizes[i] = data[i].size();
+        benchmark::benchmark_assert(
+            arctoHostBatchCreate(data.size(), chunk_sizes.data(), &batch) == arctoSuccess,
+            "arctoHostBatchCreate failed");
+        batch_total = want;
+      }
       for (size_t i = 0; i < data.size(); ++i) {
         std::memcpy(arctoHostBatchChunkPtr(batch, i), data[i].data(), data[i].size());
       }
@@ -463,7 +485,6 @@ run_benchmark_template(
       GPU_CHECK(hipEventRecord(te, stream));
       GPU_CHECK(hipStreamSynchronize(stream));
       GPU_CHECK(hipEventElapsedTime(&h2d_ms, ts, te));
-      arctoHostBatchDestroy(batch);
     } else {
       uint8_t* dst = static_cast<uint8_t*>(d_transfer_buf);
       GPU_CHECK(hipEventRecord(ts, stream));
@@ -481,6 +502,7 @@ run_benchmark_template(
     GPU_CHECK(hipEventDestroy(ts));
     GPU_CHECK(hipEventDestroy(te));
   }
+
 
   for (size_t iter = 0; iter < count; ++iter) {
     // compression
