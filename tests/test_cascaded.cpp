@@ -100,7 +100,7 @@ void test_cascaded(const std::vector<T>& input, arctoType_t data_type)
       hipMemcpy(d_in_data, input.data(), in_bytes, hipMemcpyHostToDevice));
 
   hipStream_t stream;
-  hipStreamCreate(&stream);
+  HIP_CHECK(hipStreamCreate(&stream));
 
   arctoBatchedCascadedOpts_t options = arctoBatchedCascadedDefaultOpts;
   options.type = data_type;
@@ -120,24 +120,24 @@ void test_cascaded(const std::vector<T>& input, arctoType_t data_type)
 
   size_t comp_out_bytes = manager.get_compressed_output_size(d_comp_out);
 
-  hipFree(d_in_data);
+  HIP_CHECK(hipFree(d_in_data));
 
   // Test to make sure copying the compressed file is ok
   uint8_t* copied = 0;
   HIP_CHECK(hipMalloc(&copied, comp_out_bytes));
   HIP_CHECK(
       hipMemcpy(copied, d_comp_out, comp_out_bytes, hipMemcpyDeviceToDevice));
-  hipFree(d_comp_out);
+  HIP_CHECK(hipFree(d_comp_out));
   d_comp_out = copied;
 
   auto decomp_config = manager.configure_decompression(d_comp_out);
 
   T* out_ptr;
-  hipMalloc(&out_ptr, decomp_config.decomp_data_size);
+  HIP_CHECK(hipMalloc(&out_ptr, decomp_config.decomp_data_size));
 
   // make sure the data won't match input if not written to, so we can verify
   // correctness
-  hipMemset(out_ptr, 0, decomp_config.decomp_data_size);
+  HIP_CHECK(hipMemset(out_ptr, 0, decomp_config.decomp_data_size));
 
   manager.decompress(
       reinterpret_cast<uint8_t*>(out_ptr),
@@ -147,14 +147,14 @@ void test_cascaded(const std::vector<T>& input, arctoType_t data_type)
 
   // Copy result back to host
   std::vector<T> res(input.size());
-  hipMemcpy(
-      &res[0], out_ptr, input.size() * sizeof(T), hipMemcpyDeviceToHost);
+  HIP_CHECK(hipMemcpy(
+      &res[0], out_ptr, input.size() * sizeof(T), hipMemcpyDeviceToHost));
 
   // Verify correctness
   REQUIRE(res == input);
 
-  hipFree(d_comp_out);
-  hipFree(out_ptr);
+  HIP_CHECK(hipFree(d_comp_out));
+  HIP_CHECK(hipFree(out_ptr));
 }
 
 } // namespace

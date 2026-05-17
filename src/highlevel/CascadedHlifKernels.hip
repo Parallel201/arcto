@@ -281,7 +281,8 @@ void cascadedHlifBatchDecompress(
 size_t cascadedHlifCompMaxBlockOccupancy(const int device_id, arctoType_t type)
 {
   hipDeviceProp_t deviceProp;
-  hipGetDeviceProperties(&deviceProp, device_id);
+  HipUtils::check(hipGetDeviceProperties(&deviceProp, device_id),
+                  "cascadedHlifCompMaxBlockOccupancy: hipGetDeviceProperties");
   int numBlocksPerSM = 1;
   // This kernel only uses fixed-size shared memory, not shared memory
   // determined at kernel invocation time.
@@ -290,37 +291,41 @@ size_t cascadedHlifCompMaxBlockOccupancy(const int device_id, arctoType_t type)
   // The values will almost certainly be identical for all data types,
   // but just in case, handle types separately.
   if (type == ARCTO_TYPE_CHAR || type == ARCTO_TYPE_UCHAR) {
-    hipOccupancyMaxActiveBlocksPerMultiprocessor(
+    HipUtils::check(hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &numBlocksPerSM,
         HlifCompressBatchKernel<
             cascaded_compress_wrapper<uint8_t, size_t, threadblock_size>,
             const arctoBatchedCascadedOpts_t&>,
         threadblock_size,
-        runtime_shmem_size);
+        runtime_shmem_size),
+                    "cascadedHlifCompMaxBlockOccupancy: occupancy u8");
   } else if (type == ARCTO_TYPE_SHORT || type == ARCTO_TYPE_USHORT) {
-    hipOccupancyMaxActiveBlocksPerMultiprocessor(
+    HipUtils::check(hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &numBlocksPerSM,
         HlifCompressBatchKernel<
             cascaded_compress_wrapper<uint16_t, size_t, threadblock_size>,
             const arctoBatchedCascadedOpts_t&>,
         threadblock_size,
-        runtime_shmem_size);
+        runtime_shmem_size),
+                    "cascadedHlifCompMaxBlockOccupancy: occupancy u16");
   } else if (type == ARCTO_TYPE_INT || type == ARCTO_TYPE_UINT) {
-    hipOccupancyMaxActiveBlocksPerMultiprocessor(
+    HipUtils::check(hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &numBlocksPerSM,
         HlifCompressBatchKernel<
             cascaded_compress_wrapper<uint32_t, size_t, threadblock_size>,
             const arctoBatchedCascadedOpts_t&>,
         threadblock_size,
-        runtime_shmem_size);
+        runtime_shmem_size),
+                    "cascadedHlifCompMaxBlockOccupancy: occupancy u32");
   } else if (type == ARCTO_TYPE_LONGLONG || type == ARCTO_TYPE_ULONGLONG) {
-    hipOccupancyMaxActiveBlocksPerMultiprocessor(
+    HipUtils::check(hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &numBlocksPerSM,
         HlifCompressBatchKernel<
             cascaded_compress_wrapper<uint64_t, size_t, threadblock_size>,
             const arctoBatchedCascadedOpts_t&>,
         threadblock_size,
-        runtime_shmem_size);
+        runtime_shmem_size),
+                    "cascadedHlifCompMaxBlockOccupancy: occupancy u64");
   }
 
   return deviceProp.multiProcessorCount * numBlocksPerSM;
@@ -330,7 +335,8 @@ size_t cascadedHlifDecompMaxBlockOccupancy(
     const int device_id, arctoType_t type)
 {
   hipDeviceProp_t deviceProp;
-  hipGetDeviceProperties(&deviceProp, device_id);
+  HipUtils::check(hipGetDeviceProperties(&deviceProp, device_id),
+                  "cascadedHlifDecompMaxBlockOccupancy: hipGetDeviceProperties");
   int numBlocksPerSM = 1;
   // This kernel only uses fixed-size shared memory, not shared memory
   // determined at kernel invocation time.
@@ -339,41 +345,45 @@ size_t cascadedHlifDecompMaxBlockOccupancy(
   // The values will almost certainly be identical for all data types,
   // but just in case, handle types separately.
   if (type == ARCTO_TYPE_CHAR || type == ARCTO_TYPE_UCHAR) {
-    hipOccupancyMaxActiveBlocksPerMultiprocessor(
+    HipUtils::check(hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &numBlocksPerSM,
         HlifDecompressBatchKernel<
             cascaded_decompress_wrapper<uint8_t, size_t, threadblock_size>,
             1,
             const arctoBatchedCascadedOpts_t&>,
         threadblock_size,
-        runtime_shmem_size);
+        runtime_shmem_size),
+                    "cascadedHlifDecompMaxBlockOccupancy: occupancy u8");
   } else if (type == ARCTO_TYPE_SHORT || type == ARCTO_TYPE_USHORT) {
-    hipOccupancyMaxActiveBlocksPerMultiprocessor(
+    HipUtils::check(hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &numBlocksPerSM,
         HlifDecompressBatchKernel<
             cascaded_decompress_wrapper<uint16_t, size_t, threadblock_size>,
             1,
             const arctoBatchedCascadedOpts_t&>,
         threadblock_size,
-        runtime_shmem_size);
+        runtime_shmem_size),
+                    "cascadedHlifDecompMaxBlockOccupancy: occupancy u16");
   } else if (type == ARCTO_TYPE_INT || type == ARCTO_TYPE_UINT) {
-    hipOccupancyMaxActiveBlocksPerMultiprocessor(
+    HipUtils::check(hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &numBlocksPerSM,
         HlifDecompressBatchKernel<
             cascaded_decompress_wrapper<uint32_t, size_t, threadblock_size>,
             1,
             const arctoBatchedCascadedOpts_t&>,
         threadblock_size,
-        runtime_shmem_size);
+        runtime_shmem_size),
+                    "cascadedHlifDecompMaxBlockOccupancy: occupancy u32");
   } else if (type == ARCTO_TYPE_LONGLONG || type == ARCTO_TYPE_ULONGLONG) {
-    hipOccupancyMaxActiveBlocksPerMultiprocessor(
+    HipUtils::check(hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &numBlocksPerSM,
         HlifDecompressBatchKernel<
             cascaded_decompress_wrapper<uint64_t, size_t, threadblock_size>,
             1,
             const arctoBatchedCascadedOpts_t&>,
         threadblock_size,
-        runtime_shmem_size);
+        runtime_shmem_size),
+                    "cascadedHlifDecompMaxBlockOccupancy: occupancy u64");
   }
 
   return deviceProp.multiProcessorCount * numBlocksPerSM;

@@ -294,6 +294,15 @@ set(BUILD_ZFPY          OFF CACHE BOOL "" FORCE)
 
 add_subdirectory(third_party/zfp)
 
+# Silence build warnings from the vendored canonical code -- it is upstream
+# territory and we don't want our hygiene gate to be hostage to LLNL's
+# release cadence. We touch only the compile flags of the zfp target; the
+# source tree itself stays exactly as the submodule provides it.
+if (TARGET zfp)
+  target_compile_options(zfp PRIVATE
+      $<$<COMPILE_LANGUAGE:CXX,HIP,CUDA>:-Wno-unused-result>)
+endif()
+
 # Restore BUILD_SHARED_LIBS so any downstream ARCTO targets keep their
 # original (likely shared) linkage.
 set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_BACKUP} CACHE BOOL "" FORCE)
