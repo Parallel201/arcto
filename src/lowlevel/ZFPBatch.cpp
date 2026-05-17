@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <new>
+#include <vector>
 
 namespace {
 
@@ -325,11 +326,12 @@ arctoStatus_t arctoZFPCompress(
 }
 
 // Read the canonical ZFP_HEADER_FULL from the front of h_input into `field`,
-// and return the number of header BYTES consumed via *header_bytes_out.
-// `zfp_out` (the configured stream) and `field` are owned by the caller and
-// freed by it. Returns true on success.
+// and return the number of header BYTES consumed via *header_bytes_out,
+// along with the compression mode the header advertises. The caller owns
+// and must free `field`.
 bool parse_header(const void* h_input, size_t h_input_size,
-                  zfp_field*& field, size_t* header_bytes_out)
+                  zfp_field*& field, size_t* header_bytes_out,
+                  zfp_mode* mode_out)
 {
   bitstream* bs = stream_open(const_cast<void*>(h_input), h_input_size);
   if (!bs) return false;
@@ -340,6 +342,7 @@ bool parse_header(const void* h_input, size_t h_input_size,
   if (!field) { zfp_stream_close(zfp); stream_close(bs); return false; }
 
   const size_t header_bits = zfp_read_header(zfp, field, ZFP_HEADER_FULL);
+  if (mode_out) *mode_out = zfp_stream_compression_mode(zfp);
   zfp_stream_close(zfp);
   stream_close(bs);
 
@@ -350,6 +353,56 @@ bool parse_header(const void* h_input, size_t h_input_size,
   }
   *header_bytes_out = (header_bits + CHAR_BIT - 1) / CHAR_BIT;
   return true;
+}
+
+// Variable-rate canonical stream with no ARCTO index trailer (e.g.,
+// produced by the upstream CLI). The HIP decoder cannot process those
+// directly; we fall back to canonical's serial decoder into a temporary
+// host buffer and then copy the result to the caller's device buffer.
+arctoStatus_t decompress_serial_fallback(
+    const void* h_input, size_t h_input_size,
+    void* d_output, size_t d_output_capacity,
+    size_t* actual_size_out)
+{
+  bitstream* bs = stream_open(const_cast<void*>(h_input), h_input_size);
+  if (!bs) return arctoErrorInternal;
+  zfp_stream* zfp = zfp_stream_open(bs);
+  if (!zfp) { stream_close(bs); return arctoErrorInternal; }
+
+  zfp_field* field = zfp_field_alloc();
+  if (!field) { zfp_stream_close(zfp); stream_close(bs); return arctoErrorInternal; }
+
+  if (zfp_read_header(zfp, field, ZFP_HEADER_FULL) == 0) {
+    zfp_field_free(field);
+    zfp_stream_close(zfp);
+    stream_close(bs);
+    return arctoErrorCannotDecompress;
+  }
+
+  const size_t need = zfp_field_size_bytes(field);
+  if (need > d_output_capacity) {
+    zfp_field_free(field);
+    zfp_stream_close(zfp);
+    stream_close(bs);
+    return arctoErrorInvalidValue;
+  }
+
+  std::vector<unsigned char> h_temp(need);
+  zfp_field_set_pointer(field, h_temp.data());
+  zfp_stream_set_execution(zfp, zfp_exec_serial);
+
+  const size_t bytes_read = zfp_decompress(zfp, field);
+  zfp_field_free(field);
+  zfp_stream_close(zfp);
+  stream_close(bs);
+
+  if (bytes_read == 0) return arctoErrorCannotDecompress;
+
+  hipError_t herr = hipMemcpy(d_output, h_temp.data(), need, hipMemcpyHostToDevice);
+  if (herr != hipSuccess) return arctoErrorInternal;
+
+  *actual_size_out = need;
+  return arctoSuccess;
 }
 
 arctoStatus_t arctoZFPDecompress(
@@ -365,7 +418,8 @@ arctoStatus_t arctoZFPDecompress(
   //    bytes the header occupied.
   zfp_field* field = nullptr;
   size_t header_bytes = 0;
-  if (!parse_header(h_input, h_input_size, field, &header_bytes)) {
+  zfp_mode header_mode = zfp_mode_null;
+  if (!parse_header(h_input, h_input_size, field, &header_bytes, &header_mode)) {
     return arctoErrorCannotDecompress;
   }
 
@@ -401,6 +455,22 @@ arctoStatus_t arctoZFPDecompress(
         return arctoErrorCannotDecompress;
       }
     }
+  }
+
+  // 2a. Variable-rate stream without our index trailer (e.g., produced by
+  //     the upstream `zfp` CLI). The HIP decoder cannot navigate the
+  //     variable-length blocks without an index, so fall back to the
+  //     canonical serial decoder into a host buffer + hipMemcpy. The
+  //     resulting d_output content is the same; only the data path differs.
+  const bool needs_index =
+      (header_mode == zfp_mode_fixed_precision)
+   || (header_mode == zfp_mode_fixed_accuracy)
+   || (header_mode == zfp_mode_expert);
+  if (needs_index && index_bytes == 0) {
+    zfp_field_free(field);
+    return decompress_serial_fallback(h_input, h_input_size,
+                                      d_output, d_output_capacity,
+                                      actual_size_out);
   }
 
   const size_t payload_bytes =
@@ -487,7 +557,7 @@ arctoStatus_t arctoZFPGetDecompressSize(
 
   zfp_field* field = nullptr;
   size_t header_bytes = 0;
-  if (!parse_header(h_input, h_input_size, field, &header_bytes)) {
+  if (!parse_header(h_input, h_input_size, field, &header_bytes, nullptr)) {
     return arctoErrorCannotDecompress;
   }
   *uncomp_bytes = zfp_field_size_bytes(field);

@@ -74,6 +74,14 @@ function(add_test_file EXAMPLE_SOURCE)
   else ()
     target_link_libraries(${BARE_NAME} PRIVATE arcto hip::host)
   endif ()
+  # Some tests (e.g. test_zfp_bitcompat) include the canonical ZFP headers
+  # directly to compare ARCTO against the upstream serial backend. zfp::zfp
+  # is already statically linked into libarcto.so via the top-level
+  # add_subdirectory(third_party/zfp); we just need its include directories
+  # exposed to the test source.
+  if(TARGET zfp::zfp)
+    target_link_libraries(${BARE_NAME} PRIVATE zfp::zfp)
+  endif()
   add_test(NAME ${BARE_NAME} COMMAND ${BARE_NAME})
 endfunction()
 
