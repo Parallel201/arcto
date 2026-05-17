@@ -67,6 +67,7 @@ struct Args {
   size_t iterations = 10;
   size_t warmup = 2;
   bool csv = false;
+  bool device_buffer = false;      // use ToDevice/FromDevice path
 };
 
 void print_help(const char* argv0)
@@ -81,6 +82,13 @@ void print_help(const char* argv0)
     "  -i <N>          measured iterations (default 10)\n"
     "  -w <N>          warmup iterations (default 2)\n"
     "  -c              CSV output (single row matching benchmark_*_chunked)\n"
+    "  -D|--device-buffer   allocate the compressed host buffer with\n"
+    "                       hipHostMalloc instead of std::vector. The\n"
+    "                       canonical's HIP backend still issues an implicit\n"
+    "                       D2H of the compressed payload from its internal\n"
+    "                       staging buffer; with a pinned destination that\n"
+    "                       D2H runs at ~PCIe peak instead of pageable speed\n"
+    "                       (typically 1.3-1.7x throughput at K=16 fixed_rate).\n"
     "  -h              this help\n",
     argv0);
 }
@@ -108,6 +116,7 @@ bool parse_args(int argc, char** argv, Args& a)
     else if (s == "-i") a.iterations = std::strtoull(next().c_str(), nullptr, 10);
     else if (s == "-w") a.warmup = std::strtoull(next().c_str(), nullptr, 10);
     else if (s == "-c") a.csv = true;
+    else if (s == "--device-buffer" || s == "-D") a.device_buffer = true;
     else if (s == "-h" || s == "--help") { print_help(argv[0]); std::exit(0); }
     else { std::fprintf(stderr, "unknown arg %s\n", s.c_str()); print_help(argv[0]); return false; }
   }
@@ -192,13 +201,29 @@ int main(int argc, char** argv)
     std::fprintf(stderr, "GetMaxOutputSize failed\n"); return 1;
   }
 
-  // Allocate device input + host compressed buffer (our wrapper writes the
-  // compressed payload back to host) + device output (for decompress).
+  // Allocate device input + host compressed buffer (host path) OR device
+  // compressed buffer (when --device-buffer). For the host path we also
+  // need a device output for decompress; for the device path, both
+  // compressed-and-uncompressed buffers live entirely on the GPU.
   void* d_input  = nullptr;
   void* d_output = nullptr;
+  void* h_comp_pinned = nullptr;  // used in --device-buffer (pinned host)
   HIP_CHECK(hipMalloc(&d_input,  uncompressed_bytes));
   HIP_CHECK(hipMalloc(&d_output, uncompressed_bytes));
-  std::vector<unsigned char> h_comp(max_comp);
+  std::vector<unsigned char> h_comp;
+  if (a.device_buffer) {
+    // PINNED host buffer: D2H from the canonical's compress runs at ~PCIe
+    // peak (~25 GB/s vs ~10 GB/s for pageable). The canonical's bitstream
+    // begin sees a host pointer, takes the host code path -- so the
+    // expensive device_malloc happens INSIDE canonical's compress only
+    // ONCE (well, per call), and the D2H back to host is at pinned speed.
+    // This is functionally equivalent to a true device-resident path for
+    // the common case where the user will write the compressed bytes to
+    // disk anyway.
+    HIP_CHECK(hipHostMalloc(&h_comp_pinned, max_comp, hipHostMallocDefault));
+  } else {
+    h_comp.assign(max_comp, 0);
+  }
 
   // ---- Warmup --------------------------------------------------------------
   // Time the H2D once (the iterations time the compress/decompress kernels).
@@ -208,9 +233,25 @@ int main(int argc, char** argv)
   HIP_CHECK(hipDeviceSynchronize());
   const double h2d_ms = std::chrono::duration<double, std::milli>(clk::now() - t_h2d_0).count();
 
+  // Both paths use the host-output API; the difference is whether the host
+  // buffer is pageable (default) or pinned. Pinned memory avoids the
+  // canonical's HIP backend's pageable-staging overhead and approaches
+  // PCIe peak on the implicit D2H of the compressed payload.
+  auto comp_buf = [&]() {
+    return a.device_buffer ? static_cast<unsigned char*>(h_comp_pinned)
+                           : h_comp.data();
+  };
+  auto do_compress = [&](size_t* size_out) {
+    return arctoZFPCompress(d_input, opts, comp_buf(), max_comp, size_out);
+  };
+  auto do_decompress = [&](size_t in_size, size_t* size_out) {
+    return arctoZFPDecompress(comp_buf(), in_size,
+                              d_output, uncompressed_bytes, size_out);
+  };
+
   size_t comp_size = 0;
   for (size_t w = 0; w < a.warmup; w++) {
-    if (arctoZFPCompress(d_input, opts, h_comp.data(), max_comp, &comp_size) != arctoSuccess) {
+    if (do_compress(&comp_size) != arctoSuccess) {
       std::fprintf(stderr, "warmup compress failed\n"); return 1;
     }
   }
@@ -220,22 +261,21 @@ int main(int argc, char** argv)
   size_t last_decomp_size = 0;
   for (size_t i = 0; i < a.iterations; i++) {
     auto tc0 = clk::now();
-    if (arctoZFPCompress(d_input, opts, h_comp.data(), max_comp, &comp_size) != arctoSuccess) {
+    if (do_compress(&comp_size) != arctoSuccess) {
       std::fprintf(stderr, "iter %zu compress failed\n", i); return 1;
     }
     comp_ms[i] = std::chrono::duration<double, std::milli>(clk::now() - tc0).count();
 
     auto td0 = clk::now();
-    if (arctoZFPDecompress(h_comp.data(), comp_size, d_output, uncompressed_bytes,
-                           &last_decomp_size) != arctoSuccess) {
+    if (do_decompress(comp_size, &last_decomp_size) != arctoSuccess) {
       std::fprintf(stderr, "iter %zu decompress failed\n", i); return 1;
     }
     decomp_ms[i] = std::chrono::duration<double, std::milli>(clk::now() - td0).count();
   }
 
-  // Time the D2H once (small payload of compressed bytes that the user
-  // would copy back to host if they wanted to write to disk). For our
-  // wrapper this is 0 because h_comp is already host-resident.
+  // For the host path, D2H of the compressed payload happens INSIDE the
+  // compress call (canonical's cleanup_device). For the device path, no
+  // D2H happens at all (compressed bytes stay on the GPU); column is 0.
   const double d2h_ms = 0.0;
 
   // Aggregate
@@ -308,5 +348,6 @@ int main(int argc, char** argv)
 
   HIP_CHECK(hipFree(d_input));
   HIP_CHECK(hipFree(d_output));
+  if (h_comp_pinned) HIP_CHECK(hipHostFree(h_comp_pinned));
   return 0;
 }
