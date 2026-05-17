@@ -1,4 +1,4 @@
-# hipCOMP changelog (YYYY-MM-DD)
+# ARCTO changelog (YYYY-MM-DD)
 
 # nvCOMP changelog
 

@@ -1,4 +1,4 @@
-# hipCOMP Licensing
+# ARCTO Licensing
 
 LICENSE FILE:
 

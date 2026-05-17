@@ -1,6 +1,6 @@
-# hipCOMP Benchmarks
+# ARCTO Benchmarks
 
-This directory contains performance benchmarks for hipCOMP compression algorithms.
+This directory contains performance benchmarks for ARCTO compression algorithms.
 
 ## Building Benchmarks
 

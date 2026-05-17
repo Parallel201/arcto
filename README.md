@@ -136,7 +136,7 @@ manager.decompress(device_input, device_output, stream);
 ## Directory Structure
 
 ```
-hip-compression-toolkit/
+arcto/
 ├── CMakeLists.txt
 ├── README.md
 ├── LICENSE
