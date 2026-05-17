@@ -33,6 +33,7 @@
 
 #ifdef __HIP_PLATFORM_AMD__
 #include "arcto.h"
+#include "arcto/host_batch.h"
 #include "arcto/lz4.h"
 #include "arcto/snappy.h"
 #include "arcto/cascaded.h"
@@ -119,7 +120,8 @@ void run_benchmark( \
     const bool csv_output, \
     const bool tab_separator, \
     const size_t duplicate_count, \
-    const size_t num_files) \
+    const size_t num_files, \
+    const bool pinned_input) \
 { \
   run_benchmark_template( \
       comp_get_temp, \
@@ -135,7 +137,8 @@ void run_benchmark( \
       csv_output, \
       tab_separator, \
       duplicate_count, \
-      num_files); \
+      num_files, \
+      pinned_input); \
 }
 
 // A helper function for if the input data requires no validation.
@@ -387,7 +390,8 @@ run_benchmark_template(
     const bool csv_output,
     const bool use_tabs,
     const size_t duplicates,
-    const size_t num_files)
+    const size_t num_files,
+    const bool pinned_input)
 {
   benchmark::benchmark_assert(IsInputValid(data), "Invalid input data");
 
@@ -426,24 +430,53 @@ run_benchmark_template(
   comp_times_ms.reserve(count);
   decomp_times_ms.reserve(count);
 
-  // Measure H2D transfer overhead (representative of input upload cost)
+  // Measure H2D transfer overhead (representative of input upload cost).
+  // The chunked path (1600 x 64KB hipMemcpyAsync from scattered pageable
+  // std::vector storage) caps at ~6 GB/s because per-call launch overhead
+  // dominates. When --pinned_input is set, we coalesce the chunks into a
+  // single arctoHostBatch (one pinned allocation) and issue ONE
+  // hipMemcpyAsync, hitting PCIe peak (~27 GB/s, RX 7900 XT). The two
+  // optimizations are multiplicative -- see compression-experiments@458d5ad
+  // for the standalone characterization.
   float h2d_ms = 0.0f;
   if (!warmup && total_bytes > 0) {
     void* d_transfer_buf;
     GPU_CHECK(hipMalloc(&d_transfer_buf, total_bytes));
-    uint8_t* dst = static_cast<uint8_t*>(d_transfer_buf);
     hipEvent_t ts, te;
     GPU_CHECK(hipEventCreate(&ts));
     GPU_CHECK(hipEventCreate(&te));
-    GPU_CHECK(hipEventRecord(ts, stream));
-    for (const auto& chunk : data) {
-      GPU_CHECK(hipMemcpyAsync(dst, chunk.data(), chunk.size(),
-          hipMemcpyHostToDevice, stream));
-      dst += chunk.size();
+
+    if (pinned_input) {
+      std::vector<size_t> chunk_sizes(data.size());
+      for (size_t i = 0; i < data.size(); ++i) chunk_sizes[i] = data[i].size();
+      arctoHostBatch_t* batch = nullptr;
+      benchmark::benchmark_assert(
+          arctoHostBatchCreate(data.size(), chunk_sizes.data(), &batch) == arctoSuccess,
+          "arctoHostBatchCreate failed");
+      for (size_t i = 0; i < data.size(); ++i) {
+        std::memcpy(arctoHostBatchChunkPtr(batch, i), data[i].data(), data[i].size());
+      }
+      GPU_CHECK(hipEventRecord(ts, stream));
+      benchmark::benchmark_assert(
+          arctoHostBatchUploadAsync(batch, d_transfer_buf, nullptr, stream) == arctoSuccess,
+          "arctoHostBatchUploadAsync failed");
+      GPU_CHECK(hipEventRecord(te, stream));
+      GPU_CHECK(hipStreamSynchronize(stream));
+      GPU_CHECK(hipEventElapsedTime(&h2d_ms, ts, te));
+      arctoHostBatchDestroy(batch);
+    } else {
+      uint8_t* dst = static_cast<uint8_t*>(d_transfer_buf);
+      GPU_CHECK(hipEventRecord(ts, stream));
+      for (const auto& chunk : data) {
+        GPU_CHECK(hipMemcpyAsync(dst, chunk.data(), chunk.size(),
+            hipMemcpyHostToDevice, stream));
+        dst += chunk.size();
+      }
+      GPU_CHECK(hipEventRecord(te, stream));
+      GPU_CHECK(hipStreamSynchronize(stream));
+      GPU_CHECK(hipEventElapsedTime(&h2d_ms, ts, te));
     }
-    GPU_CHECK(hipEventRecord(te, stream));
-    GPU_CHECK(hipStreamSynchronize(stream));
-    GPU_CHECK(hipEventElapsedTime(&h2d_ms, ts, te));
+
     GPU_CHECK(hipFree(d_transfer_buf));
     GPU_CHECK(hipEventDestroy(ts));
     GPU_CHECK(hipEventDestroy(te));
@@ -829,7 +862,8 @@ run_benchmark_template(
     const bool csv_output,
     const bool use_tabs,
     const size_t duplicates,
-    const size_t num_files)
+    const size_t num_files,
+    const bool /*pinned_input*/)
 {
   benchmark::benchmark_assert(IsInputValid(data), "Invalid input data");
 
@@ -1255,7 +1289,8 @@ void run_benchmark(
     const bool csv_output,
     const bool tab_separator,
     const size_t duplicate_count,
-    const size_t num_files);
+    const size_t num_files,
+    const bool pinned_input);
 
 struct args_type {
   int gpu;
@@ -1267,6 +1302,7 @@ struct args_type {
   bool use_tabs;
   bool has_page_sizes;
   size_t chunk_size;
+  bool pinned_input;     /**< coalesce + pin input host buffer (HIP only) */
 };
 
 struct parameter_type {
@@ -1322,6 +1358,7 @@ args_type parse_args(int argc, char ** argv) {
   args.use_tabs = false;
   args.has_page_sizes = false;
   args.chunk_size = 65536;
+  args.pinned_input = false;
 
   const std::vector<parameter_type> params{
     {"h", "help", "Show options.", ""},
@@ -1343,6 +1380,10 @@ args_type parse_args(int argc, char ** argv) {
         "with int64 size.", bool_to_string(args.has_page_sizes)},
     {"p", "chunk_size", "Chunk size when splitting uncompressed data.",
         std::to_string(args.chunk_size)},
+    {"P", "pinned_input", "Coalesce input chunks into one pinned host "
+        "buffer + single bulk H2D (HIP only). Hits PCIe peak vs the "
+        "scattered-pageable default. See arcto/host_batch.h.",
+        bool_to_string(args.pinned_input)},
   };
 
   char** argv_end = argv + argc;
@@ -1404,6 +1445,10 @@ args_type parse_args(int argc, char ** argv) {
         } else if (param.long_flag == "chunk_size") {
           args.chunk_size = size_t(std::stoull(*(argv++)));
           break;
+        } else if (param.long_flag == "pinned_input") {
+          std::string on(*(argv++));
+          args.pinned_input = parse_bool(on);
+          break;
         } else {
           std::cerr << "INTERNAL ERROR: Unhandled paramter '" << arg << "'." << std::endl;
           usage(name, params);
@@ -1454,11 +1499,12 @@ int main(int argc, char** argv)
 
   // one warmup to allow cuda to initialize
   run_benchmark(data, true, args.warmup_count, false, false,
-      args.duplicate_count, args.filenames.size());
+      args.duplicate_count, args.filenames.size(), args.pinned_input);
 
   // second run to report times
   run_benchmark(data, false, args.iteration_count, args.csv_output,
-      args.use_tabs, args.duplicate_count, args.filenames.size());
+      args.use_tabs, args.duplicate_count, args.filenames.size(),
+      args.pinned_input);
 
   return 0;
 }
