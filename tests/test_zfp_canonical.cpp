@@ -162,9 +162,6 @@ int main()
   const uint32_t nx = 64, ny = 64, nz = 32;
   const auto v = make_synth_3d(nx, ny, nz);
 
-  // Phase 3 supports FIXED_RATE only on the HIP path. The variable-rate
-  // modes (REVERSIBLE, FIXED_PRECISION, FIXED_ACCURACY) will land once we
-  // serialize the block-offset index alongside the stream.
   std::puts("[FIXED_RATE]");
   run_round_trip(v, nx, ny, nz, ARCTO_ZFP_MODE_FIXED_RATE,  8.0,
                  "synth fixed-rate K=8");
@@ -172,6 +169,19 @@ int main()
                  "synth fixed-rate K=16");
   run_round_trip(v, nx, ny, nz, ARCTO_ZFP_MODE_FIXED_RATE, 24.0,
                  "synth fixed-rate K=24");
+
+  // Phase 4: variable-rate modes via embedded canonical block-offset index.
+  std::puts("[FIXED_PRECISION]");
+  run_round_trip(v, nx, ny, nz, ARCTO_ZFP_MODE_FIXED_PRECISION, 12.0,
+                 "synth fixed-precision p=12");
+  run_round_trip(v, nx, ny, nz, ARCTO_ZFP_MODE_FIXED_PRECISION, 20.0,
+                 "synth fixed-precision p=20");
+
+  std::puts("[FIXED_ACCURACY]");
+  run_round_trip(v, nx, ny, nz, ARCTO_ZFP_MODE_FIXED_ACCURACY, 1e-3,
+                 "synth fixed-accuracy 1e-3");
+  run_round_trip(v, nx, ny, nz, ARCTO_ZFP_MODE_FIXED_ACCURACY, 1e-6,
+                 "synth fixed-accuracy 1e-6");
 
   std::puts("SUCCESS: all arctoZFP smoke checks passed");
   return 0;

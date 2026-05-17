@@ -16,6 +16,7 @@
 #include "zfp.h"
 
 #include <climits>
+#include <cstdlib>
 #include <cstring>
 #include <new>
 
@@ -46,14 +47,20 @@ zfp_field* make_field(const arctoZFPOpts_t& opts, void* data)
 }
 
 // Configure the zfp_stream's mode + execution policy. Returns false if any
-// step fails (e.g. HIP backend not compiled in).
+// step fails.
 //
-// Phase 3 limitation: only ARCTO_ZFP_MODE_FIXED_RATE is supported on the
-// HIP path. Variable-rate modes (FIXED_PRECISION, FIXED_ACCURACY,
-// REVERSIBLE) produce blocks of varying size, and the canonical HIP
-// decompressor requires a precomputed block-offset index that we don't yet
-// serialize alongside the stream. A follow-up commit will embed that index
-// in the output to enable the variable-rate modes on GPU.
+// FIXED_RATE          -> deterministic per-block size; no canonical index
+//                        needed on the HIP path.
+// FIXED_PRECISION /   -> variable-rate; the HIP decoder requires a block-
+// FIXED_ACCURACY         offset index. Phase 4 embeds that index as a
+//                        trailer on our compressed buffer so the decoder
+//                        can rebuild it without an out-of-band file.
+// REVERSIBLE          -> NOT supported on the canonical HIP backend at all
+//                        (its compress/decompress switch on
+//                        zfp_mode_reversible falls through to the "mode
+//                        not supported on GPU" branch). REVERSIBLE on the
+//                        GPU is reserved for ARCTO's own future
+//                        src/reversible_3d/ module.
 bool configure_stream(zfp_stream* zfp, const arctoZFPOpts_t& opts)
 {
   const zfp_type t = to_zfp_type(opts.type);
@@ -63,17 +70,67 @@ bool configure_stream(zfp_stream* zfp, const arctoZFPOpts_t& opts)
       zfp_stream_set_rate(zfp, opts.param, t, opts.ndims, zfp_false);
       break;
     case ARCTO_ZFP_MODE_FIXED_PRECISION:
+      zfp_stream_set_precision(zfp, static_cast<uint>(opts.param));
+      break;
     case ARCTO_ZFP_MODE_FIXED_ACCURACY:
+      zfp_stream_set_accuracy(zfp, opts.param);
+      break;
     case ARCTO_ZFP_MODE_REVERSIBLE:
-      // Documented above -- not yet plumbed through.
-      return false;
     default:
       return false;
   }
-  // We always target HIP. The canonical also has zfp_exec_serial and
-  // zfp_exec_omp; expose those later if the use case appears.
   if (!zfp_stream_set_execution(zfp, zfp_exec_hip)) return false;
   return true;
+}
+
+// Variable-rate modes require an offset index that the HIP decoder reads
+// alongside the bitstream. FIXED_RATE does not -- the block size is
+// constant so block N starts at maxbits * N.
+bool mode_needs_index(arctoZFPMode_t mode)
+{
+  switch (mode) {
+    case ARCTO_ZFP_MODE_FIXED_PRECISION:
+    case ARCTO_ZFP_MODE_FIXED_ACCURACY:
+      return true;
+    case ARCTO_ZFP_MODE_FIXED_RATE:
+    case ARCTO_ZFP_MODE_REVERSIBLE:
+    default:
+      return false;
+  }
+}
+
+// Trailer layout (always at the very end of the output buffer when present):
+//   bytes [tail-20 .. tail-17]:  trailer payload (1 type + 3 reserved)
+//   bytes [tail-16 .. tail-13]:  granularity (uint32_le)
+//   bytes [tail-12 .. tail-5]:   index byte size (uint64_le)
+//   bytes [tail-4  .. tail-1]:   magic "AZFP" (uint32_le 0x50465A41)
+//
+// The 16 bytes immediately preceding the trailer hold the canonical's
+// own encoded index data (uint64 offsets prefixed by a small 8-byte
+// type+granularity header that zfp_decompress also writes itself; we
+// keep it verbatim so the round-trip is bit-for-bit symmetric).
+constexpr uint32_t kArctoZFPTrailerMagic = 0x50465A41u;  // 'A''Z''F''P' LSB
+constexpr size_t   kArctoZFPTrailerBytes = 20u;
+
+void write_u32_le(unsigned char* p, uint32_t v)
+{
+  p[0] = uint8_t(v); p[1] = uint8_t(v >> 8);
+  p[2] = uint8_t(v >> 16); p[3] = uint8_t(v >> 24);
+}
+void write_u64_le(unsigned char* p, uint64_t v)
+{
+  for (int i = 0; i < 8; i++) p[i] = uint8_t(v >> (8 * i));
+}
+uint32_t read_u32_le(const unsigned char* p)
+{
+  return uint32_t(p[0]) | (uint32_t(p[1]) << 8)
+       | (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
+}
+uint64_t read_u64_le(const unsigned char* p)
+{
+  uint64_t v = 0;
+  for (int i = 0; i < 8; i++) v |= uint64_t(p[i]) << (8 * i);
+  return v;
 }
 
 } // namespace
@@ -101,7 +158,19 @@ arctoStatus_t arctoZFPCompressGetMaxOutputSize(
   // a few bytes; we add ZFP_HEADER_MAX_BITS conservatively.
   const size_t payload_bytes = zfp_stream_maximum_size(zfp, field);
   const size_t header_bytes  = (ZFP_HEADER_MAX_BITS + CHAR_BIT - 1) / CHAR_BIT;
-  *max_bytes = payload_bytes + header_bytes;
+
+  size_t index_overhead = 0;
+  if (mode_needs_index(opts.mode)) {
+    // encode_index_offset writes (blocks/granularity + 1) uint64s. We use
+    // granularity = 1 for maximum decoder flexibility.
+    size_t blocks = 1;
+    for (uint32_t d = 0; d < opts.ndims; d++) {
+      blocks *= (opts.shape[d] + 3u) / 4u;
+    }
+    index_overhead = (blocks + 1) * sizeof(uint64_t) + kArctoZFPTrailerBytes;
+  }
+
+  *max_bytes = payload_bytes + header_bytes + index_overhead;
 
   zfp_field_free(field);
   zfp_stream_close(zfp);
@@ -190,17 +259,68 @@ arctoStatus_t arctoZFPCompress(
     return arctoErrorInvalidValue;
   }
 
+  // Variable-rate modes need a block-offset index alongside the bitstream
+  // so the HIP decoder can seek into each block. Attach a fresh zfp_index
+  // (type = offset, granularity = 1); zfp_compress fills it.
+  zfp_index* idx = nullptr;
+  if (mode_needs_index(opts.mode)) {
+    idx = zfp_index_create();
+    if (!idx) {
+      zfp_field_free(field);
+      zfp_stream_close(zfp);
+      stream_close(bs);
+      return arctoErrorInternal;
+    }
+    zfp_index_set_type(idx, zfp_index_offset, 1u);
+    zfp_stream_set_index(zfp, idx);
+  }
+
   const size_t payload_bytes = zfp_compress(zfp, field);
+  if (payload_bytes == 0) {
+    if (idx) { if (idx->data) std::free(idx->data); zfp_index_free(idx); }
+    zfp_field_free(field);
+    zfp_stream_close(zfp);
+    stream_close(bs);
+    return arctoErrorInternal;
+  }
+
+  // 3. Append the encoded index (if any) and a fixed-size trailer.
+  size_t total = header_bytes + payload_bytes;
+  if (idx && idx->data && idx->size > 0) {
+    const size_t need = total + idx->size + kArctoZFPTrailerBytes;
+    if (need > h_output_capacity) {
+      std::free(idx->data);
+      zfp_index_free(idx);
+      zfp_field_free(field);
+      zfp_stream_close(zfp);
+      stream_close(bs);
+      return arctoErrorInvalidValue;
+    }
+    auto* out = static_cast<unsigned char*>(h_output);
+    std::memcpy(out + total, idx->data, idx->size);
+    total += idx->size;
+
+    // Trailer (20 bytes), positioned at out[total .. total+19]:
+    out[total + 0] = static_cast<uint8_t>(idx->type);
+    out[total + 1] = 0;
+    out[total + 2] = 0;
+    out[total + 3] = 0;
+    write_u32_le(out + total + 4,  idx->granularity);
+    write_u64_le(out + total + 8,  static_cast<uint64_t>(idx->size));
+    write_u32_le(out + total + 16, kArctoZFPTrailerMagic);
+    total += kArctoZFPTrailerBytes;
+
+    std::free(idx->data);
+  }
+  if (idx) zfp_index_free(idx);
 
   zfp_field_free(field);
   zfp_stream_close(zfp);
   stream_close(bs);
 
-  if (payload_bytes == 0) return arctoErrorInternal;
-
-  // 3. Prepend the serialized header.
+  // 4. Prepend the serialized header.
   std::memcpy(h_output, header_buf, header_bytes);
-  *actual_size_out = header_bytes + payload_bytes;
+  *actual_size_out = total;
   return arctoSuccess;
 }
 
@@ -259,13 +379,40 @@ arctoStatus_t arctoZFPDecompress(
     return arctoErrorCannotDecompress;
   }
 
-  // 2. Set up a NEW stream that wraps ONLY the payload portion of h_input.
+  // 2. Sniff a trailing index, if present. A FIXED_RATE stream has none,
+  //    and that includes anything produced by an upstream zfp CLI run;
+  //    the magic check makes the trailer self-identifying.
+  size_t  index_bytes        = 0;     // bytes occupied by canonical index data
+  uint8_t trailer_index_type = 0;
+  uint32_t trailer_granularity = 1;
+  const auto* in = static_cast<const unsigned char*>(h_input);
+  if (h_input_size >= header_bytes + kArctoZFPTrailerBytes) {
+    const unsigned char* tail = in + h_input_size - kArctoZFPTrailerBytes;
+    if (read_u32_le(tail + 16) == kArctoZFPTrailerMagic) {
+      trailer_index_type  = tail[0];
+      trailer_granularity = read_u32_le(tail + 4);
+      const uint64_t idx_size_u64 = read_u64_le(tail + 8);
+      // Sanity: index data must fit between the payload region and trailer.
+      if (idx_size_u64 + kArctoZFPTrailerBytes
+            <= h_input_size - header_bytes) {
+        index_bytes = static_cast<size_t>(idx_size_u64);
+      } else {
+        zfp_field_free(field);
+        return arctoErrorCannotDecompress;
+      }
+    }
+  }
+
+  const size_t payload_bytes =
+      h_input_size - header_bytes - index_bytes
+      - (index_bytes ? kArctoZFPTrailerBytes : 0);
+
+  // 3. Set up a NEW stream that wraps ONLY the payload portion of h_input.
   //    The HIP decode kernel reads from bit 0 of its device-side stream
   //    buffer (mirror of the compress path), so feeding it the payload
   //    pointer directly is what gets the right bytes into the kernel.
-  bitstream* bs = stream_open(
-      static_cast<unsigned char*>(const_cast<void*>(h_input)) + header_bytes,
-      h_input_size - header_bytes);
+  bitstream* bs = stream_open(const_cast<unsigned char*>(in) + header_bytes,
+                              payload_bytes);
   if (!bs) { zfp_field_free(field); return arctoErrorInternal; }
 
   zfp_stream* zfp = zfp_stream_open(bs);
@@ -275,30 +422,46 @@ arctoStatus_t arctoZFPDecompress(
     return arctoErrorInternal;
   }
 
-  // The stream's mode/rate/etc. were populated when parse_header() opened
-  // its temporary zfp_stream; that stream is gone now, so we have to apply
-  // the same configuration here from the field metadata. The arcto opts
-  // were derived from the same header that parse_header just read, but to
-  // stay self-contained, recover the original ZFP mode params directly.
-  // Simplest correct path: serialize the header again into a temp buffer
-  // backed by this stream so zfp_read_header populates THIS zfp_stream.
-  // That is wasteful but unambiguous.
+  // Replay header parsing on THIS stream so its mode / minbits / maxbits /
+  // maxprec / minexp match what the encoder used. parse_header() above
+  // populated a throwaway zfp_stream that is now gone; we copy its
+  // settings here via the (smaller) zfp_stream_set_params API.
   bitstream* hs = stream_open(const_cast<void*>(h_input), h_input_size);
   zfp_stream* hz = zfp_stream_open(hs);
   zfp_field* throwaway = zfp_field_alloc();
   zfp_read_header(hz, throwaway, ZFP_HEADER_FULL);
-  // Copy stream config (mode/precision/rate/etc.) to our payload stream.
-  // The canonical exposes this via zfp_stream_compression_mode + the
-  // matching set_* functions, but the lowest-friction route is to use
-  // zfp_stream_set_params which takes raw min/max/prec/exp.
   zfp_stream_set_params(zfp, hz->minbits, hz->maxbits, hz->maxprec, hz->minexp);
   zfp_field_free(throwaway);
   zfp_stream_close(hz);
   stream_close(hs);
 
+  // Reconstruct and attach the index, if the stream had one.
+  zfp_index* idx = nullptr;
+  if (index_bytes > 0) {
+    idx = zfp_index_create();
+    if (!idx) {
+      zfp_field_free(field);
+      zfp_stream_close(zfp);
+      stream_close(bs);
+      return arctoErrorInternal;
+    }
+    zfp_index_set_type(idx,
+        static_cast<zfp_index_type>(trailer_index_type),
+        trailer_granularity);
+    // The HIP decoder reads from idx->data via setup_device_index_decompress
+    // which copies host->device if not already on the GPU. Point at the
+    // index bytes in our input buffer; no copy on our side.
+    zfp_index_set_data(idx,
+        const_cast<unsigned char*>(in)
+            + header_bytes + payload_bytes,
+        index_bytes);
+    zfp_stream_set_index(zfp, idx);
+  }
+
   zfp_field_set_pointer(field, d_output);
 
   if (!zfp_stream_set_execution(zfp, zfp_exec_hip)) {
+    if (idx) zfp_index_free(idx);
     zfp_field_free(field);
     zfp_stream_close(zfp);
     stream_close(bs);
@@ -307,6 +470,7 @@ arctoStatus_t arctoZFPDecompress(
 
   const size_t bytes_read = zfp_decompress(zfp, field);
 
+  if (idx) zfp_index_free(idx);
   zfp_field_free(field);
   zfp_stream_close(zfp);
   stream_close(bs);
