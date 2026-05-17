@@ -76,11 +76,13 @@ endmacro (set_cuda_compilation_options)
 file(GLOB HIP_SOURCES
   ./*.hip
   ./lowlevel/*.hip
-  ./highlevel/*.hip)
+  ./highlevel/*.hip
+  ./zfp_reversible_3d/*.hip)
 file(GLOB CPP_SOURCES
   ./*.cpp
   ./lowlevel/*.cpp
-  ./highlevel/*.cpp)
+  ./highlevel/*.cpp
+  ./zfp_reversible_3d/*.cpp)
 
 if (CUDA_BACKEND)
   setup_cuda_devices()

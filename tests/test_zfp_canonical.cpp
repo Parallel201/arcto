@@ -149,8 +149,8 @@ void run_round_trip(const std::vector<float>& input,
     REQUIRE(st.max_abs <= tol, "FIXED_RATE error too large");
   }
 
-  hipFree(d_in);
-  hipFree(d_out);
+  HIP_CHECK(hipFree(d_in));
+  HIP_CHECK(hipFree(d_out));
 }
 
 } // namespace
