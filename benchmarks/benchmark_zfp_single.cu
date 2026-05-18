@@ -31,6 +31,7 @@
  */
 
 #include "arcto/zfp.h"
+#include "arcto/zfp_reversible_3d.h"
 
 #include <hip/hip_runtime.h>
 
@@ -43,6 +44,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -77,8 +79,11 @@ void print_help(const char* argv0)
     "\n"
     "  -f <path>       input float32 file (required)\n"
     "  -3 <nx,ny,nz>   treat input as 3D cube of this shape (else 1D)\n"
-    "  -m <mode>       fixed_rate (default) | fixed_precision | fixed_accuracy\n"
+    "  -m <mode>       fixed_rate (default) | fixed_precision | fixed_accuracy | reversible\n"
+    "                  reversible is GPU-native lossless (arctoZFPReversible3D, not\n"
+    "                  the canonical's REVERSIBLE which is CPU-only); requires -3 shape\n"
     "  -r <param>      mode parameter (rate bits/value, precision, or tol)\n"
+    "                  ignored for reversible\n"
     "  -i <N>          measured iterations (default 10)\n"
     "  -w <N>          warmup iterations (default 2)\n"
     "  -c              CSV output (single row matching benchmark_*_chunked)\n"
@@ -110,6 +115,7 @@ bool parse_args(int argc, char** argv, Args& a)
       if      (v == "fixed_rate")      a.mode = ARCTO_ZFP_MODE_FIXED_RATE;
       else if (v == "fixed_precision") a.mode = ARCTO_ZFP_MODE_FIXED_PRECISION;
       else if (v == "fixed_accuracy")  a.mode = ARCTO_ZFP_MODE_FIXED_ACCURACY;
+      else if (v == "reversible")      a.mode = ARCTO_ZFP_MODE_REVERSIBLE;
       else { std::fprintf(stderr, "unknown mode %s\n", v.c_str()); return false; }
     }
     else if (s == "-r") a.param = std::atof(next().c_str());
@@ -142,6 +148,51 @@ double stddev(const std::vector<double>& v)
   double sq = 0.0;
   for (double x : v) sq += (x - mean) * (x - mean);
   return std::sqrt(sq / v.size());
+}
+
+/**
+ * Fidelity metrics computed on the float32 round-trip (orig vs decompressed).
+ * Reported in the CSV alongside throughput for paper-grade lossy validation.
+ */
+struct ErrorMetrics {
+  double max_abs_diff = 0.0;   // L_infinity error -- worst-case sample delta
+  double rmse         = 0.0;   // sqrt(mean((orig - dec)^2))
+  double psnr_db      = 0.0;   // 20*log10(amplitude_range / rmse); +inf when rmse=0
+  double max_rel_err  = 0.0;   // max_abs_diff / amplitude_range (0..1)
+  double amp_range    = 0.0;   // max(orig) - min(orig)
+};
+
+/**
+ * Compares two float32 buffers of length n_elements and returns the four
+ * error metrics RTM compression literature reports (Lindstrom 2014;
+ * Boehm & Hanzich 2014; Calandra et al 2018).
+ *
+ * Operates on host buffers; the caller is responsible for the D2H of the
+ * decompressed output. Cost is O(n) two-pass (min/max then squared diff).
+ */
+ErrorMetrics compute_error(const float* orig, const float* dec, size_t n)
+{
+  ErrorMetrics m;
+  if (n == 0) return m;
+  float mn = orig[0], mx = orig[0];
+  for (size_t i = 0; i < n; ++i) {
+    if (orig[i] < mn) mn = orig[i];
+    if (orig[i] > mx) mx = orig[i];
+  }
+  m.amp_range = double(mx) - double(mn);
+
+  double sum_sq = 0.0;
+  for (size_t i = 0; i < n; ++i) {
+    const double d = double(orig[i]) - double(dec[i]);
+    if (std::abs(d) > m.max_abs_diff) m.max_abs_diff = std::abs(d);
+    sum_sq += d * d;
+  }
+  m.rmse = std::sqrt(sum_sq / double(n));
+  m.psnr_db = (m.rmse > 0.0 && m.amp_range > 0.0)
+                ? 20.0 * std::log10(m.amp_range / m.rmse)
+                : std::numeric_limits<double>::infinity();
+  m.max_rel_err = (m.amp_range > 0.0) ? m.max_abs_diff / m.amp_range : 0.0;
+  return m;
 }
 
 } // namespace
@@ -195,6 +246,161 @@ int main(int argc, char** argv)
   float* fp = reinterpret_cast<float*>(raw.data());
   const size_t nf = uncompressed_bytes / sizeof(float);
   for (size_t k = 0; k < nf; k++) if (!std::isfinite(fp[k])) fp[k] = 0.0f;
+
+  // -----------------------------------------------------------------------
+  // REVERSIBLE branch: GPU-native lossless (arctoZFPReversible3D), totally
+  // separate code path from the canonical wrapper. Fully device-resident,
+  // async API. Requires 3D shape. Always lossless (compress->decompress
+  // bit-exact within float32 ULP).
+  // -----------------------------------------------------------------------
+  if (a.mode == ARCTO_ZFP_MODE_REVERSIBLE) {
+    if (opts.ndims != 3) {
+      std::fprintf(stderr, "reversible mode requires 3D shape (-3 nx,ny,nz)\n");
+      return 1;
+    }
+    arctoZFPReversible3DOpts_t rev_opts = arctoZFPReversible3DDefaultOpts;
+    rev_opts.type = ARCTO_ZFP_REV3D_TYPE_FLOAT;
+    rev_opts.nx   = opts.shape[0];
+    rev_opts.ny   = opts.shape[1];
+    rev_opts.nz   = opts.shape[2];
+
+    size_t rev_max_comp = 0;
+    if (arctoZFPReversible3DCompressGetMaxOutputSize(rev_opts, &rev_max_comp) != arctoSuccess) {
+      std::fprintf(stderr, "Reversible GetMaxOutputSize failed\n"); return 1;
+    }
+
+    void *d_in = nullptr, *d_comp = nullptr, *d_dec = nullptr;
+    size_t *d_size = nullptr, *d_dec_size = nullptr;
+    arctoStatus_t *d_status = nullptr;
+    HIP_CHECK(hipMalloc(&d_in,       uncompressed_bytes));
+    HIP_CHECK(hipMalloc(&d_comp,     rev_max_comp));
+    HIP_CHECK(hipMalloc(&d_dec,      uncompressed_bytes));
+    HIP_CHECK(hipMalloc(&d_size,     sizeof(size_t)));
+    HIP_CHECK(hipMalloc(&d_dec_size, sizeof(size_t)));
+    HIP_CHECK(hipMalloc(&d_status,   sizeof(arctoStatus_t)));
+
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+
+    using clk = std::chrono::high_resolution_clock;
+    auto t_h2d_0 = clk::now();
+    HIP_CHECK(hipMemcpy(d_in, raw.data(), uncompressed_bytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipDeviceSynchronize());
+    const double rev_h2d_ms = std::chrono::duration<double, std::milli>(clk::now() - t_h2d_0).count();
+
+    auto do_compress = [&]() {
+      arctoStatus_t s = arctoZFPReversible3DCompressAsync(
+          d_in, rev_opts, d_comp, rev_max_comp, d_size, stream);
+      HIP_CHECK(hipStreamSynchronize(stream));
+      return s;
+    };
+    auto do_decompress = [&](size_t in_size) {
+      arctoStatus_t s = arctoZFPReversible3DDecompressAsync(
+          d_comp, in_size, d_dec, uncompressed_bytes, d_dec_size, d_status, stream);
+      HIP_CHECK(hipStreamSynchronize(stream));
+      return s;
+    };
+
+    for (size_t w = 0; w < a.warmup; w++) {
+      if (do_compress() != arctoSuccess) { std::fprintf(stderr, "rev warmup compress failed\n"); return 1; }
+    }
+
+    std::vector<double> rev_comp_ms(a.iterations), rev_decomp_ms(a.iterations);
+    size_t comp_size_host = 0;
+    for (size_t i = 0; i < a.iterations; i++) {
+      auto tc0 = clk::now();
+      if (do_compress() != arctoSuccess) { std::fprintf(stderr, "rev iter %zu compress failed\n", i); return 1; }
+      rev_comp_ms[i] = std::chrono::duration<double, std::milli>(clk::now() - tc0).count();
+      // Read back the size for the decompress call (cheap; one size_t)
+      HIP_CHECK(hipMemcpy(&comp_size_host, d_size, sizeof(size_t), hipMemcpyDeviceToHost));
+
+      auto td0 = clk::now();
+      if (do_decompress(comp_size_host) != arctoSuccess) {
+        std::fprintf(stderr, "rev iter %zu decompress failed\n", i); return 1;
+      }
+      rev_decomp_ms[i] = std::chrono::duration<double, std::milli>(clk::now() - td0).count();
+    }
+
+    const double rev_comp_time_ms   = std::accumulate(rev_comp_ms.begin(), rev_comp_ms.end(), 0.0) / a.iterations;
+    const double rev_decomp_time_ms = std::accumulate(rev_decomp_ms.begin(), rev_decomp_ms.end(), 0.0) / a.iterations;
+    const double rev_comp_total_ms  = rev_h2d_ms + rev_comp_time_ms;
+    const double rev_comp_tp_gbs    = (uncompressed_bytes / 1e9) / (rev_comp_time_ms / 1e3);
+    const double rev_decomp_tp_gbs  = (uncompressed_bytes / 1e9) / (rev_decomp_time_ms / 1e3);
+    const double rev_ratio          = double(uncompressed_bytes) / double(comp_size_host);
+
+    // Fidelity: D2H the decompressed buffer and compare to the host-side
+    // sanitized input. Reversible must be bit-exact within float32 ULP --
+    // expect max_abs_diff <= ~5e-7 (epsilon * max amplitude).
+    std::vector<unsigned char> dec_host(uncompressed_bytes);
+    HIP_CHECK(hipMemcpy(dec_host.data(), d_dec, uncompressed_bytes, hipMemcpyDeviceToHost));
+    const ErrorMetrics rev_err = compute_error(
+        reinterpret_cast<const float*>(raw.data()),
+        reinterpret_cast<const float*>(dec_host.data()),
+        nf);
+
+    if (!a.csv) {
+      std::printf("file=%s  ndims=3  mode=reversible\n", a.path.c_str());
+      std::printf("uncompressed=%zu B  compressed=%zu B  ratio=%.2fx\n",
+                  uncompressed_bytes, comp_size_host, rev_ratio);
+      std::printf("comp=%.3f ms  decomp=%.3f ms  H2D=%.3f ms\n",
+                  rev_comp_time_ms, rev_decomp_time_ms, rev_h2d_ms);
+      std::printf("comp_throughput=%.2f GB/s  decomp_throughput=%.2f GB/s\n",
+                  rev_comp_tp_gbs, rev_decomp_tp_gbs);
+      std::printf("fidelity: max_abs_diff=%.3e  rmse=%.3e  psnr=%.2f dB  max_rel=%.3e  (amp_range=%.3e)\n",
+                  rev_err.max_abs_diff, rev_err.rmse, rev_err.psnr_db,
+                  rev_err.max_rel_err, rev_err.amp_range);
+    } else {
+      const char sep = ',';
+      std::cout << "Files" << sep << "Duplicate data" << sep << "Size in MB"
+                << sep << "Pages" << sep << "Avg page size in KB"
+                << sep << "Max page size in KB" << sep << "Ucompressed size in bytes"
+                << sep << "Compressed size in bytes" << sep << "Compression ratio"
+                << sep << "Compression throughput (uncompressed) in GB/s"
+                << sep << "Decompression throughput (uncompressed) in GB/s"
+                << sep << "Compression time (ms)" << sep << "Decompression time (ms)"
+                << sep << "Transfer H2D (ms)" << sep << "Transfer D2H (ms)"
+                << sep << "Total time (ms)" << sep << "Avg chunk time (ms)"
+                << sep << "Comp throughput stddev (GB/s)"
+                << sep << "Decomp throughput stddev (GB/s)"
+                << sep << "Comp time stddev (ms)" << sep << "Decomp time stddev (ms)"
+                << sep << "Max abs diff" << sep << "RMSE"
+                << sep << "PSNR (dB)" << sep << "Max rel error"
+                << sep << "Amplitude range\n";
+      std::vector<double> rev_comp_tp(a.iterations), rev_decomp_tp(a.iterations);
+      for (size_t i = 0; i < a.iterations; i++) {
+        rev_comp_tp[i]   = (uncompressed_bytes / 1e9) / (rev_comp_ms[i] / 1e3);
+        rev_decomp_tp[i] = (uncompressed_bytes / 1e9) / (rev_decomp_ms[i] / 1e3);
+      }
+      std::cout << std::fixed;
+      std::cout << 1 << sep << 0
+                << sep << std::setprecision(6) << (uncompressed_bytes * 1e-6)
+                << sep << 1 << sep << (uncompressed_bytes * 1e-3) << sep << (uncompressed_bytes * 1e-3)
+                << sep << uncompressed_bytes << sep << comp_size_host
+                << sep << std::setprecision(2) << rev_ratio
+                << sep << rev_comp_tp_gbs << sep << rev_decomp_tp_gbs
+                << sep << std::setprecision(3) << rev_comp_time_ms
+                << sep << rev_decomp_time_ms
+                << sep << rev_h2d_ms << sep << 0.0 << sep << rev_comp_total_ms
+                << sep << std::setprecision(6) << rev_comp_time_ms
+                << sep << std::setprecision(4) << stddev(rev_comp_tp) << sep << stddev(rev_decomp_tp)
+                << sep << stddev(rev_comp_ms) << sep << stddev(rev_decomp_ms)
+                << sep << std::scientific << std::setprecision(4) << rev_err.max_abs_diff
+                << sep << rev_err.rmse
+                << sep << std::fixed << std::setprecision(2) << rev_err.psnr_db
+                << sep << std::scientific << std::setprecision(4) << rev_err.max_rel_err
+                << sep << rev_err.amp_range
+                << "\n";
+    }
+
+    HIP_CHECK(hipFree(d_in));
+    HIP_CHECK(hipFree(d_comp));
+    HIP_CHECK(hipFree(d_dec));
+    HIP_CHECK(hipFree(d_size));
+    HIP_CHECK(hipFree(d_dec_size));
+    HIP_CHECK(hipFree(d_status));
+    HIP_CHECK(hipStreamDestroy(stream));
+    return 0;
+  }
 
   size_t max_comp = 0;
   if (arctoZFPCompressGetMaxOutputSize(opts, &max_comp) != arctoSuccess) {
@@ -286,6 +492,17 @@ int main(int argc, char** argv)
   const double decomp_throughput_gbs = (uncompressed_bytes / 1e9) / (decomp_time_ms / 1e3);
   const double comp_ratio = double(uncompressed_bytes) / double(comp_size);
 
+  // Fidelity: D2H the decompressed buffer and compare to host-side input.
+  // Only meaningful for ndims>=1 float32 (which is everything benchmark_zfp_single
+  // supports today). For lossy modes this exposes the actual error budget vs the
+  // requested tolerance; for fixed_rate it shows the implicit error of the bit-rate.
+  std::vector<unsigned char> dec_host(uncompressed_bytes);
+  HIP_CHECK(hipMemcpy(dec_host.data(), d_output, uncompressed_bytes, hipMemcpyDeviceToHost));
+  const ErrorMetrics err = compute_error(
+      reinterpret_cast<const float*>(raw.data()),
+      reinterpret_cast<const float*>(dec_host.data()),
+      nf);
+
   if (!a.csv) {
     const char* mode_s = (a.mode == ARCTO_ZFP_MODE_FIXED_RATE) ? "fixed_rate" :
                          (a.mode == ARCTO_ZFP_MODE_FIXED_PRECISION) ? "fixed_precision" :
@@ -298,6 +515,8 @@ int main(int argc, char** argv)
                 comp_time_ms, decomp_time_ms, h2d_ms);
     std::printf("comp_throughput=%.2f GB/s  decomp_throughput=%.2f GB/s\n",
                 comp_throughput_gbs, decomp_throughput_gbs);
+    std::printf("fidelity: max_abs_diff=%.3e  rmse=%.3e  psnr=%.2f dB  max_rel=%.3e  (amp_range=%.3e)\n",
+                err.max_abs_diff, err.rmse, err.psnr_db, err.max_rel_err, err.amp_range);
   } else {
     // CSV header matching benchmark_*_chunked exactly.
     const char sep = ',';
@@ -312,7 +531,10 @@ int main(int argc, char** argv)
               << sep << "Total time (ms)" << sep << "Avg chunk time (ms)"
               << sep << "Comp throughput stddev (GB/s)"
               << sep << "Decomp throughput stddev (GB/s)"
-              << sep << "Comp time stddev (ms)" << sep << "Decomp time stddev (ms)\n";
+              << sep << "Comp time stddev (ms)" << sep << "Decomp time stddev (ms)"
+              << sep << "Max abs diff" << sep << "RMSE"
+              << sep << "PSNR (dB)" << sep << "Max rel error"
+              << sep << "Amplitude range\n";
     // Per-iteration throughputs for stddev (the chunked benchmark reports
     // stddev OF throughput, not throughput evaluated at the stddev of time).
     std::vector<double> comp_tp(a.iterations), decomp_tp(a.iterations);
@@ -343,6 +565,11 @@ int main(int argc, char** argv)
               << sep << stddev(decomp_tp)
               << sep << stddev(comp_ms)
               << sep << stddev(decomp_ms)
+              << sep << std::scientific << std::setprecision(4) << err.max_abs_diff
+              << sep << err.rmse
+              << sep << std::fixed << std::setprecision(2) << err.psnr_db
+              << sep << std::scientific << std::setprecision(4) << err.max_rel_err
+              << sep << err.amp_range
               << "\n";
   }
 
