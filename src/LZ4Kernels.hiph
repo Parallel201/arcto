@@ -127,6 +127,27 @@ const int LZ4_DECOMP_THREADS_PER_CHUNK = warpsize;
  */
 const int LZ4_DECOMP_CHUNKS_PER_BLOCK = 2;
 
+/**
+ * @brief The number of chunks to compress concurrently per threadblock.
+ *
+ * Each chunk is processed by exactly one wave (warp), so this is also the
+ * number of waves per block on the compress path. The original
+ * NVIDIA-derived kernel ran 1 chunk per block (1 wave/block on wave32),
+ * which on CDNA3 wave64 (MI300X) caps total wave count at batch_size --
+ * starves the GPU at ~9% occupancy because there's nothing else to schedule.
+ * Packing N chunks per block multiplies total wave count by N, lifting
+ * occupancy linearly (VALU was already 94% busy per wave; the only
+ * shortage is wave-count itself).
+ *
+ * Profile data + reasoning in
+ * compression-experiments paper/ARCTO-optim/results/MI300X_PROFILE_TIMESTAMP/FINDINGS.md
+ *
+ * Values: 1 reproduces the historical (NVIDIA-style) launch. 4 is the
+ * tuning point empirically chosen for MI300X; should be tunable per-arch
+ * once the cross-GPU sweep covers MI50 and MI210.
+ */
+const int LZ4_COMP_CHUNKS_PER_BLOCK = 4;
+
 #define OOB_CHECKING 1 // Prevent's crashing of corrupt lz4 sequences
 
 namespace arcto {
@@ -223,17 +244,22 @@ inline __device__ signed_lane_mask_t warpMatchAny(const signed_lane_mask_t parti
 #else
   signed_lane_mask_t mask = 0;
 
-  // full search
-  __shared__ T values[warpsize];
+  // Per-chunk shared-memory slice. When blockDim.y > 1 (multiple chunks per
+  // block, see LZ4_COMP_CHUNKS_PER_BLOCK), each chunk's wave needs its own
+  // values[warpsize] region to avoid cross-chunk collisions. The legacy
+  // 1-chunk-per-block path naturally degenerates: threadIdx.y == 0 and the
+  // slice is the original [0..warpsize-1].
+  __shared__ T values[LZ4_COMP_CHUNKS_PER_BLOCK * warpsize];
+  T* const my_values = values + threadIdx.y * warpsize;
   assert(blockDim.x == warpsize);
-  assert(blockDim.y == 1);
+  assert(blockDim.y <= LZ4_COMP_CHUNKS_PER_BLOCK);
   if ((LANE_MASK_ONE << threadIdx.x) & participants) {
-    values[threadIdx.x] = val;
+    my_values[threadIdx.x] = val;
     SYNCWARP(participants);
     for (int d = 0; d < warpsize; ++d) {
       const int nbr_id = (threadIdx.x + d) & (uwarpsize-1);
       if ((LANE_MASK_ONE << nbr_id) & participants) {
-        const T nbr_val = values[nbr_id];
+        const T nbr_val = my_values[nbr_id];
         mask |= static_cast<lane_mask_t>(val == nbr_val) << nbr_id;
       }
     }
