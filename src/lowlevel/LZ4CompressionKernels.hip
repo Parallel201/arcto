@@ -77,9 +77,19 @@ __global__ void lz4CompressBatchKernel(
     uint8_t* const* const device_out_ptr,
     size_t* const device_out_bytes,
     offset_type* const temp_space,
-    const position_type hash_table_size)
+    const position_type hash_table_size,
+    const size_t batch_size)
 {
   const int bidx = blockIdx.x * blockDim.y + threadIdx.y;
+
+  // Tail block guard: with LZ4_COMP_CHUNKS_PER_BLOCK > 1, the last block can
+  // have leftover waves whose bidx exceeds batch_size. The condition is
+  // uniform across a wave (threadIdx.y is the same for all threads in a
+  // wave), so the early-return is wave-safe -- no risk of half-wave deadlock
+  // on SYNCWARP/__ballot inside compressStream.
+  if (bidx >= static_cast<int>(batch_size)) {
+    return;
+  }
 
   auto decomp_ptr = device_in_ptr[bidx];
   assert(reinterpret_cast<uintptr_t>(decomp_ptr) % sizeof(T) == 0 && "Input buffer not aligned");
@@ -179,8 +189,13 @@ void lz4BatchCompress(
         + " bytes.");
   }
 
-  const dim3 grid(batch_size);
-  const dim3 block(LZ4_COMP_THREADS_PER_CHUNK); //: 32
+  // 2D launch: N chunks per block, each chunk gets its own wave. The
+  // historical layout was 1D (1 chunk = 1 block = 1 wave) which under-
+  // populated CDNA3 wave slots. With LZ4_COMP_CHUNKS_PER_BLOCK > 1 we
+  // multiply total wave count by N. See LZ4_COMP_CHUNKS_PER_BLOCK doc
+  // in LZ4Kernels.hiph for the profile-driven motivation.
+  const dim3 grid(roundUpDiv(batch_size, LZ4_COMP_CHUNKS_PER_BLOCK));
+  const dim3 block(LZ4_COMP_THREADS_PER_CHUNK, LZ4_COMP_CHUNKS_PER_BLOCK);
 
   switch (data_type) {
     case ARCTO_TYPE_BITS:
@@ -192,7 +207,8 @@ void lz4BatchCompress(
           comp_data_device,
           comp_sizes_device,
           static_cast<offset_type*>(temp_data),
-          HT_size);
+          HT_size,
+          batch_size);
       break;
     case ARCTO_TYPE_SHORT:
     case ARCTO_TYPE_USHORT:
@@ -202,7 +218,8 @@ void lz4BatchCompress(
           comp_data_device,
           comp_sizes_device,
           static_cast<offset_type*>(temp_data),
-          HT_size);
+          HT_size,
+          batch_size);
       break;
     case ARCTO_TYPE_INT:
     case ARCTO_TYPE_UINT:
@@ -212,7 +229,8 @@ void lz4BatchCompress(
           comp_data_device,
           comp_sizes_device,
           static_cast<offset_type*>(temp_data),
-          HT_size);
+          HT_size,
+          batch_size);
       break;
     default:
       throw std::invalid_argument("Unsupported input data type");
