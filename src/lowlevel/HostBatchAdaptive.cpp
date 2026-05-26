@@ -27,8 +27,15 @@ constexpr double DEFAULT_R_KERNEL_GBPS = 30.0;     // mid-range across algorithm
 
 // Practical lower bounds on W_opt. None of these depend on input size;
 // W_opt is the maximum of all three constraints applied as floors.
+//
+// W_PCIE_AMORT_FLOOR: conservative pinned-H2D bandwidth floor. The
+// microbenchmark in microbench/pcie/ shows the curve knee at 8-16 MiB
+// on PCIe Gen4 x16 (RX 7900 XT); 64 MiB sits well above that knee
+// with a ~4x margin against system-level variability and to leave
+// headroom for PCIe Gen5 / XGMI hosts (MI300X) until per-arch
+// validation is available.
 constexpr size_t W_KERNEL_SAT_DEFAULT = 64ull * 1024 * 1024;   // 64 MB safe default; arch-specific override below
-constexpr size_t W_PCIE_AMORT_FLOOR    = 64ull * 1024 * 1024;  // 64 MB
+constexpr size_t W_PCIE_AMORT_FLOOR    = 64ull * 1024 * 1024;  // 64 MB (conservative; knee in Gen4 microbench at ~16 MiB, validated 25% extra pinned memory cost)
 constexpr size_t W_LAUNCH_AMORT_FLOOR  = 16ull * 1024 * 1024;  // 16 MB
 
 // W_kernel_sat = wave_slots * chunk_size_opt. We hardcode the products
