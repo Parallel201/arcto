@@ -59,9 +59,7 @@ zfp_field* make_field(const arctoZFPOpts_t& opts, void* data)
 // REVERSIBLE          -> NOT supported on the canonical HIP backend at all
 //                        (its compress/decompress switch on
 //                        zfp_mode_reversible falls through to the "mode
-//                        not supported on GPU" branch). REVERSIBLE on the
-//                        GPU is reserved for ARCTO's own future
-//                        src/reversible_3d/ module.
+//                        not supported on GPU" branch).
 bool configure_stream(zfp_stream* zfp, const arctoZFPOpts_t& opts)
 {
   const zfp_type t = to_zfp_type(opts.type);
