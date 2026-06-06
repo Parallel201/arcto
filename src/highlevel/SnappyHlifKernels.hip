@@ -158,32 +158,36 @@ void snappyHlifBatchDecompress(
       output_status);
 }
 
-size_t snappyHlifCompMaxBlockOccupancy(const int device_id) 
+size_t snappyHlifCompMaxBlockOccupancy(const int device_id)
 {
   hipDeviceProp_t device_prop;
-  hipGetDeviceProperties(&device_prop, device_id);
+  HipUtils::check(hipGetDeviceProperties(&device_prop, device_id),
+                  "snappyHlifCompMaxBlockOccupancy: hipGetDeviceProperties");
   int num_blocks_per_sm;
   constexpr int shmem_size = 0;
-  hipOccupancyMaxActiveBlocksPerMultiprocessor(
-      &num_blocks_per_sm, 
-      HlifCompressBatchKernel<snappy_compress_wrapper>, 
+  HipUtils::check(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+      &num_blocks_per_sm,
+      HlifCompressBatchKernel<snappy_compress_wrapper>,
       COMP_THREADS_PER_BLOCK,
-      shmem_size);
-  
+      shmem_size),
+                  "snappyHlifCompMaxBlockOccupancy: occupancy query");
+
   return device_prop.multiProcessorCount * num_blocks_per_sm;
 }
 
-size_t snappyHlifDecompMaxBlockOccupancy(const int device_id) 
+size_t snappyHlifDecompMaxBlockOccupancy(const int device_id)
 {
   hipDeviceProp_t device_prop;
-  hipGetDeviceProperties(&device_prop, device_id);
+  HipUtils::check(hipGetDeviceProperties(&device_prop, device_id),
+                  "snappyHlifDecompMaxBlockOccupancy: hipGetDeviceProperties");
   int num_blocks_per_sm;
   constexpr int shmem_size = 0;
-  hipOccupancyMaxActiveBlocksPerMultiprocessor(
-      &num_blocks_per_sm, 
-      HlifDecompressBatchKernel<snappy_decompress_wrapper, 1>, 
-      DECOMP_THREADS_PER_BLOCK, 
-      shmem_size);
+  HipUtils::check(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+      &num_blocks_per_sm,
+      HlifDecompressBatchKernel<snappy_decompress_wrapper, 1>,
+      DECOMP_THREADS_PER_BLOCK,
+      shmem_size),
+                  "snappyHlifDecompMaxBlockOccupancy: occupancy query");
   
   return device_prop.multiProcessorCount * num_blocks_per_sm;
 }

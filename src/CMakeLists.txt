@@ -127,6 +127,14 @@ if (ans_FOUND)
   target_link_libraries(arcto PRIVATE ans)
 endif()
 
+# Vendored canonical LLNL/zfp (added at the top-level CMakeLists via
+# add_subdirectory(third_party/zfp)). The zfp::zfp target is a static
+# library; linking is PRIVATE because we expose only the arcto/zfp.h C
+# wrapper, never canonical's headers.
+if (TARGET zfp::zfp)
+  target_link_libraries(arcto PRIVATE zfp::zfp)
+endif()
+
 if (BUILD_TESTS)
   add_subdirectory("test")
   add_subdirectory("highlevel/test")

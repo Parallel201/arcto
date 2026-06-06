@@ -116,7 +116,7 @@ void test_base_alloc(const size_t size, const size_t num)
 
   checked_alloc<T>(temp, num);
 
-  hipFree(ptr);
+  HIP_RT_CALL(hipFree(ptr));
 }
 
 template <typename T>
@@ -135,7 +135,7 @@ void test_base_alloc_exception(const size_t size, const size_t num)
     // pass
   }
 
-  hipFree(ptr);
+  HIP_RT_CALL(hipFree(ptr));
 }
 
 /******************************************************************************
@@ -158,7 +158,7 @@ TEST_CASE("MixedSizeTest", "[small]")
   checked_alloc<Test32BStruct>(temp, 3);
   checked_alloc<double>(temp, 7);
 
-  hipFree(ptr);
+  HIP_RT_CALL(hipFree(ptr));
 }
 
 TEST_CASE("AllBaseTypeTest", "[small]")

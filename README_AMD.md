@@ -1,10 +1,10 @@
-# hipCOMP-CORE
+# ARCTO-CORE
 
 > [!CAUTION]
 > This release is an *early-access* software technology preview. Running production workloads is *not* recommended.
 ***
 
-hipCOMP CORE is a library for fast lossless compression/decompression on AMD GPUs.
+ARCTO CORE is a library for fast lossless compression/decompression on AMD GPUs.
 
 The code is based on ``nvCOMP`` release branch [``branch-2.2``](https://github.com/NVIDIA/nvcomp/tree/branch-2.2).
 GPU implementations of algorithms like DEFLATE, GDEFLATE, ANS, and zSTD that have been later introduced as part of nvCOMP's proprietary

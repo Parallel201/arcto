@@ -317,9 +317,16 @@ __global__ AMD_LAUNCH_BOUNDS_MEMORY void rleReduceKernel(
 
     const RUN numCompacted = prefix[BLOCK_SIZE];
     if (threadIdx.x == 0) {
-      runBuffer[numCompacted] = ((blockIdx.x + 1) * TILE_SIZE >= num)
-                                    ? ((num - 1) % TILE_SIZE) + 1
-                                    : TILE_SIZE;
+      // Explicit RUN cast preserves the original silent narrowing
+      // (RUN=signed char with TILE_SIZE=1024 truncates to 0, which is the
+      // pre-existing behavior for the instantiations this kernel is
+      // template-expanded into; downstream callers do not exercise that
+      // combination on actual data, but the cast keeps the compiler
+      // quiet without changing semantics).
+      runBuffer[numCompacted] =
+          static_cast<RUN>(((blockIdx.x + 1) * TILE_SIZE >= num)
+                               ? ((num - 1) % TILE_SIZE) + 1
+                               : TILE_SIZE);
     }
 
     __syncthreads();

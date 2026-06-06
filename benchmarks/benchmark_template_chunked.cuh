@@ -33,6 +33,8 @@
 
 #ifdef __HIP_PLATFORM_AMD__
 #include "arcto.h"
+#include "arcto/host_batch.h"
+#include "arcto/host_batch_adaptive.h"
 #include "arcto/lz4.h"
 #include "arcto/snappy.h"
 #include "arcto/cascaded.h"
@@ -50,6 +52,7 @@
 #endif
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -119,7 +122,10 @@ void run_benchmark( \
     const bool csv_output, \
     const bool tab_separator, \
     const size_t duplicate_count, \
-    const size_t num_files) \
+    const size_t num_files, \
+    const bool pinned_input, \
+    const bool report_phases, \
+    const bool adaptive_tiled) \
 { \
   run_benchmark_template( \
       comp_get_temp, \
@@ -135,7 +141,10 @@ void run_benchmark( \
       csv_output, \
       tab_separator, \
       duplicate_count, \
-      num_files); \
+      num_files, \
+      pinned_input, \
+      report_phases, \
+      adaptive_tiled); \
 }
 
 // A helper function for if the input data requires no validation.
@@ -387,7 +396,10 @@ run_benchmark_template(
     const bool csv_output,
     const bool use_tabs,
     const size_t duplicates,
-    const size_t num_files)
+    const size_t num_files,
+    const bool pinned_input,
+    const bool report_phases,
+    const bool adaptive_tiled)
 {
   benchmark::benchmark_assert(IsInputValid(data), "Invalid input data");
 
@@ -426,28 +438,174 @@ run_benchmark_template(
   comp_times_ms.reserve(count);
   decomp_times_ms.reserve(count);
 
-  // Measure H2D transfer overhead (representative of input upload cost)
+  // Measure H2D transfer overhead (representative of input upload cost).
+  // The chunked path (1600 x 64KB hipMemcpyAsync from scattered pageable
+  // std::vector storage) caps at ~6 GB/s because per-call launch overhead
+  // dominates. When --pinned_input is set, we coalesce the chunks into a
+  // single arctoHostBatch (one pinned allocation) and issue ONE
+  // hipMemcpyAsync, hitting PCIe peak (~27 GB/s, RX 7900 XT). The two
+  // optimizations are multiplicative -- see compression-experiments@458d5ad
+  // for the standalone characterization.
+  //
+  // We run this block during warmup too (timings discarded) so the
+  // process-lifetime static pinned batch is allocated on the warmup
+  // invocation. On gfx1100 hipHostMalloc has a ~13-iter side effect on
+  // subsequent compress kernels (see RX7900XT_BYTE_PINNED_ROOTCAUSE_*/
+  // FINDINGS.md); paying it once during warmup ensures the measurement
+  // run's H2D reuses the already-allocated batch and the measured iters
+  // start clean.
   float h2d_ms = 0.0f;
-  if (!warmup && total_bytes > 0) {
+  // Desaggregated host-side preparation phases, populated only on the
+  // --pinned_input or --adaptive_tiled paths (the scattered-pageable
+  // baseline does no host-side prep). All in milliseconds;
+  // peak_pinned_bytes is the size of the pinned allocation that backs
+  // the upload (full input for --pinned_input, window size W_opt for
+  // --adaptive_tiled).
+  double t_alloc_ms = 0.0;
+  double t_memcpy_h2h_ms = 0.0;
+  size_t peak_pinned_bytes = 0;
+  // Adaptive-tiled-specific stats (left at zero for other modes).
+  size_t adaptive_window_bytes = 0;
+  size_t adaptive_num_windows  = 0;
+  if (total_bytes > 0) {
     void* d_transfer_buf;
     GPU_CHECK(hipMalloc(&d_transfer_buf, total_bytes));
-    uint8_t* dst = static_cast<uint8_t*>(d_transfer_buf);
     hipEvent_t ts, te;
     GPU_CHECK(hipEventCreate(&ts));
     GPU_CHECK(hipEventCreate(&te));
-    GPU_CHECK(hipEventRecord(ts, stream));
-    for (const auto& chunk : data) {
-      GPU_CHECK(hipMemcpyAsync(dst, chunk.data(), chunk.size(),
-          hipMemcpyHostToDevice, stream));
-      dst += chunk.size();
+
+    if (adaptive_tiled) {
+      // Tiled aggregation: allocate ONE pinned window buffer of size
+      // W_opt and process the input in ceil(total_bytes / W_opt)
+      // windows, accumulating per-phase times into the same
+      // t_alloc_ms / t_memcpy_h2h_ms / h2d_ms tallies used by the
+      // single-shot pinned path. This way the CSV column semantics are
+      // identical across modes.
+      arctoHostBatchAdaptive_t* ab = nullptr;
+      benchmark::benchmark_assert(
+          arctoHostBatchAdaptiveCreate(total_bytes, 0.0, &ab) == arctoSuccess,
+          "arctoHostBatchAdaptiveCreate failed");
+
+      // Phase A: choose window and allocate the pinned buffer.
+      const auto t_a0 = std::chrono::high_resolution_clock::now();
+      const size_t W = arctoHostBatchAdaptiveChooseWindow(ab);
+      const auto t_a1 = std::chrono::high_resolution_clock::now();
+      t_alloc_ms = std::chrono::duration<double, std::milli>(t_a1 - t_a0).count();
+      benchmark::benchmark_assert(W > 0, "arctoHostBatchAdaptiveChooseWindow returned 0");
+      peak_pinned_bytes = W;
+      adaptive_window_bytes = W;
+
+      // Build a flat pageable concatenation of the input chunks so we
+      // can slice it by window without re-walking the chunk vector.
+      // We rely on the input data being already a contiguous logical
+      // stream conceptually.
+      std::vector<char> flat_input;
+      flat_input.reserve(total_bytes);
+      for (const auto& chunk : data) {
+        flat_input.insert(flat_input.end(), chunk.begin(), chunk.end());
+      }
+
+      uint8_t* d_write_ptr = static_cast<uint8_t*>(d_transfer_buf);
+      arctoAdaptiveWindow_t aw;
+      while (true) {
+        benchmark::benchmark_assert(
+            arctoHostBatchAdaptiveNextWindow(ab, &aw) == arctoSuccess,
+            "arctoHostBatchAdaptiveNextWindow failed");
+        if (aw.window_bytes == 0) break;
+
+        // Phase B: pageable -> pinned memcpy for this window.
+        const auto t_b0 = std::chrono::high_resolution_clock::now();
+        std::memcpy(aw.pinned_ptr, flat_input.data() + aw.input_offset, aw.window_bytes);
+        const auto t_b1 = std::chrono::high_resolution_clock::now();
+        const double this_h2h_ms = std::chrono::duration<double, std::milli>(t_b1 - t_b0).count();
+        t_memcpy_h2h_ms += this_h2h_ms;
+        arctoHostBatchAdaptiveRecordH2HTime(ab, this_h2h_ms);
+
+        // Phase C: bulk H2D of this window.
+        float this_h2d_ms = 0.0f;
+        GPU_CHECK(hipEventRecord(ts, stream));
+        benchmark::benchmark_assert(
+            arctoHostBatchAdaptiveUpload(ab, d_write_ptr, stream) == arctoSuccess,
+            "arctoHostBatchAdaptiveUpload failed");
+        GPU_CHECK(hipEventRecord(te, stream));
+        GPU_CHECK(hipStreamSynchronize(stream));
+        GPU_CHECK(hipEventElapsedTime(&this_h2d_ms, ts, te));
+        h2d_ms += this_h2d_ms;
+        arctoHostBatchAdaptiveRecordH2DTime(ab, this_h2d_ms);
+
+        d_write_ptr += aw.window_bytes;
+        adaptive_num_windows++;
+      }
+
+      arctoHostBatchAdaptiveDestroy(ab);
+    } else if (pinned_input) {
+      // Reuse the pinned host batch across calls. hipHostMalloc has a
+      // ~13-iter side effect on subsequent compress kernels (see
+      // RX7900XT_BYTE_PINNED_*/FINDINGS.md root-cause section); paying
+      // it only ONCE per process amortizes it across warmup + measurement.
+      // Process-lifetime static -- never freed, harmless on exit.
+      // Exception: when --report_phases is enabled, force a fresh
+      // allocation on every run_benchmark call so the alloc cost is
+      // measured every time the user asks for the desaggregated
+      // breakdown. This is what the scaling sweep (E1) needs.
+      static arctoHostBatch_t* batch = nullptr;
+      static size_t            batch_total = 0;
+      const size_t want = total_bytes;
+      if (batch != nullptr && (batch_total != want || report_phases)) {
+        arctoHostBatchDestroy(batch);
+        batch = nullptr;
+      }
+      // Phase A: arctoHostBatchCreate (only fires on first call or when
+      // the requested size changes). When the static batch is reused the
+      // measured t_alloc_ms is 0, which is the correct accounting for the
+      // amortization story.
+      const auto t_a0 = std::chrono::high_resolution_clock::now();
+      if (batch == nullptr) {
+        std::vector<size_t> chunk_sizes(data.size());
+        for (size_t i = 0; i < data.size(); ++i) chunk_sizes[i] = data[i].size();
+        benchmark::benchmark_assert(
+            arctoHostBatchCreate(data.size(), chunk_sizes.data(), &batch) == arctoSuccess,
+            "arctoHostBatchCreate failed");
+        batch_total = want;
+      }
+      const auto t_a1 = std::chrono::high_resolution_clock::now();
+      t_alloc_ms = std::chrono::duration<double, std::milli>(t_a1 - t_a0).count();
+      peak_pinned_bytes = arctoHostBatchTotalSize(batch);
+
+      // Phase B: pageable -> pinned memcpy (host-to-host).
+      const auto t_b0 = std::chrono::high_resolution_clock::now();
+      for (size_t i = 0; i < data.size(); ++i) {
+        std::memcpy(arctoHostBatchChunkPtr(batch, i), data[i].data(), data[i].size());
+      }
+      const auto t_b1 = std::chrono::high_resolution_clock::now();
+      t_memcpy_h2h_ms = std::chrono::duration<double, std::milli>(t_b1 - t_b0).count();
+
+      // Phase C: single bulk H2D via the arcto batched upload.
+      GPU_CHECK(hipEventRecord(ts, stream));
+      benchmark::benchmark_assert(
+          arctoHostBatchUploadAsync(batch, d_transfer_buf, nullptr, stream) == arctoSuccess,
+          "arctoHostBatchUploadAsync failed");
+      GPU_CHECK(hipEventRecord(te, stream));
+      GPU_CHECK(hipStreamSynchronize(stream));
+      GPU_CHECK(hipEventElapsedTime(&h2d_ms, ts, te));
+    } else {
+      uint8_t* dst = static_cast<uint8_t*>(d_transfer_buf);
+      GPU_CHECK(hipEventRecord(ts, stream));
+      for (const auto& chunk : data) {
+        GPU_CHECK(hipMemcpyAsync(dst, chunk.data(), chunk.size(),
+            hipMemcpyHostToDevice, stream));
+        dst += chunk.size();
+      }
+      GPU_CHECK(hipEventRecord(te, stream));
+      GPU_CHECK(hipStreamSynchronize(stream));
+      GPU_CHECK(hipEventElapsedTime(&h2d_ms, ts, te));
     }
-    GPU_CHECK(hipEventRecord(te, stream));
-    GPU_CHECK(hipStreamSynchronize(stream));
-    GPU_CHECK(hipEventElapsedTime(&h2d_ms, ts, te));
+
     GPU_CHECK(hipFree(d_transfer_buf));
     GPU_CHECK(hipEventDestroy(ts));
     GPU_CHECK(hipEventDestroy(te));
   }
+
 
   for (size_t iter = 0; iter < count; ++iter) {
     // compression
@@ -767,6 +925,13 @@ run_benchmark_template(
       std::cout << separator << "Decomp throughput stddev (GB/s)";
       std::cout << separator << "Comp time stddev (ms)";
       std::cout << separator << "Decomp time stddev (ms)";
+      if (report_phases) {
+        std::cout << separator << "t_alloc_ms";
+        std::cout << separator << "t_memcpy_h2h_ms";
+        std::cout << separator << "peak_pinned_bytes";
+        std::cout << separator << "adaptive_window_bytes";
+        std::cout << separator << "adaptive_num_windows";
+      }
       std::cout << std::endl;
 
       // CSV values
@@ -800,6 +965,13 @@ run_benchmark_template(
         std::cout << separator << stddev(comp_times_ms);
         std::cout << separator << stddev(decomp_times_ms);
       }
+      if (report_phases) {
+        std::cout << separator << std::setprecision(3) << t_alloc_ms;
+        std::cout << separator << std::setprecision(3) << t_memcpy_h2h_ms;
+        std::cout << separator << peak_pinned_bytes;
+        std::cout << separator << adaptive_window_bytes;
+        std::cout << separator << adaptive_num_windows;
+      }
       std::cout << std::endl;
     }
   }
@@ -829,7 +1001,10 @@ run_benchmark_template(
     const bool csv_output,
     const bool use_tabs,
     const size_t duplicates,
-    const size_t num_files)
+    const size_t num_files,
+    const bool /*pinned_input*/,
+    const bool /*report_phases*/,
+    const bool /*adaptive_tiled*/)
 {
   benchmark::benchmark_assert(IsInputValid(data), "Invalid input data");
 
@@ -1255,7 +1430,10 @@ void run_benchmark(
     const bool csv_output,
     const bool tab_separator,
     const size_t duplicate_count,
-    const size_t num_files);
+    const size_t num_files,
+    const bool pinned_input,
+    const bool report_phases,
+    const bool adaptive_tiled);
 
 struct args_type {
   int gpu;
@@ -1267,6 +1445,9 @@ struct args_type {
   bool use_tabs;
   bool has_page_sizes;
   size_t chunk_size;
+  bool pinned_input;     /**< coalesce + pin input host buffer (HIP only) */
+  bool report_phases;    /**< desaggregate host-side prep into alloc + h2h memcpy phases (HIP only) */
+  bool adaptive_tiled;   /**< tiled aggregation with profile-driven W_opt (HIP only) */
 };
 
 struct parameter_type {
@@ -1322,6 +1503,9 @@ args_type parse_args(int argc, char ** argv) {
   args.use_tabs = false;
   args.has_page_sizes = false;
   args.chunk_size = 65536;
+  args.pinned_input = false;
+  args.report_phases = false;
+  args.adaptive_tiled = false;
 
   const std::vector<parameter_type> params{
     {"h", "help", "Show options.", ""},
@@ -1343,6 +1527,23 @@ args_type parse_args(int argc, char ** argv) {
         "with int64 size.", bool_to_string(args.has_page_sizes)},
     {"p", "chunk_size", "Chunk size when splitting uncompressed data.",
         std::to_string(args.chunk_size)},
+    {"P", "pinned_input", "Coalesce input chunks into one pinned host "
+        "buffer + single bulk H2D (HIP only). Hits PCIe peak vs the "
+        "scattered-pageable default. See arcto/host_batch.h.",
+        bool_to_string(args.pinned_input)},
+    {"R", "report_phases", "Desaggregate the host-side preparation cost "
+        "into t_alloc_ms (hipHostMalloc / arctoHostBatchCreate), "
+        "t_memcpy_h2h_ms (pageable->pinned copy), and peak_pinned_bytes; "
+        "report as extra CSV columns. HIP only; takes effect when "
+        "--csv_output=true. Adds negligible measurement overhead.",
+        bool_to_string(args.report_phases)},
+    {"A", "adaptive_tiled", "Use the adaptive tiled aggregation API "
+        "(arctoHostBatchAdaptive): one pinned window buffer of size W_opt "
+        "is allocated once and reused across all windows. W_opt is "
+        "computed from the profile-driven cost model (wave saturation, "
+        "PCIe amortization, kernel-launch floor). HIP only; mutually "
+        "exclusive with --pinned_input (which is the single-shot path).",
+        bool_to_string(args.adaptive_tiled)},
   };
 
   char** argv_end = argv + argc;
@@ -1404,6 +1605,18 @@ args_type parse_args(int argc, char ** argv) {
         } else if (param.long_flag == "chunk_size") {
           args.chunk_size = size_t(std::stoull(*(argv++)));
           break;
+        } else if (param.long_flag == "pinned_input") {
+          std::string on(*(argv++));
+          args.pinned_input = parse_bool(on);
+          break;
+        } else if (param.long_flag == "report_phases") {
+          std::string on(*(argv++));
+          args.report_phases = parse_bool(on);
+          break;
+        } else if (param.long_flag == "adaptive_tiled") {
+          std::string on(*(argv++));
+          args.adaptive_tiled = parse_bool(on);
+          break;
         } else {
           std::cerr << "INTERNAL ERROR: Unhandled paramter '" << arg << "'." << std::endl;
           usage(name, params);
@@ -1454,11 +1667,13 @@ int main(int argc, char** argv)
 
   // one warmup to allow cuda to initialize
   run_benchmark(data, true, args.warmup_count, false, false,
-      args.duplicate_count, args.filenames.size());
+      args.duplicate_count, args.filenames.size(), args.pinned_input,
+      args.report_phases, args.adaptive_tiled);
 
   // second run to report times
   run_benchmark(data, false, args.iteration_count, args.csv_output,
-      args.use_tabs, args.duplicate_count, args.filenames.size());
+      args.use_tabs, args.duplicate_count, args.filenames.size(),
+      args.pinned_input, args.report_phases, args.adaptive_tiled);
 
   return 0;
 }

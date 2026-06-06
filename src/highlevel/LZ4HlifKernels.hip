@@ -222,52 +222,58 @@ void lz4HlifBatchDecompress(
 size_t batchedLZ4CompMaxBlockOccupancy(arctoType_t data_type, const int device_id)
 {
   hipDeviceProp_t device_prop;
-  hipGetDeviceProperties(&device_prop, device_id);
+  HipUtils::check(hipGetDeviceProperties(&device_prop, device_id),
+                  "batchedLZ4CompMaxBlockOccupancy: hipGetDeviceProperties");
   int num_blocks_per_sm;
   switch (data_type) {
     case ARCTO_TYPE_BITS:
     case ARCTO_TYPE_CHAR:
     case ARCTO_TYPE_UCHAR:
-      hipOccupancyMaxActiveBlocksPerMultiprocessor(
-          &num_blocks_per_sm, 
-          HlifCompressBatchKernel<lz4_compress_wrapper<uint8_t>, LZ4CompressorArgs>, 
-          LZ4_COMP_THREADS_PER_CHUNK, 
-          0);
+      HipUtils::check(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+          &num_blocks_per_sm,
+          HlifCompressBatchKernel<lz4_compress_wrapper<uint8_t>, LZ4CompressorArgs>,
+          LZ4_COMP_THREADS_PER_CHUNK,
+          0),
+                      "batchedLZ4CompMaxBlockOccupancy: occupancy u8");
       break;
     case ARCTO_TYPE_SHORT:
     case ARCTO_TYPE_USHORT:
-      hipOccupancyMaxActiveBlocksPerMultiprocessor(
-          &num_blocks_per_sm, 
-          HlifCompressBatchKernel<lz4_compress_wrapper<uint16_t>, LZ4CompressorArgs>, 
-          LZ4_COMP_THREADS_PER_CHUNK, 
-          0);
+      HipUtils::check(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+          &num_blocks_per_sm,
+          HlifCompressBatchKernel<lz4_compress_wrapper<uint16_t>, LZ4CompressorArgs>,
+          LZ4_COMP_THREADS_PER_CHUNK,
+          0),
+                      "batchedLZ4CompMaxBlockOccupancy: occupancy u16");
       break;
     case ARCTO_TYPE_INT:
     case ARCTO_TYPE_UINT:
-      hipOccupancyMaxActiveBlocksPerMultiprocessor(
-          &num_blocks_per_sm, 
-          HlifCompressBatchKernel<lz4_compress_wrapper<uint32_t>, LZ4CompressorArgs>, 
-          LZ4_COMP_THREADS_PER_CHUNK, 
-          0);
+      HipUtils::check(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+          &num_blocks_per_sm,
+          HlifCompressBatchKernel<lz4_compress_wrapper<uint32_t>, LZ4CompressorArgs>,
+          LZ4_COMP_THREADS_PER_CHUNK,
+          0),
+                      "batchedLZ4CompMaxBlockOccupancy: occupancy u32");
       break;
     default:
       throw std::invalid_argument("Unsupported input data type");
   }
-  
+
   return device_prop.multiProcessorCount * num_blocks_per_sm;
 }
 
 size_t batchedLZ4DecompMaxBlockOccupancy(arctoType_t data_type, const int device_id)
 {
   hipDeviceProp_t device_prop;
-  hipGetDeviceProperties(&device_prop, device_id);
+  HipUtils::check(hipGetDeviceProperties(&device_prop, device_id),
+                  "batchedLZ4DecompMaxBlockOccupancy: hipGetDeviceProperties");
   int num_blocks_per_sm;
   constexpr int shmem_size = DECOMP_INPUT_BUFFER_SIZE * LZ4_DECOMP_CHUNKS_PER_BLOCK;
-  hipOccupancyMaxActiveBlocksPerMultiprocessor(
-      &num_blocks_per_sm, 
-      HlifDecompressBatchKernel<lz4_decompress_wrapper, LZ4_DECOMP_CHUNKS_PER_BLOCK>, 
-      LZ4_DECOMP_THREADS_PER_CHUNK * LZ4_DECOMP_CHUNKS_PER_BLOCK, 
-      shmem_size);
+  HipUtils::check(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+      &num_blocks_per_sm,
+      HlifDecompressBatchKernel<lz4_decompress_wrapper, LZ4_DECOMP_CHUNKS_PER_BLOCK>,
+      LZ4_DECOMP_THREADS_PER_CHUNK * LZ4_DECOMP_CHUNKS_PER_BLOCK,
+      shmem_size),
+                  "batchedLZ4DecompMaxBlockOccupancy: occupancy");
   
   return device_prop.multiProcessorCount * num_blocks_per_sm;
 }

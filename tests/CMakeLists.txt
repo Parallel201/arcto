@@ -74,6 +74,19 @@ function(add_test_file EXAMPLE_SOURCE)
   else ()
     target_link_libraries(${BARE_NAME} PRIVATE arcto hip::host)
   endif ()
+  # Some tests (e.g. test_zfp_bitcompat) include the canonical ZFP headers
+  # directly to compare ARCTO against the upstream serial backend. zfp::zfp
+  # is already statically linked into libarcto.so via the top-level
+  # add_subdirectory(third_party/zfp); we just need its include directories
+  # exposed to the test source.
+  if(TARGET zfp::zfp)
+    target_link_libraries(${BARE_NAME} PRIVATE zfp::zfp)
+  endif()
+  # Built-in fixture path: tests use ARCTO_TEST_DATA_DIR by default and
+  # fall back to env vars (ARCTO_ZFP_TTI_DATA / ARCTO_ZFP_TTI_RSF) when
+  # the caller wants to point at larger off-tree datasets.
+  target_compile_definitions(${BARE_NAME} PRIVATE
+    ARCTO_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
   add_test(NAME ${BARE_NAME} COMMAND ${BARE_NAME})
 endfunction()
 

@@ -201,9 +201,9 @@ public: // API
   }
 
   virtual void compress(
-      const uint8_t* decomp_buffer, 
+      const uint8_t* decomp_buffer,
       uint8_t* comp_buffer,
-      const CompressionConfig& comp_config) 
+      const CompressionConfig& comp_config) override
   {
     assert(finished_init);
 
@@ -228,9 +228,9 @@ public: // API
   }
 
   virtual void decompress(
-      uint8_t* decomp_buffer, 
+      uint8_t* decomp_buffer,
       const uint8_t* comp_buffer,
-      const DecompressionConfig& config)
+      const DecompressionConfig& config) override
   {
     assert(finished_init);
 

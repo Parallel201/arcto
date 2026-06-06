@@ -80,7 +80,7 @@ void test_lz4(const std::vector<T>& data, size_t /*chunk_size*/)
   size_t comp_out_bytes = 0;
 
   hipStream_t stream;
-  hipStreamCreate(&stream);
+  HIP_CHECK(hipStreamCreate(&stream));
 
   {
     // this block handles compression, and we scope it to ensure only
@@ -114,7 +114,7 @@ void test_lz4(const std::vector<T>& data, size_t /*chunk_size*/)
     
     size_t comp_out_bytes = lz4_manager.get_compressed_output_size(d_comp_out);
 
-    hipFree(d_in_data);
+    HIP_CHECK(hipFree(d_in_data));
 
     std::cout << "comp_size: " << comp_out_bytes
               << ", compressed ratio: " << std::fixed << std::setprecision(2)
@@ -132,11 +132,11 @@ void test_lz4(const std::vector<T>& data, size_t /*chunk_size*/)
     const auto temp_bytes = lz4_manager.get_required_scratch_buffer_size();
 
     uint8_t* temp_ptr;
-    hipMalloc(&temp_ptr, temp_bytes);
+    HIP_CHECK(hipMalloc(&temp_ptr, temp_bytes));
     lz4_manager.set_scratch_buffer(temp_ptr);
 
     uint8_t* out_ptr = NULL;
-    hipMalloc(&out_ptr, decomp_config.decomp_data_size);
+    HIP_CHECK(hipMalloc(&out_ptr, decomp_config.decomp_data_size));
 
     lz4_manager.decompress(
         out_ptr,
@@ -145,11 +145,11 @@ void test_lz4(const std::vector<T>& data, size_t /*chunk_size*/)
 
     HIP_CHECK(hipStreamSynchronize(stream));
 
-    hipFree(d_comp_out);
-    hipFree(temp_ptr);
+    HIP_CHECK(hipFree(d_comp_out));
+    HIP_CHECK(hipFree(temp_ptr));
 
     std::vector<T> res(decomp_config.decomp_data_size / sizeof(T));
-    hipMemcpy(&res[0], out_ptr, decomp_config.decomp_data_size, hipMemcpyDeviceToHost);
+    HIP_CHECK(hipMemcpy(&res[0], out_ptr, decomp_config.decomp_data_size, hipMemcpyDeviceToHost));
 
 #if VERBOSE > 1
     // dump output data
@@ -161,7 +161,7 @@ void test_lz4(const std::vector<T>& data, size_t /*chunk_size*/)
 
     REQUIRE(res == data);
   }
-  hipStreamDestroy(stream);
+  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 template <typename T>
