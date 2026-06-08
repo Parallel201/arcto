@@ -55,6 +55,11 @@ constexpr size_t W_LAUNCH_AMORT_FLOOR  = 16ull * 1024 * 1024;  // 16 MB
 // covers the largest of the four (MI300X) safely.
 size_t pick_W_kernel_saturation()
 {
+#if defined(__HIP_PLATFORM_NVIDIA__) || defined(__HIP_PLATFORM_NVCC__)
+  // NVIDIA: cudaDeviceProp has no gcnArchName; the per-AMD-arch tuning below
+  // doesn't apply, so use the safe default budget.
+  return W_KERNEL_SAT_DEFAULT;
+#else
   int dev = 0;
   if (hipGetDevice(&dev) != hipSuccess) return W_KERNEL_SAT_DEFAULT;
   hipDeviceProp_t props;
@@ -66,6 +71,7 @@ size_t pick_W_kernel_saturation()
   if (arch.find("gfx942")  != std::string::npos) return 76ull  * 1024 * 1024;
   if (arch.find("gfx1100") != std::string::npos) return 48ull  * 1024 * 1024;
   return W_KERNEL_SAT_DEFAULT;
+#endif
 }
 
 } // namespace

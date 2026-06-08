@@ -34,7 +34,7 @@
 #ifndef AMD_OPTIMIZATIONS_H
 #define AMD_OPTIMIZATIONS_H
 
-#include "device_types.h"
+#include "arcto_device_types.h"
 
 namespace arcto {
 namespace amd {
@@ -241,6 +241,21 @@ __device__ __forceinline__ T wave_reduce_sum(T val)
 }
 
 /**
+ * @brief Portable warp/wavefront shuffle-down. AMD/HIP keeps the sync-less
+ * __shfl_down; NVIDIA's CUDA removed it (CUDA 9+ deprecated, gone in 12), so
+ * route to __shfl_down_sync with a full mask.
+ */
+template<typename T>
+__device__ __forceinline__ T wave_shfl_down(T val, int offset, int width)
+{
+#if AMD_GPU_TARGET
+  return __shfl_down(val, offset, width);
+#else
+  return __shfl_down_sync(0xffffffffu, val, offset, width);
+#endif
+}
+
+/**
  * @brief Max reduction across wavefront
  */
 template<typename T>
@@ -248,7 +263,7 @@ __device__ __forceinline__ T wave_reduce_max(T val)
 {
 #pragma unroll
   for (int offset = WAVEFRONT_SIZE / 2; offset > 0; offset >>= 1) {
-    T other = __shfl_down(val, offset, WAVEFRONT_SIZE);
+    T other = wave_shfl_down(val, offset, WAVEFRONT_SIZE);
     val = (val > other) ? val : other;
   }
   return val;
@@ -262,7 +277,7 @@ __device__ __forceinline__ T wave_reduce_min(T val)
 {
 #pragma unroll
   for (int offset = WAVEFRONT_SIZE / 2; offset > 0; offset >>= 1) {
-    T other = __shfl_down(val, offset, WAVEFRONT_SIZE);
+    T other = wave_shfl_down(val, offset, WAVEFRONT_SIZE);
     val = (val < other) ? val : other;
   }
   return val;

@@ -38,6 +38,7 @@
   #define hipEvent_t cudaEvent_t
   #define hipFree cudaFree
   #define hipFreeAsync cudaFreeAsync
+  #define hipGetDevice cudaGetDevice
   #define hipGetDeviceProperties cudaGetDeviceProperties
   #define hipGetErrorString cudaGetErrorString
   #define hipGetLastError cudaGetLastError

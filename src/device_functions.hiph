@@ -38,7 +38,7 @@
 #ifndef DEVICE_FUNCTIONS_HIPH
 #define DEVICE_FUNCTIONS_HIPH
 
-#include "device_types.h"
+#include "arcto_device_types.h"
 
 namespace arcto {
 
@@ -139,7 +139,7 @@ __device__ inline T SHFL1_XOR(T v, const warp_mask_t m) {
 __device__ inline void SYNCWARP() {
   return __syncwarp();
 }
-__device__ warp_mask_t BALLOT1(int predicate) {
+__device__ inline warp_mask_t BALLOT1(int predicate) {
   return __ballot_sync(~0, predicate);
 }
 //#  define SHFL10(v)        __shfl_sync(~0, (v), 0)

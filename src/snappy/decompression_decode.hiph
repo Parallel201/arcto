@@ -38,7 +38,7 @@
 #ifndef SNAPPY_DECOMPRESSION_DECODE_HIPH
 #define SNAPPY_DECOMPRESSION_DECODE_HIPH
 
-#include "device_types.h"
+#include "arcto_device_types.h"
 #include "device_functions.hiph"
 #include "snappy/config.h"
 #include "snappy/types.h"

@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef DEVICE_TYPES_HIPH
-#define DEVICE_TYPES_HIPH
+#ifndef ARCTO_DEVICE_TYPES_HIPH
+#define ARCTO_DEVICE_TYPES_HIPH
 
 #include <stdint.h>
 
@@ -45,4 +45,4 @@ constexpr int32_t warpsize = uwarpsize;
 
 } // namespace arcto
 
-#endif // DEVICE_TYPES_HIPH
+#endif // ARCTO_DEVICE_TYPES_HIPH

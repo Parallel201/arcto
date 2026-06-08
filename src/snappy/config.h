@@ -38,7 +38,7 @@
 #ifndef SNAPPY_CONFIG_HIPH
 #define SNAPPY_CONFIG_HIPH
 
-#include "device_types.h"
+#include "arcto_device_types.h"
 
 // Decompression default settings that can be influenced via compiler flags
 

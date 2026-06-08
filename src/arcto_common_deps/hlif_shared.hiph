@@ -61,7 +61,7 @@ namespace cg = cooperative_groups;
 #include <type_traits>
 #include "arcto/shared_types.h"
 #include "hlif_shared_types.hpp"
-#include "device_types.h"
+#include "arcto_device_types.h"
 
 // Compress wrapper must meet this requirement
 struct hlif_compress_wrapper {
