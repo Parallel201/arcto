@@ -21,6 +21,13 @@
 #include <new>
 #include <vector>
 
+// Match the vendored zfp's GPU execution policy to our build backend.
+#if defined(__HIP_PLATFORM_NVIDIA__) || defined(__HIP_PLATFORM_NVCC__)
+  #define ARCTO_ZFP_EXEC zfp_exec_cuda
+#else
+  #define ARCTO_ZFP_EXEC zfp_exec_hip
+#endif
+
 namespace {
 
 zfp_type to_zfp_type(arctoZFPType_t t)
@@ -78,7 +85,7 @@ bool configure_stream(zfp_stream* zfp, const arctoZFPOpts_t& opts)
     default:
       return false;
   }
-  if (!zfp_stream_set_execution(zfp, zfp_exec_hip)) return false;
+  if (!zfp_stream_set_execution(zfp, ARCTO_ZFP_EXEC)) return false;
   return true;
 }
 
@@ -528,7 +535,7 @@ arctoStatus_t arctoZFPDecompress(
 
   zfp_field_set_pointer(field, d_output);
 
-  if (!zfp_stream_set_execution(zfp, zfp_exec_hip)) {
+  if (!zfp_stream_set_execution(zfp, ARCTO_ZFP_EXEC)) {
     if (idx) zfp_index_free(idx);
     zfp_field_free(field);
     zfp_stream_close(zfp);
