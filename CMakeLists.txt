@@ -95,7 +95,9 @@ macro(setup_cuda_build)
 
   # HIP definitions
   add_compile_definitions(__HIP_PLATFORM_NVCC__ __HIP_PLATFORM_NVIDIA__)
-  include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include/arcto) # contains a hip subfolder
+  # Expose ONLY the hip->cuda shim (include/cuda_shim/hip/) globally. Using
+  # include/arcto here would shadow the vendored zfp's own zfp.h with ARCTO's.
+  include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include/cuda_shim)
 
   # Using '-G' can cause the register count to overflow for some kernels
   # and cause launch failures
@@ -278,9 +280,13 @@ if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/zfp/CMakeLists.txt")
     "before configuring.")
 endif()
 
-set(ZFP_WITH_HIP        ON  CACHE BOOL "" FORCE)
+# Match the vendored zfp's parallel backend to ours: CUDA on NVIDIA builds
+# (no ROCm there), HIP on AMD builds. Forcing HIP on a CUDA-only node fails.
 if (CUDA_BACKEND)
+  set(ZFP_WITH_HIP      OFF CACHE BOOL "" FORCE)
   set(ZFP_WITH_CUDA     ON  CACHE BOOL "" FORCE)
+else()
+  set(ZFP_WITH_HIP      ON  CACHE BOOL "" FORCE)
 endif()
 set(BUILD_SHARED_LIBS_BACKUP ${BUILD_SHARED_LIBS})
 set(BUILD_SHARED_LIBS   OFF CACHE BOOL "" FORCE)
