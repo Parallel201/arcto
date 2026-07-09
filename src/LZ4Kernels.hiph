@@ -792,9 +792,9 @@ inline __device__ word_type shuffleLiterals<uint32_t>(word_type literals)
 
 template<typename T>
 __device__ void compressStream(
-    uint8_t* compData,
-    const T* decompData,
-    offset_type* const hashTable,
+    uint8_t* __restrict__ compData,
+    const T* __restrict__ decompData,
+    offset_type* const __restrict__ hashTable,
     const position_type hash_table_size,
     const position_type length,
     size_t* comp_length)
@@ -969,9 +969,9 @@ __device__ void compressStream(
 }
 
 inline __device__ void decompressStream(
-    uint8_t* buffer,
-    uint8_t* decompData,
-    const uint8_t* compData,
+    uint8_t* __restrict__ buffer,
+    uint8_t* __restrict__ decompData,
+    const uint8_t* __restrict__ compData,
     const position_type comp_end,
     const position_type buf_end,
     size_t* decompSize,
