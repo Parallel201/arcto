@@ -103,6 +103,7 @@ arctoStatus_t arctoBatchedLZ4DecompressAsync(
   // they are not finding the maximum size.
 
   try {
+    HipUtils::check_wave_size();
     lz4BatchDecompress(
         HipUtils::device_pointer(
             reinterpret_cast<const uint8_t* const*>(device_compressed_ptrs)),
@@ -203,6 +204,7 @@ arctoStatus_t arctoBatchedLZ4CompressAsync(
   // they are not finding the maximum size.
 
   try {
+    HipUtils::check_wave_size();
     lz4BatchCompress(
         HipUtils::device_pointer(
             reinterpret_cast<const uint8_t* const*>(device_uncompressed_ptrs)),
