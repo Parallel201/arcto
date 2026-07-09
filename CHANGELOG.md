@@ -1,4 +1,30 @@
-# ARCTO changelog (YYYY-MM-DD)
+# ARCTO changelog
+
+## Unreleased
+- Experimental CUDA backend (`-D CUDA_BACKEND=ON`): builds the same HIP
+  sources on non-AMD hardware for cross-vendor comparison studies.
+- Removed the `CG_WORKAROUND` option and the bundled `include/hipext/`
+  cooperative-groups shims; minimum supported ROCm is now 6.1.
+- License housekeeping: NOTICES.md regenerated from actual per-file license
+  headers; README rewritten to match the current tree.
+
+## v0.2.0 (2026-06-06)
+- ZFP support via vendored LLNL/zfp submodule (HIP backend, static link):
+  FIXED_RATE with functional bitstream compatibility against canonical zfp;
+  FIXED_PRECISION / FIXED_ACCURACY with self-identifying embedded index
+  trailer so variable-rate streams decompress on GPU.
+- `benchmark_zfp_single` with per-mode fidelity metrics; per-iteration
+  timing/throughput stddev in the chunked benchmark harness.
+- Host-side staging APIs: `arctoHostBatch` (coalesced pinned upload) and
+  `arctoHostBatchAdaptive` (tiled windows + online cost model, per-arch
+  tuned saturation windows).
+- Removed the GPU-native ZFP-Reversible3D prototype (not ready; to be
+  redesigned from the canonical CPU reversible algorithm).
+
+## v0.1.0 (2026-05-16)
+- HIP translation of NVIDIA nvCOMP branch-2.2 for AMD GPUs (hipify-assisted,
+  manually adjusted and tuned); project named as ARCTO across the
+  codebase; build fixes and extended benchmark tooling.
 
 # nvCOMP changelog
 

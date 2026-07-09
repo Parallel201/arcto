@@ -15,7 +15,7 @@
  */
 // MIT License
 //
-// Modifications Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Modifications Copyright (C) 2025-2026 Cristiano Künas.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal

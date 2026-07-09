@@ -1,4 +1,6 @@
 /*
+ * Copyright (C) 2026 Cristiano Künas. Licensed under the MIT license.
+ *
  * ARCTO adaptive host batch -- profile-driven tiled aggregation for the
  * batched compress / decompress APIs at scale.
  *

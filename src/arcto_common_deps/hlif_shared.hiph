@@ -27,7 +27,7 @@
  */
 // MIT License
 //
-// Modifications Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Modifications Copyright (C) 2025-2026 Cristiano Künas.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -50,13 +50,8 @@
 #pragma once
 
 #include <cassert>
-#if (defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__)) && defined(CG_WORKAROUND)
-#include <hipext/hip_cooperative_groups.h>
-namespace cg = hip_extensions::hip_cooperative_groups_ext;
-#else
 #include <hip/hip_cooperative_groups.h>
 namespace cg = cooperative_groups;
-#endif
 #include <stdio.h>
 #include <type_traits>
 #include "arcto/shared_types.h"

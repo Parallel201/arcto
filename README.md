@@ -1,187 +1,136 @@
-# HIP Compression Toolkit
+# ARCTO
 
-A high-performance GPU compression library for AMD GPUs using HIP/ROCm, featuring optimized implementations of LZ4, Snappy, and Cascaded compression algorithms.
+GPU-accelerated batched compression for **AMD GPUs** (HIP/ROCm): lossless
+byte-level codecs (LZ4, Snappy, Cascaded) plus floating-point compression
+(ZFP), tuned for RDNA and CDNA architectures.
 
-## Features
+ARCTO is our own HIP translation of NVIDIA
+[nvCOMP branch-2.2](https://github.com/NVIDIA/nvcomp/tree/branch-2.2),
+adjusted and tuned for AMD GPUs, and extended with ZFP support and
+host-side staging optimizations for large inputs.
 
-- **LZ4**: Fast lossless compression algorithm
-- **Snappy**: High-speed compression developed by Google
-- **Cascaded**: Multi-stage compression combining Delta, RLE, and Bit-packing
-- **ZFP** *(planned)*: Floating-point array compression
+## Codecs
 
-### Optimizations
+| Codec | Type | Notes |
+|-------|------|-------|
+| LZ4 | lossless, byte-level | batched low-level + high-level manager APIs |
+| Snappy | lossless, byte-level | batched low-level + high-level manager APIs |
+| Cascaded | lossless (RLE + Delta + BitPack) | best for structured/numerical data |
+| ZFP | floating-point (3D) | FIXED_RATE / FIXED_PRECISION / FIXED_ACCURACY on GPU via vendored [LLNL zfp](https://github.com/LLNL/zfp); bitstream-compatible with canonical zfp |
 
-- Wave64 optimizations for AMD CDNA/RDNA architectures
-- Batched compression/decompression APIs
-- Async stream support for overlapped operations
-- Support for multiple GPU architectures
+ANS, GDeflate and Bitcomp wrappers from nvCOMP 2.2 are present but require
+external proprietary libraries (`ENABLE_ANS` / `ENABLE_GDEFLATE` /
+`ENABLE_BITCOMP`); they are not built by default.
+
+## Host-side staging
+
+For large batched inputs, two helper APIs reduce H2D transfer cost:
+
+- `arctoHostBatch` (`include/arcto/host_batch.h`) — coalesces all chunks into
+  one pinned host buffer, single `hipMemcpyAsync` upload.
+- `arctoHostBatchAdaptive` (`include/arcto/host_batch_adaptive.h`) —
+  profile-driven tiled windows with an online cost model, for multi-GB inputs
+  where peak pinned allocation must stay bounded; per-architecture tuned
+  window sizes (gfx906/gfx90a/gfx942/gfx1100).
 
 ## Supported GPUs
 
-| Architecture | GPU Models |
-|--------------|------------|
-| `gfx1100` | Radeon RX 7900 XT/XTX (RDNA 3) |
-| `gfx942` | AMD Instinct MI300X (CDNA 3) |
-| `gfx90a` | AMD Instinct MI250/MI250X (CDNA 2) |
-| `gfx908` | AMD Instinct MI100 (CDNA 1) |
-| `gfx906` | AMD Instinct MI50/MI60 |
+| Architecture | GPU | Wave size |
+|--------------|-----|-----------|
+| gfx1100 (RDNA3) | Radeon RX 7900 XT/XTX | 64 or 32 — build with `-D USE_WARPSIZE_32=ON` |
+| gfx90a (CDNA2) | Instinct MI210/MI250 | 64 |
+| gfx942 (CDNA3) | Instinct MI300X | 64 |
+
+Other gfx9+/RDNA targets should work but are not part of the test matrix.
+
+## Requirements
+
+- ROCm >= 6.1
+- CMake >= 3.21
+- C++17 compiler
 
 ## Building
 
-### Prerequisites
-
-- ROCm 5.4+ (6.0+ recommended for MI300X)
-- CMake 3.18+
-- GCC 9+ or Clang 14+
-
-### Build Instructions
-
 ```bash
-mkdir build && cd build
+cmake -S . -B build \
+  -D CMAKE_PREFIX_PATH=/opt/rocm/lib/cmake \
+  -D CMAKE_HIP_ARCHITECTURES="gfx90a;gfx942" \
+  -D CMAKE_BUILD_TYPE=Release -D BUILD_TESTS=ON -D BUILD_BENCHMARKS=ON
+cmake --build build -j
 
-# For AMD GPUs
-cmake .. \
-  -D CMAKE_PREFIX_PATH=/opt/rocm \
-  -D CMAKE_HIP_ARCHITECTURES="gfx90a;gfx942;gfx1100" \
-  -D BUILD_BENCHMARKS=ON \
-  -D BUILD_TESTS=ON
-
-make -j$(nproc)
+# RDNA3 (wave32) — REQUIRED for gfx1100: add -D USE_WARPSIZE_32=ON
 ```
 
-### Build Options
+Tips: select a GPU with `HIP_VISIBLE_DEVICES=<id>`; if no GPU is present at
+configure time, set `CMAKE_HIP_ARCHITECTURES` explicitly.
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `BUILD_BENCHMARKS` | ON | Build benchmark executables |
-| `BUILD_TESTS` | ON | Build test suite |
-| `CMAKE_HIP_ARCHITECTURES` | gfx90a | Target GPU architectures |
-| `BUILD_SHARED_LIBS` | ON | Build shared library |
+For cross-vendor comparison studies, an experimental CUDA backend
+(`-D CUDA_BACKEND=ON`) builds the same HIP sources unmodified on non-AMD
+hardware; it exists to benchmark ARCTO against vendor libraries, not as a
+supported target.
 
 ## Usage
 
-### C API (Low-level Batched)
+Low-level batched C API:
 
 ```c
 #include <arcto/lz4.h>
 
-// Get temp buffer size
 size_t temp_bytes;
-arctoBatchedLZ4CompressGetTempSize(
-    num_chunks, max_chunk_size, opts, &temp_bytes);
+arctoBatchedLZ4CompressGetTempSize(num_chunks, max_chunk_size, opts, &temp_bytes);
 
-// Get max output size per chunk
 size_t max_out_bytes;
-arctoBatchedLZ4CompressGetMaxOutputChunkSize(
-    max_chunk_size, opts, &max_out_bytes);
+arctoBatchedLZ4CompressGetMaxOutputChunkSize(max_chunk_size, opts, &max_out_bytes);
 
-// Compress asynchronously
 arctoBatchedLZ4CompressAsync(
     device_in_ptrs, device_in_sizes, max_chunk_size, num_chunks,
-    temp_buffer, temp_bytes,
-    device_out_ptrs, device_out_sizes,
-    opts, stream);
-
-// Decompress
-arctoBatchedLZ4DecompressAsync(
-    device_in_ptrs, device_in_sizes,
-    device_out_sizes, device_actual_out_sizes, num_chunks,
-    temp_buffer, temp_bytes,
-    device_out_ptrs, device_statuses, stream);
+    temp_buffer, temp_bytes, device_out_ptrs, device_out_sizes, opts, stream);
 ```
 
-### C++ API (High-level Manager)
+High-level C++ manager:
 
 ```cpp
 #include <arcto/lz4.hpp>
 #include <arcto/arctoManager.hpp>
 
-// Create LZ4 manager
 arcto::LZ4Manager manager{chunk_size, ARCTO_TYPE_CHAR, stream};
-
-// Configure compression
 manager.configure_compression(uncompressed_size);
-
-// Compress
 manager.compress(device_input, device_output, stream);
-
-// Decompress
 manager.decompress(device_input, device_output, stream);
 ```
 
-## Benchmarks
-
-### Running Benchmarks
+## Tests and benchmarks
 
 ```bash
-# Single algorithm
-./build/bin/benchmark_lz4 -f /path/to/data.bin -i 10
-
-# Using benchmark script
-./scripts/benchmark.sh lz4 /path/to/test_data/ 0
+cd build && ctest                       # unit + end-to-end round-trip tests
+./build/bin/benchmark_lz4_chunked -f data.bin -p 65536 -w 2 -i 10
+./build/bin/benchmark_zfp_single  -f field.bin        # ZFP modes + fidelity metrics
 ```
 
-### Benchmark Options
-
-| Option | Description |
-|--------|-------------|
-| `-f, --input_file` | Input file path (required) |
-| `-g, --gpu` | GPU device ID (default: 0) |
-| `-i, --iterations` | Number of iterations (default: 10) |
-| `-w, --warmup` | Warmup iterations (default: 2) |
-| `-p, --chunk_size` | Chunk size in bytes (default: 65536) |
-| `-c, --csv` | Output in CSV format |
-
-
-## Directory Structure
-
-```
-arcto/
-├── CMakeLists.txt
-├── README.md
-├── LICENSE
-├── include/
-│   └── arcto/
-│       ├── lz4.h
-│       ├── snappy.h
-│       ├── cascaded.h
-│       └── shared_types.h
-├── src/
-│   ├── lz4/
-│   ├── snappy/
-│   └── cascaded/
-├── benchmarks/
-│   ├── benchmark_lz4.cu
-│   ├── benchmark_snappy.cu
-│   └── benchmark_cascaded.cu
-├── tests/
-│   ├── test_lz4.cpp
-│   ├── test_snappy.cpp
-│   └── test_cascaded.cpp
-└── scripts/
-    └── benchmark.sh
-```
+Useful benchmark flags: `-p` chunk size, `-P` pinned coalesced input,
+`-A` adaptive tiled staging, `-R` per-phase host cost report, `-c` CSV output.
 
 ## Roadmap
 
-- [x] LZ4 compression
-- [x] Snappy compression
-- [x] Cascaded compression
-- [x] Benchmarks
-- [ ] ZFP floating-point compression
+- [ ] GPU-native lossless (reversible) ZFP for 3D float fields — canonical zfp
+      only implements reversible mode on the serial CPU backend
+- [ ] Kernel optimization pass for CDNA/RDNA (occupancy, warp primitives,
+      vectorized copies)
 - [ ] Multi-GPU support
-- [ ] Python bindings
 
 ## License
 
-This project is based on NVIDIA nvcomp, ported to AMD HIP.
-See [LICENSE](LICENSE) for details.
+ARCTO as a whole is distributed under the [MIT License](LICENSE).
+It contains code under other licenses, tracked file-by-file in
+[NOTICES.md](NOTICES.md):
 
-## Contributing
-
-Contributions are welcome! Please read our contributing guidelines before submitting PRs.
+- Code derived from NVIDIA nvCOMP 2.2 — [BSD 3-Clause](NVCOMP_2_2_LICENSE)
+  or Apache-2.0 (per-file headers preserved).
+- `tests/catch.hpp` — Boost Software License 1.0.
+- `third_party/zfp` (git submodule) — BSD 3-Clause, LLNL.
 
 ## Acknowledgments
 
-- NVIDIA nvcomp team for the original implementation
-- AMD ROCm team for HIP runtime
+- NVIDIA nvCOMP team for the original implementation
+- AMD for ROCm/HIP
+- LLNL for zfp

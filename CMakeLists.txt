@@ -26,7 +26,7 @@
 
 # MIT License
 #
-# Modifications Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Modifications Copyright (C) 2025-2026 Cristiano Künas.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -53,7 +53,6 @@ option(CUDA_BACKEND "Build for CUDA devices. Default configuration builds for AM
 option(BUILD_TESTS "Build unit and end-to-end tests." OFF)
 option(BUILD_BENCHMARKS "Build benchmark executables." OFF)
 option(BUILD_STATIC "Build a static library." OFF)
-option(CG_WORKAROUND "Use HIP cooperative groups workaround that is shipped with this project. Has no effect on CUDA builds." OFF)
 option(USE_WARPSIZE_32 "Use wave size 32, e.g., for gfx1100 devices. This option is only applicable for the ROCm backend. Has no effect if the CUDA backend is selected." OFF)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -125,9 +124,6 @@ macro(setup_hip_amd_build)
   message(STATUS "Finding HIP")
   find_package(hip REQUIRED)
   add_compile_definitions(__HIP_PLATFORM_HCC__ __HIP_PLATFORM_AMD__)
-  if (CG_WORKAROUND)
-    add_compile_definitions(CG_WORKAROUND)
-  endif()
   include_directories(${HIP_INCLUDE_DIRS})
   if(USE_WARPSIZE_32)
     add_compile_definitions("USE_WARPSIZE_32")
@@ -371,8 +367,8 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake/arcto-config.cmake"
 # Packaging
 # NOTE For the time being, we put lib and dev files into the same package.
 # NOTE We need to consider to move to ROCm CMake from raw CPACK
-set(CPACK_PACKAGE_NAME "rocm-arcto-core")
-set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
+set(CPACK_PACKAGE_NAME "arcto")
+set(CPACK_PACKAGE_VENDOR "Cristiano Künas")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "${CPACK_PACKAGE_VENDOR}")
 set(CPACK_OUTPUT_FILE_PREFIX "dist" CACHE PATH "Package output file prefix.")
 set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})

@@ -7,7 +7,7 @@
 # this software and related documentation outside the terms of the EULA
 # is strictly prohibited.
 
-# Modifications Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+# Modifications Copyright (C) 2025-2026 Cristiano Künas.
 
 function(add_unit_test test_file)
   get_filename_component(test_name "${test_file}" NAME_WE)

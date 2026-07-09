@@ -190,7 +190,4 @@ Reduce chunk size or file size:
 ```
 
 ### ROCm version compatibility
-This project has been tested with ROCm 7.0.1. For older versions, you may need to enable workarounds:
-```bash
-cmake .. -D BUILD_BENCHMARKS=ON -D CG_WORKAROUND=1
-```
+This project has been tested with ROCm 7.x; the minimum supported version is ROCm 6.1.
