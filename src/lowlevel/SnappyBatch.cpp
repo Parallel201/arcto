@@ -142,6 +142,7 @@ arctoStatus_t arctoBatchedSnappyDecompressAsync(
     hipStream_t stream)
 {
   try {
+    HipUtils::check_wave_size();
     // error check inputs
     CHECK_NOT_NULL(device_compressed_ptrs);
     CHECK_NOT_NULL(device_compressed_bytes);
@@ -218,6 +219,7 @@ arctoStatus_t arctoBatchedSnappyCompressAsync(
     hipStream_t stream)
 {
   try {
+    HipUtils::check_wave_size();
     // error check inputs
     CHECK_NOT_NULL(device_uncompressed_ptr);
     CHECK_NOT_NULL(device_uncompressed_bytes);

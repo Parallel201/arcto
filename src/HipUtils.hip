@@ -46,7 +46,9 @@
 // SOFTWARE.
 
 #include "HipUtils.h"
+#include "arcto_device_types.h"
 
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 
@@ -170,3 +172,25 @@ void* HipUtils::void_device_pointer(void* const ptr)
 }
 
 } // namespace arcto
+
+void arcto::HipUtils::check_wave_size()
+{
+  static std::once_flag flag;
+  std::call_once(flag, [] {
+    int device;
+    check(hipGetDevice(&device), "hipGetDevice() in check_wave_size()");
+    int hw_warp = 0;
+    check(
+        hipDeviceGetAttribute(&hw_warp, hipDeviceAttributeWarpSize, device),
+        "hipDeviceGetAttribute(WarpSize) in check_wave_size()");
+    if (hw_warp != warpsize) {
+      std::ostringstream oss;
+      oss << "ARCTO was compiled for wavefront size " << warpsize
+          << " but device " << device << " has wavefront size " << hw_warp
+          << ". Rebuild with "
+          << (hw_warp == 32 ? "-D USE_WARPSIZE_32=ON" : "-D USE_WARPSIZE_32=OFF")
+          << ".";
+      throw std::runtime_error(oss.str());
+    }
+  });
+}
