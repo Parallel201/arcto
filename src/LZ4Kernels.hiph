@@ -215,27 +215,74 @@ inline __device__ lane_mask_t warpBallot(int vote)
   return BALLOT1(vote);
 }
 
-template <typename T>
-inline __device__ signed_lane_mask_t warpMatchAny(const signed_lane_mask_t participants, T val)
+inline __device__ position_type hash(const word_type key, position_type hash_table_size);
+inline __device__ int numValidThreadsToMask(const int numValidThreads);
+
+/**
+ * For each participating lane, find the EARLIEST lane holding the same
+ * word (its "twin") within the current warp window.
+ *
+ * sm70+: exact, via hardware __match_any_sync.
+ * AMD: O(1) per position via a small LDS claim table -- each lane
+ * atomically claims the bucket of its word's hash with atomicMin(lane),
+ * then validates the claimed owner's word through one shuffle. A hash
+ * collision can only cause a MISSED twin (the position falls back to the
+ * global hash-table path), never a wrong match, so the LZ4 stream stays
+ * valid. This replaces an all-to-all O(warpsize) scan in the hot loop.
+ *
+ * Must be called by all lanes of the warp (uses LDS + wave barriers).
+ * Returns true iff this lane has a twin at a lower lane id; twin_lane is
+ * then that lane's id.
+ */
+inline __device__ bool findEarliestTwin(
+    const int numValidThreads, const word_type val, int& twin_lane)
 {
 #if __CUDA_ARCH__ >= 700
-  return __match_any_sync(participants, val);
-#else
-  signed_lane_mask_t mask = 0;
-
-  // Full search by warp-rotation: lane i compares against lane (i+d) via
-  // shuffle (ds_bpermute on AMD). No LDS traffic and no warp barriers,
-  // unlike the previous shared-memory emulation. Same result mask.
-  const bool active = (LANE_MASK_ONE << threadIdx.x) & participants;
+  signed_lane_mask_t m = 0;
+  if (threadIdx.x < numValidThreads) {
+    m = __match_any_sync(numValidThreadsToMask(numValidThreads), val);
+  }
+  twin_lane = m ? CLZ(BREV(m)) : static_cast<int>(threadIdx.x);
+  return m && twin_lane != static_cast<int>(threadIdx.x);
+#elif defined(USE_WARPSIZE_32)
+  // wave32: the rotation is only 32 shuffles -- shorter than the fixed
+  // cost of an LDS claim table (reset + 2 barriers + atomic). Full-mask
+  // rotation, then earliest twin = lowest set bit.
+  const bool active = static_cast<int>(threadIdx.x) < numValidThreads;
+  const signed_lane_mask_t participants = numValidThreadsToMask(numValidThreads);
+  signed_lane_mask_t m = 0;
   for (int d = 0; d < warpsize; ++d) {
     const int nbr_id = (threadIdx.x + d) & (uwarpsize - 1);
-    const T nbr_val = SHFL1(val, nbr_id);
+    const word_type nbr_val = SHFL1(val, nbr_id);
     if (active && ((LANE_MASK_ONE << nbr_id) & participants)) {
-      mask |= static_cast<lane_mask_t>(val == nbr_val) << nbr_id;
+      m |= static_cast<lane_mask_t>(val == nbr_val) << nbr_id;
     }
   }
+  twin_lane = m ? CLZ(BREV(m)) : static_cast<int>(threadIdx.x);
+  return m && twin_lane != static_cast<int>(threadIdx.x);
+#else
+  // wave64: O(1) LDS claim table instead of a 64-wide all-to-all scan.
+  constexpr int CLAIM_BUCKETS = 4 * warpsize;
+  __shared__ int claim[CLAIM_BUCKETS];
+  assert(blockDim.x == warpsize);
+  assert(blockDim.y == 1);
 
-  return mask;
+  for (int k = threadIdx.x; k < CLAIM_BUCKETS; k += warpsize) {
+    claim[k] = warpsize; // sentinel: unclaimed
+  }
+  SYNCWARP1();
+
+  const bool active = static_cast<int>(threadIdx.x) < numValidThreads;
+  const position_type h = hash(val, CLAIM_BUCKETS);
+  if (active) {
+    atomicMin(&claim[h], static_cast<int>(threadIdx.x));
+  }
+  SYNCWARP1();
+
+  const int j = active ? claim[h] : static_cast<int>(warpsize);
+  const word_type jval = SHFL1(val, (j < static_cast<int>(warpsize)) ? j : 0);
+  twin_lane = j;
+  return active && j < static_cast<int>(threadIdx.x) && jval == val;
 #endif
 }
 
@@ -858,31 +905,22 @@ __device__ void compressStream(
           static_cast<int>(LZ4_COMP_THREADS_PER_CHUNK - invalid_threads),
           static_cast<int>(typed_length - decomp_idx - last_valid_match));
 
-      // first try to find a local match
+      // first try to find a local match: does an earlier lane in this
+      // window hold the same word?
       position_type match_location = typed_length;
-      signed_lane_mask_t match_mask_self = 0;
-      if (threadIdx.x < numValidThreads) {
-        match_mask_self
-            = warpMatchAny(numValidThreadsToMask(numValidThreads), next);
-      }
+      int twin_lane;
+      const bool has_twin = findEarliestTwin(numValidThreads, next, twin_lane);
 
-      // each thread has a mask of other threads with matches, next we need
-      // to find the first thread with a match before it
-      const signed_lane_mask_t match_mask_warp = warpBallot(
-          match_mask_self && CLZ(BREV(match_mask_self)) != threadIdx.x);
+      const signed_lane_mask_t match_mask_warp = warpBallot(has_twin);
 
       int first_match_thread;
       if (match_mask_warp) {
-        // find the byte offset (thread id) within the warp where the first
-        // match is located
+        // first lane (lowest position) that has an earlier twin
         first_match_thread = CLZ(BREV(match_mask_warp));
 
-        // determine the global position for the finding thread
-        match_location = CLZ(BREV(match_mask_self)) + decomp_idx;
-
-        // comunicate the global position of the match to other threads
-        match_location
-                = SHFL1(match_location, first_match_thread);
+        // its twin's global position, communicated to all lanes
+        const position_type loc = twin_lane + decomp_idx;
+        match_location = SHFL1(loc, first_match_thread);
       } else {
         first_match_thread = numValidThreads;
       }
