@@ -72,11 +72,11 @@ namespace lowlevel {
 
 template<typename T>
 __global__ void lz4CompressBatchKernel(
-    const uint8_t* const* device_in_ptr,
-    const size_t* const device_in_bytes,
-    uint8_t* const* const device_out_ptr,
-    size_t* const device_out_bytes,
-    offset_type* const temp_space,
+    const uint8_t* const* __restrict__ device_in_ptr,
+    const size_t* const __restrict__ device_in_bytes,
+    uint8_t* const* const __restrict__ device_out_ptr,
+    size_t* const __restrict__ device_out_bytes,
+    offset_type* const __restrict__ temp_space,
     const position_type hash_table_size)
 {
   const int bidx = blockIdx.x * blockDim.y + threadIdx.y;
