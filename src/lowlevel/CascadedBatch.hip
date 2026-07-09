@@ -339,6 +339,7 @@ arctoStatus_t arctoBatchedCascadedCompressAsync(
     hipStream_t stream)
 {
   try {
+    HipUtils::check_wave_size();
     ARCTO_TYPE_ONE_SWITCH(
         format_opts.type,
         cascaded_batched_compression_typed,
@@ -376,6 +377,7 @@ arctoStatus_t arctoBatchedCascadedDecompressAsync(
     hipStream_t stream)
 {
   try {
+    HipUtils::check_wave_size();
     // Just call kernel to perform compression. Macro for datatype happens
     // within kernel
     constexpr int threadblock_size = cascaded_decompress_threadblock_size;
