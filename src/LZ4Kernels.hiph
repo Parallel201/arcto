@@ -223,21 +223,16 @@ inline __device__ signed_lane_mask_t warpMatchAny(const signed_lane_mask_t parti
 #else
   signed_lane_mask_t mask = 0;
 
-  // full search
-  __shared__ T values[warpsize];
-  assert(blockDim.x == warpsize);
-  assert(blockDim.y == 1);
-  if ((LANE_MASK_ONE << threadIdx.x) & participants) {
-    values[threadIdx.x] = val;
-    SYNCWARP(participants);
-    for (int d = 0; d < warpsize; ++d) {
-      const int nbr_id = (threadIdx.x + d) & (uwarpsize-1);
-      if ((LANE_MASK_ONE << nbr_id) & participants) {
-        const T nbr_val = values[nbr_id];
-        mask |= static_cast<lane_mask_t>(val == nbr_val) << nbr_id;
-      }
+  // Full search by warp-rotation: lane i compares against lane (i+d) via
+  // shuffle (ds_bpermute on AMD). No LDS traffic and no warp barriers,
+  // unlike the previous shared-memory emulation. Same result mask.
+  const bool active = (LANE_MASK_ONE << threadIdx.x) & participants;
+  for (int d = 0; d < warpsize; ++d) {
+    const int nbr_id = (threadIdx.x + d) & (uwarpsize - 1);
+    const T nbr_val = SHFL1(val, nbr_id);
+    if (active && ((LANE_MASK_ONE << nbr_id) & participants)) {
+      mask |= static_cast<lane_mask_t>(val == nbr_val) << nbr_id;
     }
-    SYNCWARP(participants);
   }
 
   return mask;
@@ -729,12 +724,11 @@ inline __device__ void insertHashTableWarp(
   position_type hashPos = hash(next, hashTableSize);
 
   if (threadIdx.x < numValidThreads) {
-    const int match
-        = warpMatchAny(numValidThreadsToMask(numValidThreads), hashPos);
-    if (!match || (warpsize-1) - CLZ(match) == threadIdx.x) {
-      // I'm the last match -- can insert
-      hashTable[hashPos] = pos & MAX_OFFSET;
-    }
+    // Race-tolerant insert: when several lanes hash to the same slot, any
+    // one of them may win. Readers re-validate through isValidHash (window
+    // + key check), so a colliding write can only change which match is
+    // found, never break correctness.
+    hashTable[hashPos] = pos & MAX_OFFSET;
   }
 
     SYNCWARP1();
