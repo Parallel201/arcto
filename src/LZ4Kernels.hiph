@@ -56,6 +56,16 @@
 #include "hip/hip_runtime.h"
 #include "arcto_hipcub.hiph"
 #include "LZ4Types.h"
+#include "device_functions.hiph"
+
+// Enable the warp-cooperative LSIC decode (dormant upstream path): read
+// warpsize length bytes at once + one ballot instead of a byte-serial
+// loop. Pays on wave32 (gfx1100 zeros decomp +21%, TTI neutral); on
+// wave64 the per-round ballot costs more than the short serial reads
+// typical of TTI (MI300X: -21% decomp) -- keep serial there.
+#if defined(USE_WARPSIZE_32)
+#define WARP_READ_LSIC
+#endif
 
 #include <cassert>
 #include <fstream>
@@ -559,14 +569,60 @@ private:
   const uint8_t* const m_compData;
 }; // End BufferControl Class
 
+#if defined(USE_WARPSIZE_32)
+/**
+ * Cooperative byte copy, vectorized: align the destination to 4 bytes,
+ * stream the body as dword stores fed by unaligned_load32 (two aligned
+ * loads + funnel shift), tail in bytes. The body stops 8 bytes short of
+ * the end so unaligned_load32 never reads past `source + length`.
+ */
+inline __device__ void coopCopyVec(
+    uint8_t* const dest,
+    const uint8_t* const source,
+    const position_type length,
+    const unsigned int stride)
+{
+  if (length < 32) {
+    for (position_type i = threadIdx.x; i < length; i += stride) {
+      dest[i] = source[i];
+    }
+    return;
+  }
+
+  const position_type head
+      = (4 - (reinterpret_cast<uintptr_t>(dest) & 3)) & 3;
+  for (position_type i = threadIdx.x; i < head; i += stride) {
+    dest[i] = source[i];
+  }
+
+  uint32_t* const dest32 = reinterpret_cast<uint32_t*>(dest + head);
+  const uint8_t* const src_h = source + head;
+  const position_type body
+      = (length - head >= 8) ? ((length - head - 8) / 4 + 1) : 0;
+  for (position_type w = threadIdx.x; w < body; w += stride) {
+    dest32[w] = unaligned_load32(src_h + 4 * w);
+  }
+
+  for (position_type i = head + 4 * body + threadIdx.x; i < length;
+       i += stride) {
+    dest[i] = source[i];
+  }
+}
+
+#endif // USE_WARPSIZE_32
+
 inline __device__ void coopCopyNoOverlap(
     uint8_t* const dest,
     const uint8_t* const source,
     const position_type length)
 {
+#if defined(USE_WARPSIZE_32)
+  coopCopyVec(dest, source, length, blockDim.x);
+#else
   for (position_type i = threadIdx.x; i < length; i += blockDim.x) {
     dest[i] = source[i];
   }
+#endif
 }
 
 inline __device__ void coopCopyRepeat(
@@ -575,9 +631,28 @@ inline __device__ void coopCopyRepeat(
     const position_type dist,
     const position_type length)
 {
-  // if there is overlap, it means we repeat, so we just
-  // need to organize our copy around that
   assert(dist > 0);
+#if defined(USE_WARPSIZE_32)
+  if (length > 2 * blockDim.x) {
+    // Long overlapped match = long repeating pattern of period `dist`
+    // (e.g. zero runs). Seed one period, then double the already-written
+    // prefix: log2(length/dist) rounds of straight copies instead of one
+    // modulo per byte.
+    const position_type seed = dist < length ? dist : length;
+    coopCopyVec(dest, source, seed, blockDim.x);
+
+    position_type done = seed;
+    while (done < length) {
+      __threadfence_block();
+      SYNCWARP1();
+      const position_type n = done < (length - done) ? done : (length - done);
+      coopCopyVec(dest + done, dest, n, blockDim.x);
+      done += n;
+    }
+    return;
+  }
+#endif
+  // Short match, wave64 and CUDA: strided modulo loop (original form).
   for (position_type i = threadIdx.x; i < length; i += blockDim.x) {
     dest[i] = source[i % dist];
   }
@@ -621,9 +696,13 @@ inline __device__ void copyLiterals(
     const position_type length)
 {
   assert(BLOCK_SIZE == blockDim.x);
+#if defined(USE_WARPSIZE_32)
+  coopCopyVec(dest, source, length, BLOCK_SIZE);
+#else
   for (position_type i = threadIdx.x; i < length; i += BLOCK_SIZE) {
     dest[i] = source[i];
   }
+#endif
 }
 
 constexpr __host__ __device__ size_t divRoundUp(size_t x, size_t y)
