@@ -1,13 +1,18 @@
 # ARCTO
 
-GPU-accelerated batched compression for **AMD GPUs** (HIP/ROCm): lossless
-byte-level codecs (LZ4, Snappy, Cascaded) plus floating-point compression
-(ZFP), tuned for RDNA and CDNA architectures.
+Batched compression for **AMD GPUs** (HIP/ROCm), covering lossless byte-level codecs
+(LZ4, Snappy, Cascaded) and floating-point compression (ZFP), tuned for RDNA3 and
+CDNA2/CDNA3.
 
-ARCTO is our own HIP translation of NVIDIA
-[nvCOMP branch-2.2](https://github.com/NVIDIA/nvcomp/tree/branch-2.2),
-adjusted and tuned for AMD GPUs, and extended with ZFP support and
-host-side staging optimizations for large inputs.
+**What is new here**
+- **ZFP on AMD GPUs** — FIXED_RATE / FIXED_PRECISION / FIXED_ACCURACY running on device,
+  bitstream-compatible with canonical zfp. No vendor library provides this on ROCm.
+- **Adaptive host-side staging** (`arctoHostBatchAdaptive`) — profile-driven tiled windows
+  with an online cost model, keeping peak pinned allocation bounded on multi-GB inputs;
+  window sizes tuned per architecture (gfx906 / gfx90a / gfx942 / gfx1100).
+- **Cross-vendor evaluation path** — an experimental CUDA backend builds the same HIP
+  sources unmodified, so AMD and NVIDIA numbers come from one codebase.
+- **Validated on three AMD architectures**, wave64 and wave32.
 
 ## Codecs
 
