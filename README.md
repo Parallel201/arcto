@@ -9,6 +9,22 @@ ARCTO is our own HIP translation of NVIDIA
 adjusted and tuned for AMD GPUs, and extended with ZFP support and
 host-side staging optimizations for large inputs.
 
+### Upstream provenance
+
+Branch names move; these commits do not. Recorded so the translation can be
+diffed against its ancestor, and so the NVIDIA baseline can be reproduced,
+without keeping upstream checkouts in the workspace.
+
+| Upstream | Role | Commit | Tag / branch | Date |
+|---|---|---|---|---|
+| [NVIDIA/nvcomp](https://github.com/NVIDIA/nvcomp) | Ancestor ARCTO was translated from | `a6e4e64a177e07cd2e5c8c5e07bb66ffefceae84` | `v2.2.0` / `branch-2.2` | 2022-02-07 |
+| [NVIDIA/nvcomp](https://github.com/NVIDIA/nvcomp) | Baseline for portable ARCTO-vs-nvCOMP comparison | `fa27b626d0a9ccdc266aa23eb0340fe5f9bf32af` | `v3.0.1` / `branch-3.0` | 2023-08-09 |
+
+```bash
+git clone https://github.com/NVIDIA/nvcomp.git && cd nvcomp
+git checkout a6e4e64a177e07cd2e5c8c5e07bb66ffefceae84   # the 2.2 ancestor
+```
+
 ## Codecs
 
 | Codec | Type | Notes |

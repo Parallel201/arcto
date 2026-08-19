@@ -14,6 +14,7 @@ every file retains its original NVIDIA header.
 
 * LICENSE FILE: [NVCOMP_2_2_LICENSE](NVCOMP_2_2_LICENSE)
 * HOMEPAGE: https://github.com/NVIDIA/nvcomp/tree/branch-2.2
+* UPSTREAM COMMIT: `a6e4e64a177e07cd2e5c8c5e07bb66ffefceae84` (tag `v2.2.0`, branch `branch-2.2`, 2022-02-07)
 
 * FILES:
   * ``CMakeLists.txt``
@@ -136,6 +137,7 @@ Work derived from NVIDIA nvCOMP v2.2 that is licensed under Apache-2.0
 its original header; copyright years differ per file.
 
 * HOMEPAGE: https://github.com/NVIDIA/nvcomp/tree/branch-2.2
+* UPSTREAM COMMIT: `a6e4e64a177e07cd2e5c8c5e07bb66ffefceae84` (tag `v2.2.0`, branch `branch-2.2`, 2022-02-07)
 
 * FILES:
   * ``cmake/arcto-config.cmake.amd.in``
