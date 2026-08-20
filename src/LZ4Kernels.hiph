@@ -148,7 +148,13 @@ constexpr const position_type DECOMP_BUFFER_PREFETCH_DIST
  * @brief The number of elements in the hash table to use while performing
  * compression.
  */
-constexpr const position_type MAX_HASH_TABLE_SIZE = 1U << 14;
+// Overridable at build time (-D ARCTO_LZ4_MAX_HASH_TABLE_SIZE=N) so the table
+// can be sized against the L1 budget independently of the chunk size. The
+// default reproduces the inherited nvCOMP value exactly.
+#ifndef ARCTO_LZ4_MAX_HASH_TABLE_SIZE
+#define ARCTO_LZ4_MAX_HASH_TABLE_SIZE (1U << 14)
+#endif
+constexpr const position_type MAX_HASH_TABLE_SIZE = ARCTO_LZ4_MAX_HASH_TABLE_SIZE;
 
 /**
  * @brief The value used to explicitly represent and invalid offset. This
