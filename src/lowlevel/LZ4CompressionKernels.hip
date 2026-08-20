@@ -77,8 +77,21 @@ namespace lowlevel {
 // on gfx942). Pin the budget back with a waves-per-EU hint. On wave32
 // (RDNA3, 3x larger register file) the hint would only restrict the
 // scheduler, so cap the block size alone.
+// E16 knob: on wave32 the compress kernel compiles to 136 arch VGPRs
+// (read from the rocprofv3 kernel-symbol table), which caps residency at
+// about 10 of 16 waves per SIMD on RDNA3. A nonzero min-waves value asks
+// the compiler to fit more waves (bounding VGPRs), trading possible spills
+// for occupancy. Default 0 keeps the shipped behavior exactly.
+#ifndef ARCTO_LZ4_W32_MIN_WAVES
+#define ARCTO_LZ4_W32_MIN_WAVES 0
+#endif
+
 #if defined(USE_WARPSIZE_32)
+#if ARCTO_LZ4_W32_MIN_WAVES > 0
+#define LZ4_COMP_LAUNCH_BOUNDS __launch_bounds__(LZ4_COMP_THREADS_PER_CHUNK, ARCTO_LZ4_W32_MIN_WAVES)
+#else
 #define LZ4_COMP_LAUNCH_BOUNDS __launch_bounds__(LZ4_COMP_THREADS_PER_CHUNK)
+#endif
 #else
 #define LZ4_COMP_LAUNCH_BOUNDS __launch_bounds__(LZ4_COMP_THREADS_PER_CHUNK, 8)
 #endif
