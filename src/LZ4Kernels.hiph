@@ -148,7 +148,23 @@ constexpr const position_type DECOMP_BUFFER_PREFETCH_DIST
  * @brief The number of elements in the hash table to use while performing
  * compression.
  */
-constexpr const position_type MAX_HASH_TABLE_SIZE = 1U << 14;
+// Default sized from the 2026-08-20 cross-architecture campaign (see
+// compression-experiments/experiments/EXPERIMENT-LOG.md, E08/E09/E14): the
+// measured optimum is 128 entries on wave32 RDNA and 64 on wave64 GCN/CDNA,
+// derived as (L1_bytes / max_waves_per_CU) / 4 -- two octaves below the
+// aggregate-residency knee. The CUDA backend keeps the inherited nvCOMP
+// value: those defaults were tuned for NVIDIA and ours are unmeasured there,
+// so portability must not regress by construction.
+#ifndef ARCTO_LZ4_MAX_HASH_TABLE_SIZE
+#if !defined(__HIP_PLATFORM_AMD__)
+#define ARCTO_LZ4_MAX_HASH_TABLE_SIZE (1U << 14)
+#elif defined(USE_WARPSIZE_32)
+#define ARCTO_LZ4_MAX_HASH_TABLE_SIZE (1U << 7)
+#else
+#define ARCTO_LZ4_MAX_HASH_TABLE_SIZE (1U << 6)
+#endif
+#endif
+constexpr const position_type MAX_HASH_TABLE_SIZE = ARCTO_LZ4_MAX_HASH_TABLE_SIZE;
 
 /**
  * @brief The value used to explicitly represent and invalid offset. This
