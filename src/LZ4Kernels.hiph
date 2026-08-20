@@ -677,10 +677,27 @@ inline __device__ void coopCopyOverlap(
   }
 }
 
+// Experiment knobs (A4): restrict the hash to ARCTO_LZ4_HASH_SLOT_MASK+1
+// logical slots and place them ARCTO_LZ4_HASH_SLOT_STRIDE entries apart,
+// while the table stays allocated at MAX_HASH_TABLE_SIZE. Both geometries
+// keep the logical slot function identical, so collisions and therefore
+// match decisions are unchanged; only the cache-line footprint of the
+// probes moves. Defaults compile to the original behavior exactly.
+#ifndef ARCTO_LZ4_HASH_SLOT_MASK
+#define ARCTO_LZ4_HASH_SLOT_MASK 0u
+#endif
+#ifndef ARCTO_LZ4_HASH_SLOT_STRIDE
+#define ARCTO_LZ4_HASH_SLOT_STRIDE 1u
+#endif
+
 inline __device__ position_type hash(const word_type key, position_type hash_table_size)
 {
   // needs to be 12 bits
-  return (__brev(key) + (key ^ 0xc375)) & (hash_table_size - 1); //: key type is not depending on warpsize
+  const position_type h = __brev(key) + (key ^ 0xc375); //: key type is not depending on warpsize
+  if (ARCTO_LZ4_HASH_SLOT_MASK != 0u) {
+    return (h & ARCTO_LZ4_HASH_SLOT_MASK) * ARCTO_LZ4_HASH_SLOT_STRIDE;
+  }
+  return h & (hash_table_size - 1);
 }
 
 inline __device__ uint8_t encodePair(const uint8_t t1, const uint8_t t2)
