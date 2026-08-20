@@ -773,6 +773,17 @@ inline __device__ bool isValidHash(
     return false;
   }
 
+  // With the table no longer cleared between chunks, an entry may hold any
+  // 16-bit value. Within the first OFFSET_SIZE window (decomp_idx <=
+  // MAX_OFFSET) a value at or ahead of the current position has no valid
+  // decoding: convertIdx would wrap below zero, and the wrapped offset can
+  // slip past the window check below and be dereferenced. Entries written
+  // legitimately in this window always sit strictly behind decomp_idx, so
+  // rejecting the rest restores the invariant the clear loop used to provide.
+  if (decomp_idx <= MAX_OFFSET && hashed_offset >= decomp_idx) {
+    return false;
+  }
+
   offset = convertIdx(hashed_offset, decomp_idx);
 
   if (decomp_idx - offset > MAX_OFFSET) {
