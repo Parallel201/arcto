@@ -101,10 +101,10 @@ template <
     int chunk_size = default_chunk_size>
 __global__ void cascaded_compression_kernel(
     int batch_size,
-    const data_type* const* uncompressed_data,
-    const size_type* uncompressed_bytes,
-    void* const* compressed_data,
-    size_type* compressed_bytes,
+    const data_type* const* __restrict__ uncompressed_data,
+    const size_type* __restrict__ uncompressed_bytes,
+    void* const* __restrict__ compressed_data,
+    size_type* __restrict__ compressed_bytes,
     arctoBatchedCascadedOpts_t comp_opts)
 {
   arcto::do_cascaded_compression_kernel<
@@ -339,6 +339,7 @@ arctoStatus_t arctoBatchedCascadedCompressAsync(
     hipStream_t stream)
 {
   try {
+    HipUtils::check_wave_size();
     ARCTO_TYPE_ONE_SWITCH(
         format_opts.type,
         cascaded_batched_compression_typed,
@@ -376,6 +377,7 @@ arctoStatus_t arctoBatchedCascadedDecompressAsync(
     hipStream_t stream)
 {
   try {
+    HipUtils::check_wave_size();
     // Just call kernel to perform compression. Macro for datatype happens
     // within kernel
     constexpr int threadblock_size = cascaded_decompress_threadblock_size;

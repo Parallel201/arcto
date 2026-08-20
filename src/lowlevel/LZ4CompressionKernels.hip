@@ -70,13 +70,25 @@ namespace arcto {
 
 namespace lowlevel {
 
+// CDNA (wave64) sits exactly on the 64-VGPR occupancy step (<=64 VGPRs ->
+// 8 waves/SIMD; 65-96 -> 5). Without bounds the compiler allocates ~90
+// VGPRs for the compress kernel and occupancy drops 8->5 waves (measured
+// on gfx942). Pin the budget back with a waves-per-EU hint. On wave32
+// (RDNA3, 3x larger register file) the hint would only restrict the
+// scheduler, so cap the block size alone.
+#if defined(USE_WARPSIZE_32)
+#define LZ4_COMP_LAUNCH_BOUNDS __launch_bounds__(LZ4_COMP_THREADS_PER_CHUNK)
+#else
+#define LZ4_COMP_LAUNCH_BOUNDS __launch_bounds__(LZ4_COMP_THREADS_PER_CHUNK, 8)
+#endif
+
 template<typename T>
-__global__ void lz4CompressBatchKernel(
-    const uint8_t* const* device_in_ptr,
-    const size_t* const device_in_bytes,
-    uint8_t* const* const device_out_ptr,
-    size_t* const device_out_bytes,
-    offset_type* const temp_space,
+__global__ LZ4_COMP_LAUNCH_BOUNDS void lz4CompressBatchKernel(
+    const uint8_t* const* __restrict__ device_in_ptr,
+    const size_t* const __restrict__ device_in_bytes,
+    uint8_t* const* const __restrict__ device_out_ptr,
+    size_t* const __restrict__ device_out_bytes,
+    offset_type* const __restrict__ temp_space,
     const position_type hash_table_size)
 {
   const int bidx = blockIdx.x * blockDim.y + threadIdx.y;

@@ -79,7 +79,7 @@ namespace
 {
 
 template <typename VALUE>
-__global__ AMD_LAUNCH_BOUNDS_MEMORY void deltaKernel(
+__global__ __launch_bounds__(BLOCK_SIZE) void deltaKernel(
     VALUE** const outputPtr,
     const VALUE* const input,
     const size_t* const numDevice,

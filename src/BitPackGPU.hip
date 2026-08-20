@@ -222,7 +222,7 @@ namespace
 {
 
 template <typename LIMIT, typename INPUT>
-__global__ AMD_LAUNCH_BOUNDS_COMPUTE void bitPackConfigScanKernel(
+__global__ __launch_bounds__(BLOCK_SIZE) void bitPackConfigScanKernel(
     LIMIT* const minValue,
     LIMIT* const maxValue,
     INPUT const* const in,
@@ -283,7 +283,7 @@ __global__ AMD_LAUNCH_BOUNDS_COMPUTE void bitPackConfigScanKernel(
 }
 
 template <typename LIMIT, typename INPUT>
-__global__ AMD_LAUNCH_BOUNDS_BALANCED void bitPackConfigFinalizeKernel(
+__global__ __launch_bounds__(BLOCK_SIZE) void bitPackConfigFinalizeKernel(
     LIMIT const* const inMin,
     LIMIT const* const inMax,
     unsigned char* const* const numBitsPtr,
@@ -335,7 +335,7 @@ __global__ AMD_LAUNCH_BOUNDS_BALANCED void bitPackConfigFinalizeKernel(
 }
 
 template <typename INPUT, typename OUTPUT>
-__global__ void bitPackKernel(
+__global__ __launch_bounds__(BLOCK_SIZE) void bitPackKernel(
     unsigned char const* const* const numBitsPtr,
     INPUT const* const* const valueOffsetPtr,
     OUTPUT* const* const outPtr,

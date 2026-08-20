@@ -56,6 +56,16 @@
 #include "hip/hip_runtime.h"
 #include "arcto_hipcub.hiph"
 #include "LZ4Types.h"
+#include "device_functions.hiph"
+
+// Enable the warp-cooperative LSIC decode (dormant upstream path): read
+// warpsize length bytes at once + one ballot instead of a byte-serial
+// loop. Pays on wave32 (gfx1100 zeros decomp +21%, TTI neutral); on
+// wave64 the per-round ballot costs more than the short serial reads
+// typical of TTI (MI300X: -21% decomp) -- keep serial there.
+#if defined(USE_WARPSIZE_32)
+#define WARP_READ_LSIC
+#endif
 
 #include <cassert>
 #include <fstream>
@@ -221,32 +231,74 @@ inline __device__ lane_mask_t warpBallot(int vote)
   return BALLOT1(vote);
 }
 
-template <typename T>
-inline __device__ signed_lane_mask_t warpMatchAny(const signed_lane_mask_t participants, T val)
+inline __device__ position_type hash(const word_type key, position_type hash_table_size);
+inline __device__ int numValidThreadsToMask(const int numValidThreads);
+
+/**
+ * For each participating lane, find the EARLIEST lane holding the same
+ * word (its "twin") within the current warp window.
+ *
+ * sm70+: exact, via hardware __match_any_sync.
+ * AMD: O(1) per position via a small LDS claim table -- each lane
+ * atomically claims the bucket of its word's hash with atomicMin(lane),
+ * then validates the claimed owner's word through one shuffle. A hash
+ * collision can only cause a MISSED twin (the position falls back to the
+ * global hash-table path), never a wrong match, so the LZ4 stream stays
+ * valid. This replaces an all-to-all O(warpsize) scan in the hot loop.
+ *
+ * Must be called by all lanes of the warp (uses LDS + wave barriers).
+ * Returns true iff this lane has a twin at a lower lane id; twin_lane is
+ * then that lane's id.
+ */
+inline __device__ bool findEarliestTwin(
+    const int numValidThreads, const word_type val, int& twin_lane)
 {
 #if __CUDA_ARCH__ >= 700
-  return __match_any_sync(participants, val);
+  signed_lane_mask_t m = 0;
+  if (threadIdx.x < numValidThreads) {
+    m = __match_any_sync(numValidThreadsToMask(numValidThreads), val);
+  }
+  twin_lane = m ? CLZ(BREV(m)) : static_cast<int>(threadIdx.x);
+  return m && twin_lane != static_cast<int>(threadIdx.x);
+#elif defined(USE_WARPSIZE_32)
+  // wave32: the rotation is only 32 shuffles -- shorter than the fixed
+  // cost of an LDS claim table (reset + 2 barriers + atomic). Full-mask
+  // rotation, then earliest twin = lowest set bit.
+  const bool active = static_cast<int>(threadIdx.x) < numValidThreads;
+  const signed_lane_mask_t participants = numValidThreadsToMask(numValidThreads);
+  signed_lane_mask_t m = 0;
+  for (int d = 0; d < warpsize; ++d) {
+    const int nbr_id = (threadIdx.x + d) & (uwarpsize - 1);
+    const word_type nbr_val = SHFL1(val, nbr_id);
+    if (active && ((LANE_MASK_ONE << nbr_id) & participants)) {
+      m |= static_cast<lane_mask_t>(val == nbr_val) << nbr_id;
+    }
+  }
+  twin_lane = m ? CLZ(BREV(m)) : static_cast<int>(threadIdx.x);
+  return m && twin_lane != static_cast<int>(threadIdx.x);
 #else
-  signed_lane_mask_t mask = 0;
-
-  // full search
-  __shared__ T values[warpsize];
+  // wave64: O(1) LDS claim table instead of a 64-wide all-to-all scan.
+  constexpr int CLAIM_BUCKETS = 4 * warpsize;
+  __shared__ int claim[CLAIM_BUCKETS];
   assert(blockDim.x == warpsize);
   assert(blockDim.y == 1);
-  if ((LANE_MASK_ONE << threadIdx.x) & participants) {
-    values[threadIdx.x] = val;
-    SYNCWARP(participants);
-    for (int d = 0; d < warpsize; ++d) {
-      const int nbr_id = (threadIdx.x + d) & (uwarpsize-1);
-      if ((LANE_MASK_ONE << nbr_id) & participants) {
-        const T nbr_val = values[nbr_id];
-        mask |= static_cast<lane_mask_t>(val == nbr_val) << nbr_id;
-      }
-    }
-    SYNCWARP(participants);
-  }
 
-  return mask;
+  for (int k = threadIdx.x; k < CLAIM_BUCKETS; k += warpsize) {
+    claim[k] = warpsize; // sentinel: unclaimed
+  }
+  SYNCWARP1();
+
+  const bool active = static_cast<int>(threadIdx.x) < numValidThreads;
+  const position_type h = hash(val, CLAIM_BUCKETS);
+  if (active) {
+    atomicMin(&claim[h], static_cast<int>(threadIdx.x));
+  }
+  SYNCWARP1();
+
+  const int j = active ? claim[h] : static_cast<int>(warpsize);
+  const word_type jval = SHFL1(val, (j < static_cast<int>(warpsize)) ? j : 0);
+  twin_lane = j;
+  return active && j < static_cast<int>(threadIdx.x) && jval == val;
 #endif
 }
 
@@ -523,14 +575,60 @@ private:
   const uint8_t* const m_compData;
 }; // End BufferControl Class
 
+#if defined(USE_WARPSIZE_32)
+/**
+ * Cooperative byte copy, vectorized: align the destination to 4 bytes,
+ * stream the body as dword stores fed by unaligned_load32 (two aligned
+ * loads + funnel shift), tail in bytes. The body stops 8 bytes short of
+ * the end so unaligned_load32 never reads past `source + length`.
+ */
+inline __device__ void coopCopyVec(
+    uint8_t* const dest,
+    const uint8_t* const source,
+    const position_type length,
+    const unsigned int stride)
+{
+  if (length < 32) {
+    for (position_type i = threadIdx.x; i < length; i += stride) {
+      dest[i] = source[i];
+    }
+    return;
+  }
+
+  const position_type head
+      = (4 - (reinterpret_cast<uintptr_t>(dest) & 3)) & 3;
+  for (position_type i = threadIdx.x; i < head; i += stride) {
+    dest[i] = source[i];
+  }
+
+  uint32_t* const dest32 = reinterpret_cast<uint32_t*>(dest + head);
+  const uint8_t* const src_h = source + head;
+  const position_type body
+      = (length - head >= 8) ? ((length - head - 8) / 4 + 1) : 0;
+  for (position_type w = threadIdx.x; w < body; w += stride) {
+    dest32[w] = unaligned_load32(src_h + 4 * w);
+  }
+
+  for (position_type i = head + 4 * body + threadIdx.x; i < length;
+       i += stride) {
+    dest[i] = source[i];
+  }
+}
+
+#endif // USE_WARPSIZE_32
+
 inline __device__ void coopCopyNoOverlap(
     uint8_t* const dest,
     const uint8_t* const source,
     const position_type length)
 {
+#if defined(USE_WARPSIZE_32)
+  coopCopyVec(dest, source, length, blockDim.x);
+#else
   for (position_type i = threadIdx.x; i < length; i += blockDim.x) {
     dest[i] = source[i];
   }
+#endif
 }
 
 inline __device__ void coopCopyRepeat(
@@ -539,9 +637,28 @@ inline __device__ void coopCopyRepeat(
     const position_type dist,
     const position_type length)
 {
-  // if there is overlap, it means we repeat, so we just
-  // need to organize our copy around that
   assert(dist > 0);
+#if defined(USE_WARPSIZE_32)
+  if (length > 2 * blockDim.x) {
+    // Long overlapped match = long repeating pattern of period `dist`
+    // (e.g. zero runs). Seed one period, then double the already-written
+    // prefix: log2(length/dist) rounds of straight copies instead of one
+    // modulo per byte.
+    const position_type seed = dist < length ? dist : length;
+    coopCopyVec(dest, source, seed, blockDim.x);
+
+    position_type done = seed;
+    while (done < length) {
+      __threadfence_block();
+      SYNCWARP1();
+      const position_type n = done < (length - done) ? done : (length - done);
+      coopCopyVec(dest + done, dest, n, blockDim.x);
+      done += n;
+    }
+    return;
+  }
+#endif
+  // Short match, wave64 and CUDA: strided modulo loop (original form).
   for (position_type i = threadIdx.x; i < length; i += blockDim.x) {
     dest[i] = source[i % dist];
   }
@@ -585,9 +702,13 @@ inline __device__ void copyLiterals(
     const position_type length)
 {
   assert(BLOCK_SIZE == blockDim.x);
+#if defined(USE_WARPSIZE_32)
+  coopCopyVec(dest, source, length, BLOCK_SIZE);
+#else
   for (position_type i = threadIdx.x; i < length; i += BLOCK_SIZE) {
     dest[i] = source[i];
   }
+#endif
 }
 
 constexpr __host__ __device__ size_t divRoundUp(size_t x, size_t y)
@@ -735,12 +856,11 @@ inline __device__ void insertHashTableWarp(
   position_type hashPos = hash(next, hashTableSize);
 
   if (threadIdx.x < numValidThreads) {
-    const int match
-        = warpMatchAny(numValidThreadsToMask(numValidThreads), hashPos);
-    if (!match || (warpsize-1) - CLZ(match) == threadIdx.x) {
-      // I'm the last match -- can insert
-      hashTable[hashPos] = pos & MAX_OFFSET;
-    }
+    // Race-tolerant insert: when several lanes hash to the same slot, any
+    // one of them may win. Readers re-validate through isValidHash (window
+    // + key check), so a colliding write can only change which match is
+    // found, never break correctness.
+    hashTable[hashPos] = pos & MAX_OFFSET;
   }
 
     SYNCWARP1();
@@ -798,9 +918,9 @@ inline __device__ word_type shuffleLiterals<uint32_t>(word_type literals)
 
 template<typename T>
 __device__ void compressStream(
-    uint8_t* compData,
-    const T* decompData,
-    offset_type* const hashTable,
+    uint8_t* __restrict__ compData,
+    const T* __restrict__ decompData,
+    offset_type* const __restrict__ hashTable,
     const position_type hash_table_size,
     const position_type length,
     size_t* comp_length)
@@ -870,31 +990,22 @@ __device__ void compressStream(
           static_cast<int>(LZ4_COMP_THREADS_PER_CHUNK - invalid_threads),
           static_cast<int>(typed_length - decomp_idx - last_valid_match));
 
-      // first try to find a local match
+      // first try to find a local match: does an earlier lane in this
+      // window hold the same word?
       position_type match_location = typed_length;
-      signed_lane_mask_t match_mask_self = 0;
-      if (threadIdx.x < numValidThreads) {
-        match_mask_self
-            = warpMatchAny(numValidThreadsToMask(numValidThreads), next);
-      }
+      int twin_lane;
+      const bool has_twin = findEarliestTwin(numValidThreads, next, twin_lane);
 
-      // each thread has a mask of other threads with matches, next we need
-      // to find the first thread with a match before it
-      const signed_lane_mask_t match_mask_warp = warpBallot(
-          match_mask_self && CLZ(BREV(match_mask_self)) != threadIdx.x);
+      const signed_lane_mask_t match_mask_warp = warpBallot(has_twin);
 
       int first_match_thread;
       if (match_mask_warp) {
-        // find the byte offset (thread id) within the warp where the first
-        // match is located
+        // first lane (lowest position) that has an earlier twin
         first_match_thread = CLZ(BREV(match_mask_warp));
 
-        // determine the global position for the finding thread
-        match_location = CLZ(BREV(match_mask_self)) + decomp_idx;
-
-        // comunicate the global position of the match to other threads
-        match_location
-                = SHFL1(match_location, first_match_thread);
+        // its twin's global position, communicated to all lanes
+        const position_type loc = twin_lane + decomp_idx;
+        match_location = SHFL1(loc, first_match_thread);
       } else {
         first_match_thread = numValidThreads;
       }
@@ -975,9 +1086,9 @@ __device__ void compressStream(
 }
 
 inline __device__ void decompressStream(
-    uint8_t* buffer,
-    uint8_t* decompData,
-    const uint8_t* compData,
+    uint8_t* __restrict__ buffer,
+    uint8_t* __restrict__ decompData,
+    const uint8_t* __restrict__ compData,
     const position_type comp_end,
     const position_type buf_end,
     size_t* decompSize,
