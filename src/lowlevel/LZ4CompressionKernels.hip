@@ -56,6 +56,7 @@
 #include "hip/hip_runtime.h"
 #include "arcto_hipcub.hiph"
 
+#include <cstring>
 #include <cassert>
 #include <fstream>
 #include <iostream>
@@ -173,6 +174,52 @@ __global__ void lz4DecompressBatchKernel(
  * PUBLIC FUNCTIONS ***********************************************************
  *****************************************************************************/
 
+#ifdef ARCTO_LZ4_RUNTIME_TABLE
+// E15: the table cap derived at run time from the two device properties the
+// model names -- per-CU vector cache size and the number of concurrently
+// resident waves -- instead of a fixed constant. The knee measured on three
+// architectures sits at L1 / concurrent_waves, and moved with the denominator
+// when the input size changed; this encodes exactly that.
+static size_t lz4RuntimeTableCap(size_t batch_size)
+{
+  int dev = 0;
+  hipGetDevice(&dev);
+  hipDeviceProp_t prop;
+  hipGetDeviceProperties(&prop, dev);
+  size_t l1_bytes = 16 * 1024;                       // GCN/CDNA per-CU vector cache
+  if (strstr(prop.gcnArchName, "gfx10") || strstr(prop.gcnArchName, "gfx11")
+      || strstr(prop.gcnArchName, "gfx12")) {
+    l1_bytes = 32 * 1024;                            // RDNA L0
+  }
+  const size_t cus = prop.multiProcessorCount > 0 ? prop.multiProcessorCount : 1;
+  size_t max_waves_per_cu = 32;
+  if (prop.warpSize > 0 && prop.maxThreadsPerMultiProcessor > 0) {
+    max_waves_per_cu = prop.maxThreadsPerMultiProcessor / prop.warpSize;
+  }
+  size_t waves_per_cu = batch_size / cus;
+  if (waves_per_cu < 1) waves_per_cu = 1;
+  if (waves_per_cu > max_waves_per_cu) waves_per_cu = max_waves_per_cu;
+  size_t entries = (l1_bytes / waves_per_cu) / sizeof(offset_type);
+  size_t pow2 = 1;
+  while (pow2 * 2 <= entries) pow2 *= 2;             // round DOWN to a power of two
+  if (pow2 < 64) pow2 = 64;
+  if (pow2 > (size_t)MAX_HASH_TABLE_SIZE) pow2 = MAX_HASH_TABLE_SIZE;
+  return pow2;
+}
+#endif
+
+static size_t lz4GetHashTableSizeForBatch(size_t max_chunk_size, size_t batch_size)
+{
+#ifdef ARCTO_LZ4_RUNTIME_TABLE
+  const size_t base = lz4GetHashTableSize(max_chunk_size);
+  const size_t cap = lz4RuntimeTableCap(batch_size);
+  return base < cap ? base : cap;
+#else
+  (void)batch_size;
+  return lz4GetHashTableSize(max_chunk_size);
+#endif
+}
+
 size_t lz4GetHashTableSize(size_t max_chunk_size)
 {
   auto roundUpPow2 = [](size_t x) {
@@ -202,7 +249,7 @@ void lz4BatchCompress(
     hipStream_t stream)
 {
 
-  position_type HT_size = lz4GetHashTableSize(max_chunk_size);
+  position_type HT_size = lz4GetHashTableSizeForBatch(max_chunk_size, batch_size);
 
   const size_t total_required_temp
       = batch_size * (HT_size + ARCTO_LZ4_TABLE_PAD_ENTRIES) * sizeof(offset_type);
@@ -326,7 +373,7 @@ size_t lz4BatchCompressComputeTempSize(
         "Maximum chunk size for LZ4 is " + std::to_string(lz4MaxChunkSize()));
   }
 
-  return (lz4GetHashTableSize(max_chunk_size) + ARCTO_LZ4_TABLE_PAD_ENTRIES) * sizeof(offset_type) * batch_size;
+  return (lz4GetHashTableSizeForBatch(max_chunk_size, batch_size) + ARCTO_LZ4_TABLE_PAD_ENTRIES) * sizeof(offset_type) * batch_size;
 }
 
 size_t lz4DecompressComputeTempSize(
