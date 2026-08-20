@@ -6,6 +6,21 @@ Individual files derived from other projects keep their original licenses,
 listed below. This file is generated from the actual per-file license
 headers in the tree.
 
+## Vendored zfp (LLNL) — our distribution
+
+`third_party/zfp` is vendored as a git submodule pointing at **our
+distribution** of LLNL zfp, `github.com/cristianokunas/zfp`, branch
+`amd-hip`, forked from upstream at commit
+`cccbb9d5e69a2998f63eb06153ca3b7b63901b56` (the commit this submodule has
+always pinned). The fork exists to carry AMD/HIP-focused improvements ahead
+of upstream; changes suitable for general use are intended to be offered
+back to `LLNL/zfp` as pull requests.
+
+zfp is BSD 3-Clause; its `LICENSE` is preserved in the subtree and
+modifications in the fork are marked as such. Updating from upstream is a
+deliberate act (merge of an upstream tag into `amd-hip`), never automatic:
+the submodule gitlink pins the exact commit either way.
+
 ## Files subject to the BSD 3-Clause License (NVIDIA nvCOMP 2.2)
 
 ARCTO is a HIP translation of NVIDIA nvCOMP v2.2 (BSD 3-Clause). The files
