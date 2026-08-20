@@ -161,8 +161,18 @@ constexpr const position_type DECOMP_BUFFER_PREFETCH_DIST
 // Overridable at build time (-D ARCTO_LZ4_MAX_HASH_TABLE_SIZE=N) so the table
 // can be sized against the L1 budget independently of the chunk size. The
 // default reproduces the inherited nvCOMP value exactly.
+// Default sized from the cross-architecture campaign of 2026-08-20 (see
+// compression-experiments/experiments/EXPERIMENT-LOG.md, E08/E09): the
+// measured optimum is 128 entries on wave32 (RDNA) and 64 on wave64
+// (GCN/CDNA), the knee tracking L1/(concurrent waves), at a worst-case
+// compression-ratio cost of +0.0075 % in exact bytes. The inherited nvCOMP
+// value was 1<<14; it remains reachable via this override.
 #ifndef ARCTO_LZ4_MAX_HASH_TABLE_SIZE
-#define ARCTO_LZ4_MAX_HASH_TABLE_SIZE (1U << 14)
+#if defined(USE_WARPSIZE_32)
+#define ARCTO_LZ4_MAX_HASH_TABLE_SIZE (1U << 7)
+#else
+#define ARCTO_LZ4_MAX_HASH_TABLE_SIZE (1U << 6)
+#endif
 #endif
 constexpr const position_type MAX_HASH_TABLE_SIZE = ARCTO_LZ4_MAX_HASH_TABLE_SIZE;
 
