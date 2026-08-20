@@ -82,6 +82,10 @@ namespace lowlevel {
 #define LZ4_COMP_LAUNCH_BOUNDS __launch_bounds__(LZ4_COMP_THREADS_PER_CHUNK, 8)
 #endif
 
+#ifndef ARCTO_LZ4_TABLE_PAD_ENTRIES
+#define ARCTO_LZ4_TABLE_PAD_ENTRIES 0u
+#endif
+
 template<typename T>
 __global__ LZ4_COMP_LAUNCH_BOUNDS void lz4CompressBatchKernel(
     const uint8_t* const* __restrict__ device_in_ptr,
@@ -100,7 +104,14 @@ __global__ LZ4_COMP_LAUNCH_BOUNDS void lz4CompressBatchKernel(
   uint8_t* const comp_ptr = device_out_ptr[bidx];
   size_t* const comp_length = device_out_bytes + bidx;
 
-  offset_type* const hash_table = temp_space + bidx * hash_table_size;
+  // A6 experiment knob: per-chunk tables are laid out at a stride of
+  // hash_table_size + ARCTO_LZ4_TABLE_PAD_ENTRIES entries. With the default
+  // pad of 0 this is exactly the shipped layout. A nonzero pad breaks the
+  // power-of-two alignment of consecutive tables while leaving the table
+  // itself untouched, which is what separates a channel/bank-conflict account
+  // of the table cost from a footprint account.
+  const position_type table_stride = hash_table_size + ARCTO_LZ4_TABLE_PAD_ENTRIES;
+  offset_type* const hash_table = temp_space + bidx * table_stride;
 
   compressStream(comp_ptr, reinterpret_cast<const T*>(decomp_ptr), hash_table, hash_table_size, decomp_length, comp_length);
 }
@@ -183,7 +194,7 @@ void lz4BatchCompress(
   position_type HT_size = lz4GetHashTableSize(max_chunk_size);
 
   const size_t total_required_temp
-      = batch_size * HT_size * sizeof(offset_type);
+      = batch_size * (HT_size + ARCTO_LZ4_TABLE_PAD_ENTRIES) * sizeof(offset_type);
   if (temp_bytes < total_required_temp) {
     throw std::runtime_error(
         "Insufficient temp space: got " + std::to_string(temp_bytes)
@@ -304,7 +315,7 @@ size_t lz4BatchCompressComputeTempSize(
         "Maximum chunk size for LZ4 is " + std::to_string(lz4MaxChunkSize()));
   }
 
-  return lz4GetHashTableSize(max_chunk_size) * sizeof(offset_type) * batch_size;
+  return (lz4GetHashTableSize(max_chunk_size) + ARCTO_LZ4_TABLE_PAD_ENTRIES) * sizeof(offset_type) * batch_size;
 }
 
 size_t lz4DecompressComputeTempSize(
