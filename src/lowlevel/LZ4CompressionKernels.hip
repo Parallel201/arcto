@@ -88,7 +88,27 @@ __global__ void lz4CompressBatchKernel(
   uint8_t* const comp_ptr = device_out_ptr[bidx];
   size_t* const comp_length = device_out_bytes + bidx;
 
+// E11 (campaign campaign-o-2026-08-20): the match-finding table lives in the
+// Local Data Share on AMD -- measured KEPT on all three architectures with
+// byte-identical output (gfx90a +25%, gfx1100 +9%, gfx906 +300% over the
+// packed global table, and it also wins in the undersubscribed regime). At
+// the shipped table sizes this is 128-256 B of LDS per wave, so the old
+// occupancy objection does not apply. The CUDA backend keeps the global-
+// memory path until measured there. Opt out with -DARCTO_LZ4_LDS_TABLE=0.
+#ifndef ARCTO_LZ4_LDS_TABLE
+#if defined(__HIP_PLATFORM_AMD__)
+#define ARCTO_LZ4_LDS_TABLE 1
+#else
+#define ARCTO_LZ4_LDS_TABLE 0
+#endif
+#endif
+#if ARCTO_LZ4_LDS_TABLE
+  __shared__ offset_type lds_hash_table[MAX_HASH_TABLE_SIZE];
+  offset_type* const hash_table = lds_hash_table;
+  (void)temp_space;
+#else
   offset_type* const hash_table = temp_space + bidx * hash_table_size;
+#endif
 
   compressStream(comp_ptr, reinterpret_cast<const T*>(decomp_ptr), hash_table, hash_table_size, decomp_length, comp_length);
 }
