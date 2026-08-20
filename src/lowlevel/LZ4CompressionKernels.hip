@@ -104,6 +104,16 @@ __global__ LZ4_COMP_LAUNCH_BOUNDS void lz4CompressBatchKernel(
   uint8_t* const comp_ptr = device_out_ptr[bidx];
   size_t* const comp_length = device_out_bytes + bidx;
 
+#ifdef ARCTO_LZ4_LDS_TABLE
+  // E11: the match-finding table lives in the Local Data Share instead of
+  // global memory. At the measured optimum sizes (64-128 entries, 128-256 B)
+  // the old occupancy objection is gone, and the probes leave the contended
+  // per-CU vector cache entirely -- the mechanism the counter matrices showed
+  // governing throughput. One table per block (one wave per chunk here).
+  __shared__ offset_type lds_hash_table[MAX_HASH_TABLE_SIZE];
+  offset_type* const hash_table = lds_hash_table;
+  (void)temp_space;
+#else
   // A6 experiment knob: per-chunk tables are laid out at a stride of
   // hash_table_size + ARCTO_LZ4_TABLE_PAD_ENTRIES entries. With the default
   // pad of 0 this is exactly the shipped layout. A nonzero pad breaks the
@@ -112,6 +122,7 @@ __global__ LZ4_COMP_LAUNCH_BOUNDS void lz4CompressBatchKernel(
   // of the table cost from a footprint account.
   const position_type table_stride = hash_table_size + ARCTO_LZ4_TABLE_PAD_ENTRIES;
   offset_type* const hash_table = temp_space + bidx * table_stride;
+#endif
 
   compressStream(comp_ptr, reinterpret_cast<const T*>(decomp_ptr), hash_table, hash_table_size, decomp_length, comp_length);
 }
