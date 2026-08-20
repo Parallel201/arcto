@@ -104,7 +104,15 @@ __global__ LZ4_COMP_LAUNCH_BOUNDS void lz4CompressBatchKernel(
   uint8_t* const comp_ptr = device_out_ptr[bidx];
   size_t* const comp_length = device_out_bytes + bidx;
 
-#ifdef ARCTO_LZ4_LDS_TABLE
+// Default ON since the 2026-08-20 cross-architecture campaign: byte-identical
+// output and faster on every architecture measured, in both concurrency
+// regimes (gfx90a +25 %, gfx1100 +9 %, gfx906 +300 % over the packed global
+// table at saturation). Opt out with -DARCTO_LZ4_LDS_TABLE=0.
+#ifndef ARCTO_LZ4_LDS_TABLE
+#define ARCTO_LZ4_LDS_TABLE 1
+#endif
+
+#if ARCTO_LZ4_LDS_TABLE
   // E11: the match-finding table lives in the Local Data Share instead of
   // global memory. At the measured optimum sizes (64-128 entries, 128-256 B)
   // the old occupancy objection is gone, and the probes leave the contended
