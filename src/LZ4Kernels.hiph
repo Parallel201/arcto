@@ -692,12 +692,24 @@ inline __device__ void coopCopyOverlap(
 
 inline __device__ position_type hash(const word_type key, position_type hash_table_size)
 {
+  // Pure hash. The A4 experiment knobs live in tableSlot() below, NOT here:
+  // this function is also used to bucket the wave64 LDS claim table
+  // (findEarliestTwin, CLAIM_BUCKETS entries), and hijacking it there sends
+  // strided indices out of the LDS allocation -- found the hard way on MI50,
+  // where the exact-bytes gate flagged a deterministic 58-byte deviation.
   // needs to be 12 bits
-  const position_type h = __brev(key) + (key ^ 0xc375); //: key type is not depending on warpsize
+  return (__brev(key) + (key ^ 0xc375)) & (hash_table_size - 1); //: key type is not depending on warpsize
+}
+
+// Slot function for the GLOBAL match-finding table only. Carries the A4
+// probe-footprint knobs (mask + stride); defaults compile to hash() exactly.
+inline __device__ position_type tableSlot(const word_type key, position_type hash_table_size)
+{
   if (ARCTO_LZ4_HASH_SLOT_MASK != 0u) {
+    const position_type h = __brev(key) + (key ^ 0xc375);
     return (h & ARCTO_LZ4_HASH_SLOT_MASK) * ARCTO_LZ4_HASH_SLOT_STRIDE;
   }
-  return h & (hash_table_size - 1);
+  return hash(key, hash_table_size);
 }
 
 inline __device__ uint8_t encodePair(const uint8_t t1, const uint8_t t2)
@@ -870,7 +882,7 @@ inline __device__ void insertHashTableWarp(
     const word_type next,
     const int numValidThreads)
 {
-  position_type hashPos = hash(next, hashTableSize);
+  position_type hashPos = tableSlot(next, hashTableSize);
 
   if (threadIdx.x < numValidThreads) {
     // Race-tolerant insert: when several lanes hash to the same slot, any
@@ -1029,7 +1041,7 @@ __device__ void compressStream(
 
       {
         // go to hash table for an earlier match
-        position_type hashPos = hash(next, hash_table_size);
+        position_type hashPos = tableSlot(next, hash_table_size);
         word_type offset = decomp_idx;
         const int match_found = threadIdx.x < first_match_thread
                                     ? isValidHash<T>(
