@@ -773,17 +773,6 @@ inline __device__ bool isValidHash(
     return false;
   }
 
-  // With the table no longer cleared between chunks, an entry may hold any
-  // 16-bit value. Within the first OFFSET_SIZE window (decomp_idx <=
-  // MAX_OFFSET) a value at or ahead of the current position has no valid
-  // decoding: convertIdx would wrap below zero, and the wrapped offset can
-  // slip past the window check below and be dereferenced. Entries written
-  // legitimately in this window always sit strictly behind decomp_idx, so
-  // rejecting the rest restores the invariant the clear loop used to provide.
-  if (decomp_idx <= MAX_OFFSET && hashed_offset >= decomp_idx) {
-    return false;
-  }
-
   offset = convertIdx(hashed_offset, decomp_idx);
 
   if (decomp_idx - offset > MAX_OFFSET) {
@@ -949,17 +938,12 @@ __device__ void compressStream(
   position_type comp_idx = 0;
   const position_type typed_length = divRoundUp(length, sizeof(T));
 
-  // The hash table is deliberately NOT cleared between chunks. Every reader
-  // goes through isValidHash, which already rejects a stale or garbage entry
-  // three ways: the NULL_OFFSET check, the MAX_OFFSET window check (an offset
-  // at or ahead of the current position underflows and fails it), and a
-  // byte-level comparison of the hashed key against the actual data at the
-  // decoded offset. A leftover entry from a previous chunk can therefore only
-  // ever propose a match that is then verified against the current chunk's
-  // own bytes; it can change WHICH valid match is found, never manufacture an
-  // invalid one. The clear loop this replaces wrote hash_table_size entries
-  // to global memory per chunk (32 KB per 64 KiB chunk at the inherited
-  // size) before compressing a single byte.
+  for (position_type i = threadIdx.x; i < hash_table_size;
+    i += LZ4_COMP_THREADS_PER_CHUNK) {
+    hashTable[i] = NULL_OFFSET;
+  }
+
+  SYNCWARP1();
 
   constexpr position_type last_valid_match = divRoundUp(LAST_VALID_MATCH_BYTES, sizeof(T));
   constexpr position_type min_ending_literals = divRoundUp(MIN_ENDING_LITERALS_BYTES, sizeof(T));
