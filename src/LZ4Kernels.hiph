@@ -260,6 +260,31 @@ inline __device__ int numValidThreadsToMask(const int numValidThreads);
  * Returns true iff this lane has a twin at a lower lane id; twin_lane is
  * then that lane's id.
  */
+#if defined(USE_WARPSIZE_32) && !defined(__CUDA_ARCH__)
+// E17: the July twin-search rewrite costs 8% on wave32 (gfx1100), where the
+// E04-era rotation and its per-lane mask contract are faster; both are kept
+// verbatim under this gate while wave64 uses the LDS claim table below.
+template <typename T>
+inline __device__ signed_lane_mask_t warpMatchAny(const signed_lane_mask_t participants, T val)
+{
+  signed_lane_mask_t mask = 0;
+
+  // Full search by warp-rotation: lane i compares against lane (i+d) via
+  // shuffle (ds_bpermute on AMD). No LDS traffic and no warp barriers,
+  // unlike the previous shared-memory emulation. Same result mask.
+  const bool active = (LANE_MASK_ONE << threadIdx.x) & participants;
+  for (int d = 0; d < warpsize; ++d) {
+    const int nbr_id = (threadIdx.x + d) & (uwarpsize - 1);
+    const T nbr_val = SHFL1(val, nbr_id);
+    if (active && ((LANE_MASK_ONE << nbr_id) & participants)) {
+      mask |= static_cast<lane_mask_t>(val == nbr_val) << nbr_id;
+    }
+  }
+
+  return mask;
+}
+#endif
+
 inline __device__ bool findEarliestTwin(
     const int numValidThreads, const word_type val, int& twin_lane)
 {
@@ -928,9 +953,9 @@ inline __device__ word_type shuffleLiterals<uint32_t>(word_type literals)
 
 template<typename T>
 __device__ void compressStream(
-    uint8_t* __restrict__ compData,
-    const T* __restrict__ decompData,
-    offset_type* const __restrict__ hashTable,
+    uint8_t* ARCTO_KRESTRICT compData,
+    const T* ARCTO_KRESTRICT decompData,
+    offset_type* const ARCTO_KRESTRICT hashTable,
     const position_type hash_table_size,
     const position_type length,
     size_t* comp_length)
@@ -1000,6 +1025,36 @@ __device__ void compressStream(
           static_cast<int>(LZ4_COMP_THREADS_PER_CHUNK - invalid_threads),
           static_cast<int>(typed_length - decomp_idx - last_valid_match));
 
+#if defined(USE_WARPSIZE_32) && !defined(__CUDA_ARCH__)
+      // E17 wave32 gate: E04-era local match search, per-lane mask contract.
+      position_type match_location = typed_length;
+      signed_lane_mask_t match_mask_self = 0;
+      if (threadIdx.x < numValidThreads) {
+        match_mask_self
+            = warpMatchAny(numValidThreadsToMask(numValidThreads), next);
+      }
+
+      // each thread has a mask of other threads with matches, next we need
+      // to find the first thread with a match before it
+      const signed_lane_mask_t match_mask_warp = warpBallot(
+          match_mask_self && CLZ(BREV(match_mask_self)) != threadIdx.x);
+
+      int first_match_thread;
+      if (match_mask_warp) {
+        // find the byte offset (thread id) within the warp where the first
+        // match is located
+        first_match_thread = CLZ(BREV(match_mask_warp));
+
+        // determine the global position for the finding thread
+        match_location = CLZ(BREV(match_mask_self)) + decomp_idx;
+
+        // comunicate the global position of the match to other threads
+        match_location
+                = SHFL1(match_location, first_match_thread);
+      } else {
+        first_match_thread = numValidThreads;
+      }
+#else
       // first try to find a local match: does an earlier lane in this
       // window hold the same word?
       position_type match_location = typed_length;
@@ -1019,6 +1074,7 @@ __device__ void compressStream(
       } else {
         first_match_thread = numValidThreads;
       }
+#endif
 
       {
         // go to hash table for an earlier match
@@ -1096,9 +1152,9 @@ __device__ void compressStream(
 }
 
 inline __device__ void decompressStream(
-    uint8_t* __restrict__ buffer,
-    uint8_t* __restrict__ decompData,
-    const uint8_t* __restrict__ compData,
+    uint8_t* ARCTO_KRESTRICT buffer,
+    uint8_t* ARCTO_KRESTRICT decompData,
+    const uint8_t* ARCTO_KRESTRICT compData,
     const position_type comp_end,
     const position_type buf_end,
     size_t* decompSize,

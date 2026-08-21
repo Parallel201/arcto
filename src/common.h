@@ -64,6 +64,16 @@
 using ssize_t = ptrdiff_t;
 #endif
 
+// Restrict qualification on kernel pointer parameters pays only on AMD
+// wave64 together with the 64-VGPR pin (E17: +18.5% MI210, +12.7% MI50);
+// on wave32 it costs -1.8% (gfx1100) and on the CUDA backend it was never
+// measured, so both keep the inherited unqualified form.
+#if defined(__HIP_PLATFORM_AMD__) && !defined(USE_WARPSIZE_32)
+#define ARCTO_KRESTRICT __restrict__
+#else
+#define ARCTO_KRESTRICT
+#endif
+
 namespace arcto {
 
 namespace {
