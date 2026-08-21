@@ -62,6 +62,7 @@
 #include <vector>
 #include <iomanip>
 #include <cassert>
+#include <cstdlib>
 
 #ifdef __HIP_PLATFORM_AMD__
 #include <hip/hip_runtime.h>
@@ -794,6 +795,47 @@ run_benchmark_template(
   decomp_time /= count;
 
   if (!warmup) {
+    // Per-repetition output. The aggregated CSV below reports mean + stddev,
+    // which is adequate for kernel throughput but does not satisfy the thesis
+    // measurement protocol, which requires the raw per-repetition values to be
+    // preserved. Those values already exist in the vectors; this only writes
+    // them out.
+    //
+    // Driven by the environment rather than a CLI flag on purpose: a flag would
+    // have to be threaded through the run_benchmark macro, its forward
+    // declaration, both backend variants and every call site, whereas this is
+    // one local block. Same pattern as FLETCHER_COMP_LOG in fletcher-modern.
+    //
+    //   ARCTO_PER_REP_CSV=<path>   append per-repetition rows to <path>
+    //   ARCTO_PER_REP_TAG=<label>  identifies the configuration within a sweep
+    //
+    // Rows are appended, so one file accumulates a whole sweep; the header is
+    // written only while the file is still empty.
+    if (const char* per_rep_path = std::getenv("ARCTO_PER_REP_CSV")) {
+      if (per_rep_path[0] != '\0' && !comp_throughputs.empty()) {
+        const char* per_rep_tag = std::getenv("ARCTO_PER_REP_TAG");
+        std::ofstream frep(per_rep_path, std::ios::app);
+        if (frep) {
+          frep.seekp(0, std::ios::end);
+          if (frep.tellp() == std::streampos(0)) {
+            frep << "Tag,Rep,ChunkSize,NumFiles,Duplicates,UncompressedBytes,"
+                    "Chunks,CompThroughputGBs,DecompThroughputGBs,"
+                    "CompTimeMs,DecompTimeMs\n";
+          }
+          for (size_t r = 0; r < comp_throughputs.size(); ++r) {
+            frep << (per_rep_tag ? per_rep_tag : "") << ',' << r << ','
+                 << chunk_size << ',' << num_files << ',' << duplicates << ','
+                 << total_bytes << ',' << data.size() << ','
+                 << std::fixed << std::setprecision(6)
+                 << comp_throughputs[r] << ','
+                 << (r < decomp_throughputs.size() ? decomp_throughputs[r] : 0.0) << ','
+                 << comp_times_ms[r] << ','
+                 << (r < decomp_times_ms.size() ? decomp_times_ms[r] : 0.0) << '\n';
+          }
+        }
+      }
+    }
+
     const double comp_ratio = (double)total_bytes / compressed_size;
     const double compression_throughput_gbs = (double)total_bytes / (1.0e9 * comp_time);
     const double decompression_throughput_gbs = (double)total_bytes / (1.0e9 * decomp_time);
@@ -1253,6 +1295,47 @@ run_benchmark_template(
   decomp_time /= count;
 
   if (!warmup) {
+    // Per-repetition output. The aggregated CSV below reports mean + stddev,
+    // which is adequate for kernel throughput but does not satisfy the thesis
+    // measurement protocol, which requires the raw per-repetition values to be
+    // preserved. Those values already exist in the vectors; this only writes
+    // them out.
+    //
+    // Driven by the environment rather than a CLI flag on purpose: a flag would
+    // have to be threaded through the run_benchmark macro, its forward
+    // declaration, both backend variants and every call site, whereas this is
+    // one local block. Same pattern as FLETCHER_COMP_LOG in fletcher-modern.
+    //
+    //   ARCTO_PER_REP_CSV=<path>   append per-repetition rows to <path>
+    //   ARCTO_PER_REP_TAG=<label>  identifies the configuration within a sweep
+    //
+    // Rows are appended, so one file accumulates a whole sweep; the header is
+    // written only while the file is still empty.
+    if (const char* per_rep_path = std::getenv("ARCTO_PER_REP_CSV")) {
+      if (per_rep_path[0] != '\0' && !comp_throughputs.empty()) {
+        const char* per_rep_tag = std::getenv("ARCTO_PER_REP_TAG");
+        std::ofstream frep(per_rep_path, std::ios::app);
+        if (frep) {
+          frep.seekp(0, std::ios::end);
+          if (frep.tellp() == std::streampos(0)) {
+            frep << "Tag,Rep,ChunkSize,NumFiles,Duplicates,UncompressedBytes,"
+                    "Chunks,CompThroughputGBs,DecompThroughputGBs,"
+                    "CompTimeMs,DecompTimeMs\n";
+          }
+          for (size_t r = 0; r < comp_throughputs.size(); ++r) {
+            frep << (per_rep_tag ? per_rep_tag : "") << ',' << r << ','
+                 << chunk_size << ',' << num_files << ',' << duplicates << ','
+                 << total_bytes << ',' << data.size() << ','
+                 << std::fixed << std::setprecision(6)
+                 << comp_throughputs[r] << ','
+                 << (r < decomp_throughputs.size() ? decomp_throughputs[r] : 0.0) << ','
+                 << comp_times_ms[r] << ','
+                 << (r < decomp_times_ms.size() ? decomp_times_ms[r] : 0.0) << '\n';
+          }
+        }
+      }
+    }
+
     const double comp_ratio = (double)total_bytes / compressed_size;
     const double compression_throughput_gbs = (double)total_bytes / (1.0e9 * comp_time);
     const double decompression_throughput_gbs = (double)total_bytes / (1.0e9 * decomp_time);
