@@ -38,3 +38,25 @@ kernels themselves take ~0.1 ms, so this is a large share of the per-call latenc
 medium fields. Zero effect on the bytes (no stream parameters change).
 Prediction: compress call latency −1…−3 ms on small fields; none at 512³; bytes identical (ZFP-T1).
 Measured: (pending)
+
+### ZFP-H1b / ZFP-H2a / ZFP-D4 — fork-side host glue (vendored zfp branch `opt/zfp-host-2026-08`)   Category: C8   Status: COMMITTED (measure with the batch)
+Commit: (this commit: gitlink `third_party/zfp` → 6332c5c)  (fork commits ef9ee46 H1b, 3246564 H2a, 6332c5c D4 on top of LLNL cccbb9d)
+Files (fork): `src/hip/interface.cpp`, `src/share/device.h`, `src/hip/decode{1,2,3}.h`
+Changes:
+- H1b: `zfp_internal_hip_init` runs `device_init()` once per process (static flag); it used to
+  run on every `zfp_stream_set_execution(zfp_exec_hip)`: hipMalloc + 1-thread kernel + hipHostMalloc
+  (pinned) + synchronous hipMemcpy + hipHostFree + hipFree.
+- H2a: `malloc_async` / `free_async` on HIP use `hipMallocAsync` / `hipFreeAsync` on the null stream
+  (HIP ≥ 6), mirroring the CUDA path's `cudaMallocAsync`; the per-call staging buffers (compressed
+  stream, index, field copies) come from the stream-ordered pool and `hipFree`'s implicit device
+  synchronisation disappears from every call.
+- D4: in fixed-rate mode (minbits == maxbits, granularity 1) the decode launchers compute the final
+  bit position as `blocks * maxbits` on the host instead of hipMalloc + hipMemset + synchronous D2H +
+  hipFree of a device counter per call; the kernels skip the counter store when it is NULL; a
+  `hipDeviceSynchronize` keeps the "decode is complete on return" contract for device-resident
+  fields (the counter copy used to provide it). Variable-rate modes keep the counter.
+Why: the ZFP wrapper's per-call latency on small/medium fields is dominated by HIP API calls, not by
+the kernels (`benchmark_zfp_single` 64³ float ≈ 1 MB). None of these touch the bit streams (ZFP-T1).
+Prediction: per-call compress/decompress latency −2…−5 ms for 64³; ≈ 0 at 512³; bytes identical.
+Measured: (pending: `benchmark_zfp_single -3 64,64,64` and a 256³ synthetic field, fixed_rate 16 /
+fixed_precision 16, both nodes)
