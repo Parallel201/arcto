@@ -286,8 +286,16 @@ fewer resident blocks; the ring depth is not the bottleneck) — REJECT; 4-secto
 ×0.885 / ×0.737 / ×0.990 (x0 ×0.891 / ×0.688) — REJECT; `LITERAL_SECTORS=8` ×1.009 / ×1.039 /
 ×0.999 (x0 ×1.002 / ×1.099 / ×1.000) — POSITIVE on literal-heavy data (more bytes in flight per
 literal step with SNP-D8's dword path); sleeps 0/0/0 ×0.992 / ×0.993 / ×0.999 — neutral (see D1).
-Verdict: candidate to make `LITERAL_SECTORS=8` the AMD default once gfx942 confirms; ring and
-granule stay as inherited.
+Result (gfx942, MI300A, 30 reps; head reference from sweep 5 / A/B: 152 / 282 / 44.7 GB/s at saturation, 1.84 / 5.39 / 8.50 at small batch; saturation medians on this node drift ±5 %): 8 KB ring 120.3 / 266 / 34.9 at saturation (×0.79 / ×0.94 / ×0.78) but tti x0 6.32 (×1.17) — deeper prefetch helps a lone chunk, fewer resident blocks hurt at saturation — REJECT; 4-sector granules ≈ head at saturation, x0 ×0.98–1.00 — neutral here, −25 % on gfx1100 — REJECT; `LITERAL_SECTORS=8` ≈ head at saturation, x0 tti ×0.96, binary ×0.99 — neutral to slightly negative on wave64 (vs +4 % / +10 % on gfx1100); sleeps 0/0/0 ≈ head — neutral (D1 kept on the 60-rep A/B).
+Verdict: `LITERAL_SECTORS` defaults to 8 on wave32 AMD builds only (`USE_WARPSIZE_32`), commit below (SNP-D11s); ring, granule and sleeps stay as inherited.
+
+### SNP-D11s — LITERAL_SECTORS=8 default on wave32 AMD builds                            Category: C6   Status: COMMITTED (verification sweep pending)
+Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
+Files: `src/snappy/config.h`
+Change: `LITERAL_SECTORS` default `defined(USE_WARPSIZE_32) ? 8 : 4`; still overridable with `-DLITERAL_SECTORS=N`. Each literal step then moves 2 dwords per lane (256 B per 32-lane step) through the SNP-D8 dword path.
+Prediction: gfx1100 tti +4 % at saturation / +10 % at small batch (the measured flag variant), binary/words unchanged; gfx942 and CUDA untouched (4); bytes identical.
+Measured: (pending final verification sweep)
+
 
 ### SNP-D8k — knobs to measure D8's two mechanisms separately                          Category: C3   Status: KNOBS (defaults = D8 as measured)
 Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)

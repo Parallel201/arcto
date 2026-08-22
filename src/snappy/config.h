@@ -67,8 +67,16 @@
 #endif
 
 #ifndef LITERAL_SECTORS
-   // How many loads in flight when processing the literal
-#  define LITERAL_SECTORS 4
+   // How many loads in flight when processing the literal (bytes per lane per
+   // literal step). SNP-D11: with the dword literal path (SNP-D8) two dwords per
+   // lane (8) measured +4 % / +10 % on literal-heavy data on the wave32 gfx1100
+   // and neutral-to-slightly-negative on the wave64 gfx942, so 8 is the default
+   // for wave32 AMD builds only; wave64 and CUDA keep the inherited 4.
+#  if defined(USE_WARPSIZE_32)
+#    define LITERAL_SECTORS 8
+#  else
+#    define LITERAL_SECTORS 4
+#  endif
 #endif
 
 namespace arcto
