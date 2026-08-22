@@ -67,7 +67,13 @@ zfp_field* make_field(const arctoZFPOpts_t& opts, void* data)
 //                        (its compress/decompress switch on
 //                        zfp_mode_reversible falls through to the "mode
 //                        not supported on GPU" branch).
-bool configure_stream(zfp_stream* zfp, const arctoZFPOpts_t& opts)
+// ZFP-H1: `set_exec` selects the HIP execution policy, which is only needed
+// on the stream that actually runs zfp_compress / zfp_decompress. Every
+// zfp_stream_set_execution(zfp_exec_hip) call runs the backend's device
+// warm-up (hipMalloc + kernel launch + hipHostMalloc + synchronous copy +
+// frees), so the throwaway streams used for sizing and header serialisation
+// must not ask for it.
+bool configure_stream(zfp_stream* zfp, const arctoZFPOpts_t& opts, bool set_exec = true)
 {
   const zfp_type t = to_zfp_type(opts.type);
   switch (opts.mode) {
@@ -85,7 +91,7 @@ bool configure_stream(zfp_stream* zfp, const arctoZFPOpts_t& opts)
     default:
       return false;
   }
-  if (!zfp_stream_set_execution(zfp, ARCTO_ZFP_EXEC)) return false;
+  if (set_exec && !zfp_stream_set_execution(zfp, ARCTO_ZFP_EXEC)) return false;
   return true;
 }
 
@@ -154,7 +160,7 @@ arctoStatus_t arctoZFPCompressGetMaxOutputSize(
   zfp_stream* zfp = zfp_stream_open(nullptr);
   if (!zfp) { zfp_field_free(field); return arctoErrorInternal; }
 
-  if (!configure_stream(zfp, opts)) {
+  if (!configure_stream(zfp, opts, /*set_exec=*/false)) {
     zfp_field_free(field);
     zfp_stream_close(zfp);
     return arctoErrorInvalidValue;
@@ -204,7 +210,7 @@ size_t serialize_header(const arctoZFPOpts_t& opts,
   zfp_stream* zfp = zfp_stream_open(bs);
   if (!zfp) { stream_close(bs); return 0; }
 
-  if (!configure_stream(zfp, opts)) {
+  if (!configure_stream(zfp, opts, /*set_exec=*/false)) {
     zfp_stream_close(zfp);
     stream_close(bs);
     return 0;
