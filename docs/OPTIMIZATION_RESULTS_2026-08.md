@@ -123,9 +123,12 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
   ×1.80, TTI ×1.98, zeros ×1.17, decompression ints ×1.21, zeros ×7.8, TTI ×0.985; gfx942
   compression ints ×2.55–2.98, TTI ×3.4–3.6, zeros ×1.6–1.8, decompression ints ×1.33–1.48, zeros
   ×3.0–4.45, TTI ×1.34–1.67. Bytes identical throughout.
-* **LZ4 decompression on wave64** (`opt/lz4-decomp-wave64-2026-08`): bounds neutral, modulo
-  removal exact, the vectorised copies are the lever (×2.2 / +31–48 % on literal/long-match data)
-  once gated away from short-sequence data — defaults *pending* the lz4b variants.
+* **LZ4 decompression on wave64** (`opt/lz4-decomp-wave64-2026-08`, base `origin/opt/curated`):
+  final head vs base on gfx942 — decompression binary ×2.28 (small batch) / ×1.35 (saturation), TTI
+  ×2.20 / ×1.12, zeros ×1.17 / ×1.37, words ×0.80 / ×0.75; compression unchanged; gfx1100
+  configuration-identical (×0.995–1.005). Bounds neutral, modulo removal exact, D5 reverted; the
+  decompression-side vectorised copies are the lever, and their cost on short-sequence data is the
+  84-VGPR / 5-wave build (occupancy-target and D5-on-top variants *pending* on gfx942).
 * **ZFP** (`opt/zfp-host-2026-08` + vendored-zfp branch): the HIP path is bit-exact with canonical serial (T1, 308 cases, both nodes); the host path was API-bound — 64³ calls ×2–3.3 faster on both parts, 256³ fixed-rate ×3.6–4.6 on the MI300A APU, ×1.1–1.2 on the discrete RX 7900 XT. Kernel items (fork) not started.
 
 ## 3. Cross-cutting findings worth writing up
