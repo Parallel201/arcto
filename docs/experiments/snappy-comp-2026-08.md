@@ -17,7 +17,7 @@ integration branch.
 
 ---
 
-### SNP-C5 — clear the whole hash map with 16-byte LDS stores (fixes the wave64 half-clear)   Category: C4   Status: PENDING
+### SNP-C5 — clear the whole hash map with 16-byte LDS stores (fixes the wave64 half-clear)   Category: C4   Status: KEPT (correctness; neutral on gfx1100, gfx942 pending)
 Commit: (this commit)  (branch `opt/snappy-comp-2026-08`)
 Files: `src/snappy/compression.hiph`, `src/snappy/compression_state.hiph`
 Change: `hash_map` (4096 × `uint16_t` = 8 KB in LDS) is `alignas(16)` and cleared with `uint4`
@@ -35,10 +35,10 @@ Prediction: compression throughput unchanged within noise on both archs; bytes i
 gfx1100; bytes may differ on gfx942 versus the half-cleared baseline (a fix, not a regression).
 Measured: (pending) `benchmark_snappy_chunked` compression column, exact-bytes ladder,
 `test_snappy_coverage` (determinism check: two compressions identical).
-Result: (pending)
-Verdict: (pending)
+Result: gfx1100 (RX 7900 XT, wave32, ROCm 7.0.1 container, 30 reps, median, `-p 65536`; compression GB/s at saturation binary / tti / words = 27.07 / 27.02 / 3.75 baseline, small batch 1.12 / 1.27 / 1.87): compression ×1.001 / ×0.999 / ×0.998 (x0 ×1.002 / ×1.001 / ×1.001); decompression unchanged; exact-bytes ladder identical (wave32 clears the whole table either way); tests green incl. the determinism check.
+Verdict: KEPT — a correctness/determinism fix for wave64 with no measurable cost on wave32. gfx942 sweep pending (bytes may legitimately move there).
 
-### SNP-C2 — one barrier per literal/copy pair (double-buffered match results)        Category: C1   Status: PENDING
+### SNP-C2 — one barrier per literal/copy pair (double-buffered match results)        Category: C1   Status: NEGATIVE on gfx1100 (−1…−4 %) — revert candidate, gfx942 pending
 Commit: (this commit)  (branch `opt/snappy-comp-2026-08`)
 Files: `src/snappy/compression.hiph`, `src/snappy/compression_state.hiph`
 Change: `literal_length`, `copy_length`, `copy_distance` become 2-slot arrays indexed by iteration
@@ -53,10 +53,10 @@ a workgroup barrier for a 2-wave block is cheap but it serialises the two waves'
 streams at every iteration — halving the barrier count shortens the per-iteration critical path.
 Prediction: ~5–10 % compression throughput; bytes identical (gfx1100) / identical to SNP-C5 (gfx942).
 Measured: (pending) same protocol as SNP-C5.
-Result: (pending)
-Verdict: (pending)
+Result: gfx1100 (RX 7900 XT, wave32, ROCm 7.0.1 container, 30 reps, median, `-p 65536`; compression GB/s at saturation binary / tti / words = 27.07 / 27.02 / 3.75 baseline, small batch 1.12 / 1.27 / 1.87): compression ×0.990 / ×0.997 / ×0.964 at saturation, ×0.966 / ×0.994 / ×0.960 at small batch; bytes identical; tests green.
+Verdict: NEGATIVE on gfx1100, contrary to the prediction: removing the top-of-loop barrier made the compressor 1–4 % slower on the copy-heavy inputs (binary, words) and left TTI flat. The barrier was evidently not a cost on the critical path on RDNA3 (two waves only), and the double-buffered slots add LDS address arithmetic and live state to every iteration. To be reverted unless gfx942 disagrees.
 
-### SNP-C1 — one-round-ahead prefetch of the match-search data word                  Category: C3   Status: PENDING
+### SNP-C1 — one-round-ahead prefetch of the match-search data word                  Category: C3   Status: NEGATIVE on gfx1100 (−4…−7 %) — revert candidate, gfx942 pending
 Commit: (this commit)  (branch `opt/snappy-comp-2026-08`)
 Files: `src/snappy/compression.hiph`
 Change: in `FindFourByteMatch` each round loaded its lane's 4-byte window (`unaligned_load32`, two
@@ -71,10 +71,10 @@ block at ≈ 8 waves/SIMD (LDS-bound), so little latency is hidden by other wave
 Prediction: single digits to ~15 % on literal-heavy inputs (more rounds per literal: random,
 binary, TTI), ≈ 0 on highly compressible data; bytes identical.
 Measured: (pending) same protocol as SNP-C5.
-Result: (pending)
-Verdict: (pending)
+Result: gfx1100 (RX 7900 XT, wave32, ROCm 7.0.1 container, 30 reps, median, `-p 65536`; compression GB/s at saturation binary / tti / words = 27.07 / 27.02 / 3.75 baseline, small batch 1.12 / 1.27 / 1.87): vs SNP-C2: compression ×0.959 / ×0.993 / ×0.931 at saturation, ×0.941 / ×1.004 / ×0.927 at small batch (cumulative vs baseline ×0.950 / ×0.991 / ×0.897); bytes identical; tests green.
+Verdict: NEGATIVE on gfx1100: on compressible data most match searches end in the first round, so the one-ahead load (two aligned dword loads + funnel shift per lane) is pure overhead every round, and because vector-memory counters retire in order the round's verification load cannot be consumed before the speculative one completes. The prediction 'nil on compressible data' was wrong by 4–7 %; on the literal-heavy TTI it is ≈ 0 as predicted. To be reverted unless gfx942 disagrees.
 
-### SNP-C3 — dword literal emission in `StoreLiterals` (AMD)                            Category: C3   Status: PENDING
+### SNP-C3 — dword literal emission in `StoreLiterals` (AMD)                            Category: C3   Status: ≈ NEUTRAL / slightly positive on gfx1100, gfx942 pending
 Commit: (this commit)  (branch `opt/snappy-comp-2026-08`)
 Files: `src/snappy/compression.hiph`
 Change (AMD only; CUDA keeps the byte loop): the emitting wave copied a literal run byte by byte
@@ -86,5 +86,5 @@ emitting wave is rarely the bottleneck (the match-finding wave is), so the gain 
 often WARP0 is on the critical path — mostly on incompressible data with long literal runs.
 Prediction: small; visible only on random/binary/TTI inputs; bytes identical.
 Measured: (pending) same protocol as SNP-C5.
-Result: (pending)
-Verdict: (pending)
+Result: gfx1100 (RX 7900 XT, wave32, ROCm 7.0.1 container, 30 reps, median, `-p 65536`; compression GB/s at saturation binary / tti / words = 27.07 / 27.02 / 3.75 baseline, small batch 1.12 / 1.27 / 1.87): vs SNP-C1: compression ×1.007 / ×1.004 / ×1.000 at saturation, ×1.000 / ×0.997 / ×0.999 at small batch; bytes identical; tests green.
+Verdict: Small positive on the literal-heavy inputs (+0.4…+0.7 %), as predicted; kept pending gfx942.
