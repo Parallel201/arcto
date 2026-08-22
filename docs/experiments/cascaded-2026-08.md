@@ -204,7 +204,11 @@ single 4096-run is less parallel than the 256-lane one), x0 14.0 → 11.0 (bimod
 ≈ (×0.98 vs base at saturation). Compression ×1.00–1.01 vs H3 (H1b +0.6 % ints). Full coverage
 matrix green (72 684 assertions); ladder identical.
 Result: the ints cost of D1/D1f is gone (and a little more), zeros keeps most of its ×6–8, TTI flat.
-Verdict: KEPT — the final form of CAS-D1. gfx942: (cas6 pending)
+Verdict: KEPT — the final form of CAS-D1. gfx942 (cas6, 30 reps, vs H3 / vs base): decompression ints
+x32 233 → 256 GB/s (×1.10 / ×1.43), x0 68.9 → 72.7 (×1.056 / ×1.40); zeros x512 463 → 422 (×0.91 /
+×2.49), x0 15.0 → 12.9 (×0.86 / ×3.86); TTI x0 ≈ (×1.54 vs base), x512 664 (the base row of this run
+reads 737 with IQR 552–740, the earlier base 539 — noise band); compression ×1.01–1.02 vs H3 (H1b).
+Full matrix green; ladder identical.
 
 ### CAS-H1b — header-gap zeroing folded into the header-writing thread-0 section          Category: C8   Status: COMMITTED
 Commit: (this commit)  (branch `opt/cascaded-2026-08`)
@@ -327,6 +331,8 @@ Cost: a few scalar stores per layer; compressed sizes unchanged; decompressors (
 ignore the bytes. Effect: Cascaded output is now byte-deterministic, so the sweeps' gates and the
 coverage test can compare bytes across commits and architectures.
 Measured: (part of the sweep; expected ≈ 0)
+### Cumulative FINAL on gfx942 (MI300A, wave64), base 777135f → head ddf1fd0 (cas6): compression ints ×2.60 (x0) / ×3.17 (x32), TTI ×3.58 (x0) / ×3.82 (x512), zeros ×1.60 (x0) / ×2.10 (x512); decompression ints ×1.40 (x0) / ×1.43 (x32), zeros ×3.86 (x0) / ×2.49 (x512), TTI ×1.54 (x0) / saturation inside the node's noise band (×0.90 vs a bimodal base row, ×1.23 vs the earlier base). Bytes identical; full coverage matrix green (72 684 assertions).
+
 ### Cumulative FINAL on gfx1100 (wave32), base 777135f → head ddf1fd0 (cas6): compression ints ×2.07 (x0) / ×2.16 (x32), TTI ×2.26 (x0) / ×2.32 (x512), zeros ×1.61 (x512); decompression ints ×1.16 (x0) / ×1.28 (x32), zeros ×4.3 (x0) / ×6.4 (x512), TTI ×0.98 (x512). Bytes identical on the ladder; full coverage matrix green.
 
 ### Cumulative on gfx942 (MI300A, wave64), base 777135f → S6 c375cab (S5/H1 rebuilt, measured separately): compression ints ×2.55 (x0) / ×2.98 (x32), TTI ×3.58 (x0) / ×3.39 (x512), zeros ×1.62 (x0) / ×1.82 (x512); decompression ints ×1.33 (x0) / ×1.38–1.48 (x32, drift band), zeros ×4.45 (x0) / ×3.0 (x512), TTI ×1.67 (x0) / ×1.34 (x512). Bytes identical on the ladder throughout. Order of contribution: S1 (256-thread blocks) > C1 > S4 > C2 > D2/D5 > S6; D1 is the zeros lever with an ints cost to tune.
