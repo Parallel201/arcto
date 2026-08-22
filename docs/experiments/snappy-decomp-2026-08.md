@@ -214,3 +214,30 @@ paths of the benchmark); visible only for very large batches; bytes unaffected.
 Measured: (pending) correctness via test_snappy_coverage (size query checked per chunk).
 Result: (pending)
 Verdict: (pending)
+
+### SNP-D8 — 4 bytes per lane in the processor's literal and non-overlapping copy paths   Category: C3   Status: PENDING
+Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
+Files: `src/snappy/decompression_process.hiph`
+Change (AMD only, `#if __HIP_PLATFORM_AMD__`; CUDA keeps the byte loops): (a) literals — each lane
+moves 4 bytes per step (unaligned dword loads from the compressed stream, or two aligned LDS dword
+loads + shift via `read_window5` while the literal is still in the ring; unaligned dword stores to
+the output), `LITERAL_SECTORS/4` dwords per lane so a step still covers `LITERAL_SECTORS·GROUPSIZE`
+bytes; whole-dword tail then 0–3 trailing bytes. (b) copies with `dist ≥ blen` (no overlap between
+source and destination; Snappy copies are ≤ 64 B) — one unaligned dword per lane, byte tail; all
+loads precede all stores and the source lies entirely before `out`, so there is no intra-copy
+hazard. Overlapping copies (`dist < blen`, the repeat-pattern case) keep the original byte loop
+with the modulo source index. Output bytes identical. (The first version of this commit indexed the
+copy tail as `out[4*ndw + t - dist]` with an unsigned `ndw`, which wraps when `dist > 4·ndw + t` —
+an out-of-bounds store caught immediately by the test gate as `hipErrorIllegalAddress` on every
+input; fixed to pointer arithmetic before any measurement.)
+Why (mechanism): the output side of the processor issued one `global_store_byte` per byte per lane
+(64 B per wave-instruction); on RDNA3/CDNA3 literal-heavy streams are bound by store-instruction
+issue rather than bandwidth. Unaligned dword global access is supported on AMD (unaligned-access
+mode), so a 4× reduction in VMEM store (and load) instructions costs nothing in correctness.
+Prediction: medium on literal-heavy / incompressible input (binary, TTI: 89–94 GB/s today),
+smaller on copy-heavy input (words); bytes identical; ISA shows `global_store_dword` with
+`align 1` replacing most `global_store_byte`.
+Measured: (pending) same protocol as SNP-D1; test_snappy_coverage exercises odd sizes and
+misaligned output pointers.
+Result: (pending)
+Verdict: (pending)

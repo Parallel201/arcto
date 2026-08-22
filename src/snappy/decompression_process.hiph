@@ -182,33 +182,111 @@ namespace arcto
             if (dist > 0)
             {
               // Copy
-              uint8_t b0, b1;
-              if (t < blen)
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+              if ((uint32_t)dist >= (uint32_t)blen)
               {
-                uint32_t pos = t;
-                const uint8_t *src = out + ((pos >= dist) ? (pos % dist) : pos) - dist;
-                b0 = *src;
+                // No overlap between source [out-dist, out-dist+blen) and the
+                // destination: a plain forward copy, 4 bytes per lane with
+                // unaligned dword loads/stores (supported on AMD), byte tail.
+                // All loads precede all stores and the source lies entirely
+                // before `out`, so there is no intra-copy hazard. Copies are
+                // at most 64 bytes (Snappy), so one dword per lane suffices.
+                const uint32_t ndw = (uint32_t)blen >> 2;
+                uint32_t v = 0;
+                if (t < ndw) __builtin_memcpy(&v, out - dist + 4 * t, 4);
+                if (t < ndw) __builtin_memcpy(out + 4 * t, &v, 4);
+                // (pointer arithmetic: 4*ndw + t - dist would wrap as unsigned)
+                if (t < (uint32_t)blen - 4 * ndw) out[4 * ndw + t] = *(out - dist + 4 * ndw + t);
               }
-              if (GROUPSIZE + t < blen)
+              else
+#endif
               {
-                uint32_t pos = GROUPSIZE + t;
-                const uint8_t *src = out + ((pos >= dist) ? (pos % dist) : pos) - dist;
-                b1 = *src;
-              }
-              if (t < blen)
-              {
-                out[t] = b0;
-              }
-              if (GROUPSIZE + t < blen)
-              {
-                out[GROUPSIZE + t] = b1;
+                // Overlapping copy (repeat pattern of period dist): the
+                // original byte loop with the modulo source index.
+                uint8_t b0, b1;
+                if (t < blen)
+                {
+                  uint32_t pos = t;
+                  const uint8_t *src = out + ((pos >= dist) ? (pos % dist) : pos) - dist;
+                  b0 = *src;
+                }
+                if (GROUPSIZE + t < blen)
+                {
+                  uint32_t pos = GROUPSIZE + t;
+                  const uint8_t *src = out + ((pos >= dist) ? (pos % dist) : pos) - dist;
+                  b1 = *src;
+                }
+                if (t < blen)
+                {
+                  out[t] = b0;
+                }
+                if (GROUPSIZE + t < blen)
+                {
+                  out[GROUPSIZE + t] = b1;
+                }
               }
             }
             else
             {
               // Literal
-              uint8_t b[LITERAL_SECTORS];
               dist = -dist;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+              // AMD: 4 bytes per lane per step (unaligned dword loads and
+              // stores are supported), LITERAL_SECTORS/4 dwords per lane so a
+              // step still covers LITERAL_SECTORS*GROUPSIZE bytes as before.
+              // Source is the LDS ring (two aligned dword loads + shift per
+              // lane via read_window5) while the literal is still resident,
+              // else the compressed stream in global memory. 4x fewer store
+              // instructions than the byte loop; bytes identical.
+              static_assert(LITERAL_SECTORS % 4 == 0, "literal step must be whole dwords per lane");
+              constexpr int DW = LITERAL_SECTORS / 4;
+              constexpr int STEP = LITERAL_SECTORS * GROUPSIZE;
+              uint32_t v[DW];
+#pragma unroll 1
+              for (int k = 0; k < blen / STEP; ++k)
+              {
+                if (dist + STEP < current_prefetch_wrpos)
+                {
+                  for (int i = 0; i < DW; ++i)
+                    v[i] = static_cast<uint32_t>(s->q.read_window5(dist + 4 * t + 4 * i * GROUPSIZE));
+                }
+                else
+                {
+                  for (int i = 0; i < DW; ++i)
+                    __builtin_memcpy(&v[i], literal_base + dist + 4 * t + 4 * i * GROUPSIZE, 4);
+                }
+                for (int i = 0; i < DW; ++i)
+                  __builtin_memcpy(out + 4 * t + 4 * i * GROUPSIZE, &v[i], 4);
+                dist += STEP;
+                out += STEP;
+              }
+              blen %= STEP;
+              {
+                const uint32_t ndw = (uint32_t)blen >> 2;          // whole dwords in the tail
+                const uint32_t nrem = (uint32_t)blen - 4 * ndw;    // 0..3 trailing bytes
+                const bool from_ring = (dist + blen < current_prefetch_wrpos);
+                for (int i = 0; i < DW; ++i)
+                {
+                  const uint32_t d = i * GROUPSIZE + t;             // dword index of this lane
+                  if (d < ndw)
+                  {
+                    if (from_ring) v[i] = static_cast<uint32_t>(s->q.read_window5(dist + 4 * d));
+                    else __builtin_memcpy(&v[i], literal_base + dist + 4 * d, 4);
+                  }
+                }
+                for (int i = 0; i < DW; ++i)
+                {
+                  const uint32_t d = i * GROUPSIZE + t;
+                  if (d < ndw) __builtin_memcpy(out + 4 * d, &v[i], 4);
+                }
+                if (t < nrem)
+                {
+                  out[4 * ndw + t] = from_ring ? READ_BYTE(dist + 4 * ndw + t)
+                                               : literal_base[dist + 4 * ndw + t];
+                }
+              }
+#else
+              uint8_t b[LITERAL_SECTORS];
 #pragma unroll 1
               for (int k = 0; k < blen / (LITERAL_SECTORS * GROUPSIZE); ++k)
               {
@@ -250,6 +328,7 @@ namespace arcto
                 if (i * GROUPSIZE + t < blen)
                   out[i * GROUPSIZE + t] = b[i];
               //: end similar as above
+#endif
             }
             out += blen;
           }
