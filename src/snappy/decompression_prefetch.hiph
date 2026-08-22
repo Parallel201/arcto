@@ -110,11 +110,34 @@ namespace arcto
           blen = SHFL10(blen);
           if (blen == PREFETCH_SECTORS * GROUPSIZE)
           {
-            uint8_t vals[PREFETCH_SECTORS];
-            for (int i = 0; i < PREFETCH_SECTORS; ++i)
-              vals[i] = base[pos + t + i * GROUPSIZE];
-            for (int i = 0; i < PREFETCH_SECTORS; ++i)
-              s->q.buf[(pos + t + i * GROUPSIZE) & (PREFETCH_SIZE - 1)] = vals[i];
+            // Full granule of PREFETCH_SECTORS*GROUPSIZE bytes. base+pos is
+            // GROUPSIZE-aligned (>= 32 B) and pos only advances by whole
+            // granules, so the granule is PREFETCH_SECTORS/4 aligned dwords
+            // per lane at pos + 4t + 4*GROUPSIZE*i: the wave's loads are
+            // contiguous and 4x fewer than the byte loads they replace. The
+            // ring offset keeps the same alignment as pos for the whole chunk:
+            // dword stores when pos is 4-byte aligned (the common case --
+            // inputs from hipMalloc'd buffers), byte stores otherwise. Ring
+            // contents are identical either way.
+            static_assert(PREFETCH_SECTORS % 4 == 0, "granule must be a whole number of dwords per lane");
+            constexpr int DWORDS_PER_LANE = PREFETCH_SECTORS / 4;
+            uint32_t vals[DWORDS_PER_LANE];
+            const uint32_t* src32 = reinterpret_cast<const uint32_t*>(base + pos);
+            for (int i = 0; i < DWORDS_PER_LANE; ++i)
+              vals[i] = src32[t + i * GROUPSIZE];
+            if ((pos & 3) == 0)
+            {
+              volatile uint32_t* ring32 = reinterpret_cast<volatile uint32_t*>(s->q.buf);
+              for (int i = 0; i < DWORDS_PER_LANE; ++i)
+                ring32[((pos + 4 * t + 4 * i * GROUPSIZE) & (PREFETCH_SIZE - 1)) >> 2] = vals[i];
+            }
+            else
+            {
+              for (int i = 0; i < DWORDS_PER_LANE; ++i)
+                for (int j = 0; j < 4; ++j)
+                  s->q.buf[(pos + 4 * t + 4 * i * GROUPSIZE + j) & (PREFETCH_SIZE - 1)] =
+                      static_cast<uint8_t>((vals[i] >> (8 * j)) & 0xffu);
+            }
           }
           else
           {

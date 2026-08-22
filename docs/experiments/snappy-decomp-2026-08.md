@@ -179,3 +179,22 @@ small on literal-heavy data; bytes identical; ISA `ds_bpermute_b32` count drops 
 Measured: (pending) same protocol as SNP-D1.
 Result: (pending)
 Verdict: (pending)
+
+### SNP-D6 — dword-granular prefetch of the compressed stream                         Category: C3   Status: PENDING
+Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
+Files: `src/snappy/decompression_prefetch.hiph`
+Change: for a full granule (`PREFETCH_SECTORS·GROUPSIZE` = 512 B on wave64, 256 B on wave32) each
+prefetcher lane loaded 8 single bytes at `pos + t + i·GROUPSIZE` and stored them byte-wise into
+the ring. `base+pos` is GROUPSIZE-aligned by construction and advances by whole granules, so the
+granule is now loaded as `PREFETCH_SECTORS/4` aligned dwords per lane (`pos + 4t + 4·GROUPSIZE·i`,
+wave-contiguous), and written to the ring as dwords when `pos` is 4-byte aligned (the common
+case: inputs in `hipMalloc`'d buffers — the alignment of `pos` is constant for the whole chunk) or
+as bytes otherwise. Ring contents identical; bytes unchanged; same code on CUDA.
+Why (mechanism): 8 `global_load_ubyte` → 2 `global_load_dword` per lane per granule (4× fewer
+VMEM instructions and address computations, same coalescing); on the ring, lane-contiguous dword
+stores hit one bank per lane instead of four lanes writing sub-dword bytes of the same bank.
+Prediction: small–medium on inputs where the prefetcher is on the critical path (large,
+incompressible chunks: binary/TTI), ~0 where the decoder is the bottleneck; bytes identical.
+Measured: (pending) same protocol as SNP-D1.
+Result: (pending)
+Verdict: (pending)
