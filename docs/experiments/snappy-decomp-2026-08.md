@@ -198,3 +198,19 @@ incompressible chunks: binary/TTI), ~0 where the decoder is the bottleneck; byte
 Measured: (pending) same protocol as SNP-D1.
 Result: (pending)
 Verdict: (pending)
+
+### SNP-D10 — size kernel: one chunk per thread                                       Category: C6   Status: PENDING
+Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
+Files: `src/lowlevel/SnappyBatchKernels.hip`
+Change: `get_uncompressed_sizes_kernel` (varint header parse, used by
+`arctoBatchedSnappyGetDecompressSizeAsync`) launched one `warpsize`-thread workgroup per chunk
+with a single active lane; it now parses one chunk per thread in 256-thread blocks
+(`grid = ⌈count/256⌉`). Same parse, same outputs.
+Why (mechanism): 63 of 64 lanes idle and one workgroup dispatch per chunk → 64× fewer lanes
+wasted and ~256× fewer workgroups; the parse is 1–5 dependent byte loads per chunk, so a
+thread per chunk is the natural shape.
+Prediction: µs-level absolute gain on the size query (not part of the timed compress/decompress
+paths of the benchmark); visible only for very large batches; bytes unaffected.
+Measured: (pending) correctness via test_snappy_coverage (size query checked per chunk).
+Result: (pending)
+Verdict: (pending)
