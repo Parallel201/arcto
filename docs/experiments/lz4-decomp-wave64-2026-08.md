@@ -45,3 +45,21 @@ small gain on short matches; bytes identical.
 Measured: (pending)
 Result: (pending)
 Verdict: (pending)
+
+### LZ4-D1 — vectorised copies and doubling repeat on wave64 (knob, default = curated)      Category: C3   Status: KNOB — variants pending
+Commit: (this commit)  (branch `opt/lz4-decomp-wave64-2026-08`)
+Files: `src/LZ4Kernels.hiph`
+Change: the E17 wave32-only pieces — `coopCopyVec` (dword body fed by `unaligned_load32`, byte
+head/tail) in `coopCopyNoOverlap`/`copyLiterals`, and the doubling expansion of long overlapped
+matches in `coopCopyRepeat` — are selected by `ARCTO_LZ4_VEC_COPY` instead of `USE_WARPSIZE_32`:
+default 1 on wave32, 0 on wave64 and CUDA (identical code to the curated lineage). Variants to
+measure on gfx942: `-DARCTO_LZ4_VEC_COPY=1`, with and without `-DARCTO_LZ4_DECOMP_MIN_WAVES_PER_EU=8`.
+Why (mechanism): on wave64 a byte copy issues one 64-B store per instruction; the dword path
+issues 256 B per instruction with 4× fewer `s_waitcnt` round trips; the doubling turns a
+period-`dist` match of length L into log2(L/dist) straight copies. The earlier wave64 loss (E17)
+was measured without launch bounds; under LZ4-D7 the VGPR budget is explicit.
+Prediction: with bounds, VEC_COPY=1 on wave64 +5–20 % on literal-/run-heavy inputs; if it still
+loses, the cause is the extra registers (check `-Rpass-analysis` VGPRs vs 64) — then keep off.
+Measured: (pending)
+Result: (pending)
+Verdict: (pending)

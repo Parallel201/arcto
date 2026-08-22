@@ -610,7 +610,20 @@ private:
   const uint8_t* const m_compData;
 }; // End BufferControl Class
 
-#if defined(USE_WARPSIZE_32)
+// LZ4-D1: the vectorised cooperative copy and the doubling repeat (E17: kept
+// on wave32, gated off on wave64 where they measured as losses before the
+// kernel had launch bounds). ARCTO_LZ4_VEC_COPY selects them per build:
+// default on for wave32, off for wave64 and CUDA — the curated behaviour —
+// so that -DARCTO_LZ4_VEC_COPY=1 re-tests them on wave64 under LZ4-D7.
+#ifndef ARCTO_LZ4_VEC_COPY
+#  if defined(USE_WARPSIZE_32)
+#    define ARCTO_LZ4_VEC_COPY 1
+#  else
+#    define ARCTO_LZ4_VEC_COPY 0
+#  endif
+#endif
+
+#if ARCTO_LZ4_VEC_COPY
 /**
  * Cooperative byte copy, vectorized: align the destination to 4 bytes,
  * stream the body as dword stores fed by unaligned_load32 (two aligned
@@ -650,14 +663,14 @@ inline __device__ void coopCopyVec(
   }
 }
 
-#endif // USE_WARPSIZE_32
+#endif // ARCTO_LZ4_VEC_COPY
 
 inline __device__ void coopCopyNoOverlap(
     uint8_t* const dest,
     const uint8_t* const source,
     const position_type length)
 {
-#if defined(USE_WARPSIZE_32)
+#if ARCTO_LZ4_VEC_COPY
   coopCopyVec(dest, source, length, blockDim.x);
 #else
   for (position_type i = threadIdx.x; i < length; i += blockDim.x) {
@@ -673,7 +686,7 @@ inline __device__ void coopCopyRepeat(
     const position_type length)
 {
   assert(dist > 0);
-#if defined(USE_WARPSIZE_32)
+#if ARCTO_LZ4_VEC_COPY
   if (length > 2 * blockDim.x) {
     // Long overlapped match = long repeating pattern of period `dist`
     // (e.g. zero runs). Seed one period, then double the already-written
@@ -747,7 +760,7 @@ inline __device__ void copyLiterals(
     const position_type length)
 {
   assert(BLOCK_SIZE == blockDim.x);
-#if defined(USE_WARPSIZE_32)
+#if ARCTO_LZ4_VEC_COPY
   coopCopyVec(dest, source, length, BLOCK_SIZE);
 #else
   for (position_type i = threadIdx.x; i < length; i += BLOCK_SIZE) {
