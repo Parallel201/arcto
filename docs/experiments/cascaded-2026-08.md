@@ -196,7 +196,15 @@ otherwise the per-run fill. No block-wide vote or barrier is added to any round;
 existing `__syncthreads()` remains. Same values to the same positions: bytes identical.
 Prediction: ints back to the pre-D1 level (≈ 97 GB/s at x32 on gfx1100), zeros keeps the D1 gain
 (64-lane instead of 256-lane balancing of a single run: still ×6+), TTI ≈.
-Measured: (final sweep)
+Measured (cas6, gfx1100, 30 reps; vs H3 = block vote, and vs base 777135f): decompression ints
+x32 88.8 → 96.1 GB/s (×1.082 vs H3; base 75.3 → ×1.276 cumulative; pre-D1 was 97.3), x0 72.4 → 78.9
+(×1.090; ×1.163 cumulative — above the pre-D1 73.4: the wave-local fill also speeds up rounds with
+moderately long runs); zeros x512 348 → 296 (×0.85 vs H3; ×6.43 vs base; the 64-lane fill of a
+single 4096-run is less parallel than the 256-lane one), x0 14.0 → 11.0 (bimodal band 8–18); TTI
+≈ (×0.98 vs base at saturation). Compression ×1.00–1.01 vs H3 (H1b +0.6 % ints). Full coverage
+matrix green (72 684 assertions); ladder identical.
+Result: the ints cost of D1/D1f is gone (and a little more), zeros keeps most of its ×6–8, TTI flat.
+Verdict: KEPT — the final form of CAS-D1. gfx942: (cas6 pending)
 
 ### CAS-H1b — header-gap zeroing folded into the header-writing thread-0 section          Category: C8   Status: COMMITTED
 Commit: (this commit)  (branch `opt/cascaded-2026-08`)
@@ -319,6 +327,8 @@ Cost: a few scalar stores per layer; compressed sizes unchanged; decompressors (
 ignore the bytes. Effect: Cascaded output is now byte-deterministic, so the sweeps' gates and the
 coverage test can compare bytes across commits and architectures.
 Measured: (part of the sweep; expected ≈ 0)
+### Cumulative FINAL on gfx1100 (wave32), base 777135f → head ddf1fd0 (cas6): compression ints ×2.07 (x0) / ×2.16 (x32), TTI ×2.26 (x0) / ×2.32 (x512), zeros ×1.61 (x512); decompression ints ×1.16 (x0) / ×1.28 (x32), zeros ×4.3 (x0) / ×6.4 (x512), TTI ×0.98 (x512). Bytes identical on the ladder; full coverage matrix green.
+
 ### Cumulative on gfx942 (MI300A, wave64), base 777135f → S6 c375cab (S5/H1 rebuilt, measured separately): compression ints ×2.55 (x0) / ×2.98 (x32), TTI ×3.58 (x0) / ×3.39 (x512), zeros ×1.62 (x0) / ×1.82 (x512); decompression ints ×1.33 (x0) / ×1.38–1.48 (x32, drift band), zeros ×4.45 (x0) / ×3.0 (x512), TTI ×1.67 (x0) / ×1.34 (x512). Bytes identical on the ladder throughout. Order of contribution: S1 (256-thread blocks) > C1 > S4 > C2 > D2/D5 > S6; D1 is the zeros lever with an ints cost to tune.
 
 ### Cumulative on gfx1100 (wave32), base 777135f → S6 c375cab (S5/H1 rebuilt, measured separately): compression ints_mixed ×1.80 (x32), TTI ×1.98 (x512), zeros ×1.17 (x512); decompression ints_mixed ×1.21 (x32), zeros ×7.8 (x512), TTI ×0.985 (x512). Bytes identical on the ladder throughout; gfx942 pending.
