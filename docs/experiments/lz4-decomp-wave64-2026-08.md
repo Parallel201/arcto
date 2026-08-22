@@ -28,3 +28,20 @@ loss if the compiler spills to reach it (check `-Rpass-analysis`); bytes identic
 Measured: (pending) gfx942 (+ gfx1100 regression check).
 Result: (pending)
 Verdict: (pending)
+
+### LZ4-D2 — incremental source index in the repeat (overlapped-match) copy             Category: C1   Status: PENDING
+Commit: (this commit)  (branch `opt/lz4-decomp-wave64-2026-08`)
+Files: `src/LZ4Kernels.hiph` (`coopCopyRepeat`)
+Change: the strided loop `dest[i] = source[i % dist]` (the wave64/CUDA path for every overlapped
+match, and the wave32 path for matches ≤ 2 × blockDim) keeps the lane's source index
+incrementally: `r = lane % dist`, `step = blockDim.x % dist` once, then `r += step; if (r >= dist)
+r -= dist` per iteration. Exact (r, step < dist, so one conditional subtract suffices).
+Why (mechanism): a 32-bit remainder by a runtime divisor is ~30 VALU instructions on GCN/CDNA/
+RDNA; the inherited loop paid it per byte. Repetitive inputs (zero runs, TTI's sparse regions) are
+decoded almost entirely through this loop on wave64 (the doubling fast path is wave32-only in the
+curated lineage). Bytes identical.
+Prediction: gfx942 +10–30 % decompression on zeros / repetitive data, ≈ 0 on incompressible; gfx1100
+small gain on short matches; bytes identical.
+Measured: (pending)
+Result: (pending)
+Verdict: (pending)

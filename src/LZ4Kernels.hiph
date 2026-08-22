@@ -693,9 +693,19 @@ inline __device__ void coopCopyRepeat(
     return;
   }
 #endif
-  // Short match, wave64 and CUDA: strided modulo loop (original form).
+  // Short match, wave64 and CUDA: strided loop over the period. LZ4-D2: the
+  // lane's source index `i % dist` advances by a constant `blockDim.x % dist`
+  // per iteration, so it is kept incrementally (two 32-bit remainders per lane
+  // instead of one per byte — `urem` is a ~30-instruction VALU sequence on
+  // AMD, and the match copy of repetitive data is this loop).
+  position_type r = threadIdx.x % dist;
+  const position_type step = blockDim.x % dist;
   for (position_type i = threadIdx.x; i < length; i += blockDim.x) {
-    dest[i] = source[i % dist];
+    dest[i] = source[r];
+    r += step;
+    if (r >= dist) {
+      r -= dist;
+    }
   }
 }
 
