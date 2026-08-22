@@ -610,35 +610,66 @@ __device__ void block_bitpack(
                  + num_output_elements * sizeof(uint32_t);
   }
 
-  for (int out_idx = threadIdx.x; out_idx < num_output_elements;
-       out_idx += threadblock_size) {
-    // The kernel works by assigning each 4B element of the bitpacked data to a
-    // thread. The kernel then iterates over chunks of input, filling the bits
-    // for each element, and then writing the stored bits to the output.
-    const int out_bit_start = out_idx * sizeof(uint32_t) * num_bits_per_byte;
-    const int out_bit_end
-        = out_bit_start + sizeof(uint32_t) * num_bits_per_byte;
-    const int input_idx_start = out_bit_start / bitwidth;
-    const int input_idx_end = roundUpDiv(out_bit_end, bitwidth);
+  if (num_output_elements > 0) {
+    // CAS-C4: a thread's output words are `threadblock_size` apart, so its
+    // input window [out_bit_start / bitwidth, ceil(out_bit_end / bitwidth))
+    // advances by a fixed quotient/remainder per iteration — keep it with an
+    // incremental division (two divisions per thread up front instead of two
+    // per output word; `bitwidth` is a runtime divisor here, the words are
+    // identical). bitwidth > 0 whenever there are output words.
+    constexpr int word_bits = sizeof(uint32_t) * num_bits_per_byte;
+    const int step_bits = threadblock_size * word_bits;
+    const int step_q = step_bits / bitwidth;
+    const int step_r = step_bits % bitwidth;
+    const int first_bit = threadIdx.x * word_bits;
+    int start_q = first_bit / bitwidth;
+    int start_r = first_bit % bitwidth;
+    // input_idx_end = ceil((out_bit_start + word_bits) / bitwidth)
+    //               = (out_bit_start + word_bits + bitwidth - 1) / bitwidth
+    int end_q = (first_bit + word_bits + bitwidth - 1) / bitwidth;
+    int end_r = (first_bit + word_bits + bitwidth - 1) % bitwidth;
 
-    uint32_t output_val = 0;
-    for (int input_idx = input_idx_start; input_idx < input_idx_end;
-         input_idx++) {
-      unsigned_data_type input_val = 0;
-      if (input_idx < num_elements)
-        input_val = static_cast<unsigned_data_type>(
-            input[input_idx] - frame_of_reference);
+    for (int out_idx = threadIdx.x; out_idx < num_output_elements;
+         out_idx += threadblock_size) {
+      // The kernel works by assigning each 4B element of the bitpacked data to
+      // a thread. The kernel then iterates over chunks of input, filling the
+      // bits for each element, and then writing the stored bits to the output.
+      const int out_bit_start = out_idx * word_bits;
+      const int input_idx_start = start_q;
+      const int input_idx_end = end_q;
 
-      auto padded_val = static_cast<padded_data_type>(input_val);
-      const int offset = input_idx * bitwidth - out_bit_start;
-      if (offset > 0) {
-        padded_val <<= offset;
-      } else {
-        padded_val >>= -offset;
+      uint32_t output_val = 0;
+      for (int input_idx = input_idx_start; input_idx < input_idx_end;
+           input_idx++) {
+        unsigned_data_type input_val = 0;
+        if (input_idx < num_elements)
+          input_val = static_cast<unsigned_data_type>(
+              input[input_idx] - frame_of_reference);
+
+        auto padded_val = static_cast<padded_data_type>(input_val);
+        const int offset = input_idx * bitwidth - out_bit_start;
+        if (offset > 0) {
+          padded_val <<= offset;
+        } else {
+          padded_val >>= -offset;
+        }
+        output_val |= static_cast<uint32_t>(padded_val);
       }
-      output_val |= static_cast<uint32_t>(padded_val);
+      current_ptr[out_idx] = output_val;
+
+      start_q += step_q;
+      start_r += step_r;
+      if (start_r >= static_cast<int>(bitwidth)) {
+        start_r -= bitwidth;
+        start_q++;
+      }
+      end_q += step_q;
+      end_r += step_r;
+      if (end_r >= static_cast<int>(bitwidth)) {
+        end_r -= bitwidth;
+        end_q++;
+      }
     }
-    current_ptr[out_idx] = output_val;
   }
 }
 

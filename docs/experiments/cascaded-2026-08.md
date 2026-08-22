@@ -155,5 +155,23 @@ Measured: (pending)
 Result: (pending)
 Verdict: (pending)
 
+### CAS-C4 — incremental input-window arithmetic in `block_bitpack`                    Category: C1   Status: PENDING
+Commit: (this commit)  (branch `opt/cascaded-2026-08`)
+Files: `src/CascadedKernels.hiph` (`block_bitpack`)
+Change: the word-per-thread packing loop computed `input_idx_start = out_bit_start / bitwidth`
+and `input_idx_end = roundUpDiv(out_bit_end, bitwidth)` for every output word — two integer
+divisions by a runtime divisor. A thread's consecutive words are `threadblock_size` apart, so
+both indices advance by a fixed quotient/remainder per iteration; they are now kept with an
+exact incremental division (two divisions per thread before the loop). Inner loop unchanged.
+Why (mechanism): 32-bit integer division by a runtime value is a ~30–40-instruction VALU
+sequence on GCN/CDNA/RDNA (no hardware divider); at bitwidth 8 the inner loop is five 8-op
+iterations, so the two divisions were roughly half the packing work per word. Packing runs on
+every layer output with `use_bp` (RLE counts, final array); the words produced are identical.
+Prediction: +5–15 % compression on bit-packed inputs (TTI/ints), ≈ 0 on zeros (bitwidth 0 →
+no words); bytes identical.
+Measured: (pending)
+Result: (pending)
+Verdict: (pending)
+
 ### Resource evidence — gfx942 (MI300A), ROCm 7.0.1, baseline kernels (before CAS-S2/S1/C1)
 `-Rpass-analysis=kernel-resource-usage`, wave64, 128-thread blocks (inherited): `cascaded_compression_kernel<int,128,4096>` SGPR 106 / VGPR 71 / LDS 13456 B per block / 9 SGPR spills / est. 7 waves per SIMD; `cascaded_decompression_kernel<4B,128,4096>` SGPR 106 / VGPR 73 / LDS 13192 B / 12 SGPR spills / est. 6 waves per SIMD; `get_decompress_size_kernel` 22 / 10 / 0 LDS / 8. The SGPR spills (scalar state of the nested RLE/delta/bit-pack passes) and the 13 KB of LDS per 128-thread block (≤4 blocks per CU by LDS) are the two structural costs to attack (CAS-S2 launch bounds already committed; CAS-D5 LDS shrink queued).
