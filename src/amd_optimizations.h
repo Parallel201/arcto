@@ -90,14 +90,40 @@ namespace block_size {
 // ============================================================================
 
 /**
- * @brief Optimal launch bounds for AMD GPUs
+ * @brief Launch bounds with explicit, per-platform semantics.
  *
- * AMD GPUs benefit from higher occupancy. These macros help the compiler
- * optimize register usage and LDS allocation.
+ * The two platforms give the SECOND argument of __launch_bounds__ different
+ * meanings:
+ *   CUDA: __launch_bounds__(maxThreadsPerBlock, minBlocksPerMultiprocessor)
+ *   HIP:  __launch_bounds__(maxThreadsPerBlock, minWavesPerExecutionUnit)
+ *         i.e. the minimum number of wavefronts the compiler must keep
+ *         resident per SIMD (amdgpu_waves_per_eu) -- it caps the VGPR budget
+ *         (CDNA: <=64 VGPRs for 8 waves/SIMD, <=72 for 7, <=80 for 6, <=96 for
+ *         5, <=128 for 4) and is NOT "blocks per CU".
  *
- * Format: __launch_bounds__(max_threads_per_block, min_blocks_per_cu)
- *
- * MI300X has 304 CUs, so we can have many blocks in flight.
+ * ARCTO_LAUNCH_BOUNDS(threads, min_waves_per_eu, min_blocks_per_sm) lets a
+ * kernel state both intents in one place and expands to whichever form the
+ * active platform understands. ARCTO_LAUNCH_BOUNDS_1(threads) is the
+ * single-argument form (identical on both platforms).
+ */
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+  #define ARCTO_LAUNCH_BOUNDS(threads, min_waves_per_eu, min_blocks_per_sm) \
+    __launch_bounds__(threads, min_waves_per_eu)
+#else
+  #define ARCTO_LAUNCH_BOUNDS(threads, min_waves_per_eu, min_blocks_per_sm) \
+    __launch_bounds__(threads, min_blocks_per_sm)
+#endif
+#define ARCTO_LAUNCH_BOUNDS_1(threads) __launch_bounds__(threads)
+
+/**
+ * Presets used by the legacy per-stage Cascaded kernels (BitPackGPU, DeltaGPU,
+ * RunLengthEncodeGPU). On HIP the second argument is a waves-per-EU minimum
+ * (see above): (512, 2) asks for >= 2 waves/SIMD, (1024, 4) for >= 4,
+ * (512, 3) for >= 3, (256, 8) for >= 8 (which caps VGPRs at 64 on CDNA).
+ * They were historically documented with the CUDA "blocks per CU" meaning;
+ * the values are kept unchanged here so that this header change is
+ * behaviour-neutral -- re-derive them per architecture when those kernels are
+ * tuned.
  */
 
 // For compute-intensive kernels (prefer more registers)
