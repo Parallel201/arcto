@@ -249,3 +249,24 @@ Measured: (pending) same protocol as SNP-D1; test_snappy_coverage exercises odd 
 misaligned output pointers.
 Result: (pending)
 Verdict: (pending)
+
+### SNP-D12 — experiment knob: 32-lane decode groups inside a wave64 (+ punning hygiene)   Category: C6   Status: KNOB (default off) — variant pending on gfx942
+Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
+Files: `src/snappy/decompression.hiph`, `src/snappy/decompression_decode_strategies.hiph`,
+`src/snappy/decompression_decode_warp_scans.hiph`, `src/device_functions.hiph`
+Change: `-DARCTO_SNAPPY_DECODE_GROUP=32` on a wave64 build instantiates the two decode strategies
+with a 32-bit group mask (`TryDecodeStringOf2To{3,5}ByteSymbols<uint32_t, uint64_t>`): 32 symbols
+per batch, the 8-step `len3`/`len5` mask chains of the original 32-lane nvCOMP design, half the
+decode lanes; prefetcher and processor stay 64-wide. Default = the whole wave (unchanged code
+path). Prerequisites fixed in the same commit: the `uint64_t → uint32_t` mask truncations in
+`ballot1<uint32_t,64>` and `get_len3/5_mask<uint32_t,uint64_t>` used pointer punning
+(`*reinterpret_cast<uint32_t*>(&v)`), now `static_cast`; and the 2-to-3 strategy's "every lane
+decoded a short symbol" default was `warpsize` where `GROUPSIZE` is meant (identical when the
+group is the wave, wrong for a 32-lane group). Default build: identical code and bytes.
+Why (mechanism): nvCOMP tuned the parallel strategies for 32 symbols per batch; on wave64 the
+batch doubled (64) and the serial mask chain doubled (16 lookups). Whether 64 wide symbols per
+batch outweigh the longer chain is unknown a priori.
+Prediction: unknown (either way); bytes identical. To be measured as a flag variant on gfx942.
+Measured: (pending) `94fb297+ -DARCTO_SNAPPY_DECODE_GROUP=32` on gfx942 only.
+Result: (pending)
+Verdict: (pending)

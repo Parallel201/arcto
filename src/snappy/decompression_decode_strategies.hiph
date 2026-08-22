@@ -155,7 +155,9 @@ namespace snappy {
 
       if (!(short_sym_mask & 1)) {
         // short_sym_mask is a ballot result (wave-uniform): same value on all lanes.
-        batch_len = short_sym_mask ? find_first_set_bit(short_sym_mask) - 1 : warpsize;
+        // No long symbol among the group's lanes -> the whole group decoded one
+        // symbol each (GROUPSIZE == warpsize in the default configuration).
+        batch_len = short_sym_mask ? find_first_set_bit(short_sym_mask) - 1 : static_cast<int32_t>(GROUPSIZE);
         if (batch_len != 0) {
           uint32_t blen = 0;
           int32_t ofs   = 0;

@@ -289,8 +289,8 @@ __device__ inline uint64_t ballot1<uint64_t,64u>(uint32_t t,int predicate,int pr
 
 template <>
 __device__ inline uint32_t ballot1<uint32_t,64u>(uint32_t t,int predicate,int predicate_excluded) {
-  uint64_t mask_64 = BALLOT1(predicate);
-  return *reinterpret_cast<uint32_t*>(&mask_64);
+  // low 32 lanes of the wave64 ballot (well-defined truncation, no pointer punning)
+  return static_cast<uint32_t>(BALLOT1(predicate));
 }
 #else
 template <>

@@ -38,6 +38,8 @@
 #ifndef SNAPPY_DECOMPRESSION_HIPH
 #define SNAPPY_DECOMPRESSION_HIPH
 
+#include <type_traits>
+
 #include "arcto_device_types.h"
 #include "device_functions.hiph"
 #include "snappy/config.h"
@@ -192,6 +194,18 @@ namespace arcto
     /**
      * \brief Snappy decompression device function
      **/
+    // Experiment knob (SNP-D12): the decode wave may work in 32-lane groups
+    // inside a 64-wide wave (-DARCTO_SNAPPY_DECODE_GROUP=32 on a wave64 build):
+    // 32 symbols per batch and the 8-step len3/len5 mask chains of the original
+    // 32-lane design, at the cost of half the decode lanes. Default: the whole
+    // wave (64 on wave64, 32 on wave32) -- the configuration measured so far.
+#ifndef ARCTO_SNAPPY_DECODE_GROUP
+#  define ARCTO_SNAPPY_DECODE_GROUP uwarpsize
+#endif
+    static_assert(ARCTO_SNAPPY_DECODE_GROUP == uwarpsize || (ARCTO_SNAPPY_DECODE_GROUP == 32u && uwarpsize == 64u),
+                  "ARCTO_SNAPPY_DECODE_GROUP must be the wave size, or 32 on a wave64 build");
+    using decode_group_mask_t = typename std::conditional<(ARCTO_SNAPPY_DECODE_GROUP == 32u), uint32_t, warp_mask_t>::type;
+
     __device__ inline void do_unsnap(
         const uint8_t *const __restrict__ device_in_ptr,
         const uint64_t device_in_bytes,
@@ -202,8 +216,8 @@ namespace arcto
     {
       _do_unsnap<
         DecodeSymbols<
-          TryDecodeStringOf2To3ByteSymbols<warp_mask_t, warp_mask_t>,
-          TryDecodeStringOf2To5ByteSymbols<warp_mask_t, warp_mask_t>
+          TryDecodeStringOf2To3ByteSymbols<decode_group_mask_t, warp_mask_t>,
+          TryDecodeStringOf2To5ByteSymbols<decode_group_mask_t, warp_mask_t>
         >,
         PrefetchByteStream<warp_mask_t, warp_mask_t>,
         ProcessSymbols<warp_mask_t, warp_mask_t>
