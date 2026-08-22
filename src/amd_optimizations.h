@@ -115,28 +115,6 @@ namespace block_size {
 #endif
 #define ARCTO_LAUNCH_BOUNDS_1(threads) __launch_bounds__(threads)
 
-/**
- * Presets used by the legacy per-stage Cascaded kernels (BitPackGPU, DeltaGPU,
- * RunLengthEncodeGPU). On HIP the second argument is a waves-per-EU minimum
- * (see above): (512, 2) asks for >= 2 waves/SIMD, (1024, 4) for >= 4,
- * (512, 3) for >= 3, (256, 8) for >= 8 (which caps VGPRs at 64 on CDNA).
- * They were historically documented with the CUDA "blocks per CU" meaning;
- * the values are kept unchanged here so that this header change is
- * behaviour-neutral -- re-derive them per architecture when those kernels are
- * tuned.
- */
-
-// For compute-intensive kernels (prefer more registers)
-#define AMD_LAUNCH_BOUNDS_COMPUTE __launch_bounds__(512, 2)
-
-// For memory-intensive kernels (prefer more blocks for hiding latency)
-#define AMD_LAUNCH_BOUNDS_MEMORY __launch_bounds__(1024, 4)
-
-// For balanced kernels
-#define AMD_LAUNCH_BOUNDS_BALANCED __launch_bounds__(512, 3)
-
-// For small kernels that need high occupancy
-#define AMD_LAUNCH_BOUNDS_HIGH_OCC __launch_bounds__(256, 8)
 
 // ============================================================================
 // WAVE-LEVEL SYNCHRONIZATION
