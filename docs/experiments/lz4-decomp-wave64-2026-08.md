@@ -114,8 +114,13 @@ overhead (at MIN=256 every copy of words takes the byte loop): it is the cost of
 paths compiled in. Resource report (gfx942, `-Rpass-analysis`): `lz4DecompressBatchKernel` goes
 from 66 VGPRs / 7 waves per SIMD (vec off) to 84 VGPRs / 5 waves per SIMD (vec on), no spills — the
 short-sequence input is latency-bound and loses two waves of latency hiding; the long-copy inputs
-gain from the 4× wider stores despite the lower occupancy. Occupancy-target variants
-(`MIN_WAVES_PER_EU` 7 / 6 → ≤ 72 / ≤ 80 VGPRs) are in the final sweep. The gains are equally cutoff-independent.
+gain from the 4× wider stores despite the lower occupancy. Occupancy-target variants (lz4d, gfx942,
+`MIN_WAVES_PER_EU` 7 / 6 on the head): small-batch rows ≈ the head (binary ×1.00 / ×1.005, tti
+×1.03 / ×0.98, zeros ×1.01 / ×0.99, words ×0.97 / ×0.99), saturation rows swing in both directions
+between near-identical builds (binary 577 / 777 vs 776 GB/s, tti 712 / 800 (IQR 722–962) vs 547,
+zeros 594 / 792 vs 826) — the same binaries' saturation medians on this shared node moved ±30 %
+within the hour, so no occupancy target is adopted; the default stays bounds-only (the per-chunk
+work, x0, is unchanged by the target). The gains are equally cutoff-independent.
 The compression-side vectorisation is a clear loss on wave64 (COMP stays off); MIN stays 32.
 Verdict: wave64 default = DECOMP on, COMP off (next commit, LZ4-D1w), with the words/zeros costs
 recorded; the knobs stay for workloads dominated by short sequences.
@@ -161,4 +166,16 @@ decompression synth_binary x0 4.37 → 9.97 GB/s (×2.28), x512 576 → 776 (×1
 Open point: the lz4b variant with the same paths *and* LZ4-D5 still in read tti x512 at 693–704 GB/s
 (vs 547 here) while x0 matched (9.4–9.6) — either this node's saturation drift or a real D5 × vec
 interaction (scalar parsing state relieving the 84-VGPR build); a D5-on-head variant is queued (lz4e).
-gfx1100: (lz4c pending)
+gfx1100 (lz4c, 30 reps): head vs curated base ×0.995–1.005 on every input and both directions — the
+wave32 build is configuration-identical by construction (bounds neutral, D2 exact); `MIN_WAVES_PER_EU`
+7 / 6 also ×0.996–1.008 there (the wave32 kernel already runs 16 waves at 91 VGPRs). Tests green.
+
+### LZ4-D5r — readfirstlane parsing re-applied on the vectorised wave64 build (variant)      Category: C2   Status: DROPPED (−2.5…−6 %)
+Commit: measured as ea5482f (cherry-pick of 0a2a349 on top of D1w), then removed from the branch
+Why: D5 alone was neutral/negative on the byte-copy build, but with the dword paths compiled in the
+kernel sits at 84 VGPRs / 5 waves; moving the sequence-parsing state into SGPRs may give back a wave.
+Measured (lz4e, gfx942, 30 reps, head vs head+D5r): decompression binary ×0.975 (x0) / ×0.972 (sat),
+tti ×1.00 / ×0.97, zeros ×0.96 / ×1.00, words ×0.94 / ×0.965; compression ≈. Tests green.
+Result: negative everywhere on the vectorised build as well — the lz4b TTI-at-saturation reading
+was this node's drift (the head alone measured 547 and 719 GB/s an hour apart).
+Verdict: DROPPED (the commit was removed from the branch; the branch head code is 34d036a's).
