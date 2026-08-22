@@ -125,7 +125,24 @@ __global__ LZ4_COMP_LAUNCH_BOUNDS void lz4CompressBatchKernel(
   compressStream(comp_ptr, reinterpret_cast<const T*>(decomp_ptr), hash_table, hash_table_size, decomp_length, comp_length);
 }
 
-__global__ void lz4DecompressBatchKernel(
+// LZ4-D7: bound the decompression kernel to its real block (threads per
+// chunk x chunks per block) so hip-clang budgets registers for 64/128 threads
+// instead of the 1024-thread default, and optionally ask for a minimum
+// occupancy (HIP: waves per EU; CUDA: min blocks per SM) to pin the VGPR
+// budget — e.g. -DARCTO_LZ4_DECOMP_MIN_WAVES_PER_EU=8 keeps <= 64 VGPRs on
+// CDNA. 0 (default) = no occupancy target.
+#ifndef ARCTO_LZ4_DECOMP_MIN_WAVES_PER_EU
+#  define ARCTO_LZ4_DECOMP_MIN_WAVES_PER_EU 0
+#endif
+#if ARCTO_LZ4_DECOMP_MIN_WAVES_PER_EU > 0
+#  define ARCTO_LZ4_DECOMP_BOUNDS \
+    __launch_bounds__(LZ4_DECOMP_THREADS_PER_CHUNK * LZ4_DECOMP_CHUNKS_PER_BLOCK, ARCTO_LZ4_DECOMP_MIN_WAVES_PER_EU)
+#else
+#  define ARCTO_LZ4_DECOMP_BOUNDS \
+    __launch_bounds__(LZ4_DECOMP_THREADS_PER_CHUNK * LZ4_DECOMP_CHUNKS_PER_BLOCK)
+#endif
+
+__global__ void ARCTO_LZ4_DECOMP_BOUNDS lz4DecompressBatchKernel(
     const uint8_t* const* const device_in_ptrs,
     const size_t* const device_in_bytes,
     const size_t* const device_out_bytes,
