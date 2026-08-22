@@ -55,3 +55,21 @@ Prediction: ~5–10 % compression throughput; bytes identical (gfx1100) / identi
 Measured: (pending) same protocol as SNP-C5.
 Result: (pending)
 Verdict: (pending)
+
+### SNP-C1 — one-round-ahead prefetch of the match-search data word                  Category: C3   Status: PENDING
+Commit: (this commit)  (branch `opt/snappy-comp-2026-08`)
+Files: `src/snappy/compression.hiph`
+Change: in `FindFourByteMatch` each round loaded its lane's 4-byte window (`unaligned_load32`, two
+aligned dword loads + funnel shift) at the top of the round, heading the dependent chain
+load → hash → 12 ballots → LDS lookup → verify load → ballot. The loop only continues when
+`literal_cnt == GROUPSIZE`, so the next round's position is exactly `pos + GROUPSIZE`: its load is
+now issued at the start of the current round and consumed next round (the last round's prefetch
+is wasted — one cache-resident 4-byte load per call). Same rounds, same matches, bytes unchanged.
+Why (mechanism): removes one global-load latency (L1 hit ≈ 100+ cycles on CDNA, more from L2) from
+the start of rounds ≥ 1 and overlaps it with the ballot/LDS work; the compressor runs 2 waves per
+block at ≈ 8 waves/SIMD (LDS-bound), so little latency is hidden by other waves.
+Prediction: single digits to ~15 % on literal-heavy inputs (more rounds per literal: random,
+binary, TTI), ≈ 0 on highly compressible data; bytes identical.
+Measured: (pending) same protocol as SNP-C5.
+Result: (pending)
+Verdict: (pending)
