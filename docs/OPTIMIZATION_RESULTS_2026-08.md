@@ -50,7 +50,7 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
 | Snappy decomp | SNP-D12 | 32-lane decode groups inside a wave64 (knob) | n/a | TTI +8 % (x0), words −9 % | input-dependent, knob off by default |
 | Cascaded | CAS-S4 | `BLOCK_SCAN_WARP_SCANS` (rocPRIM `using_warp_scan`) for the three block scans | decomp ints +3 %, others ≈ | comp +16–19 %, decomp +10–15 % | kept (big on CDNA) |
 | Cascaded comp | CAS-S6 | 32-bit scan type for in-chunk run counts (was `size_t`) | +1–1.6 % | +2–4 % | kept |
-| LZ4 decomp | LZ4-D5 | token / LSIC / offset through `readfirstlane` (scalar sequence parsing) | ±1–3 % mixed | words −5…−8 %, others ≈ | reverted |
+| LZ4 decomp | LZ4-D5 | token / LSIC / offset through `readfirstlane` (scalar sequence parsing) | ±1–3 % mixed | words −5…−8 %, others ≈; re-tested on the vectorised build: −2.5…−6 % everywhere | reverted |
 
 ### C3 — memory-access width and cache policy
 
@@ -132,7 +132,7 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
   ×2.20 / ×1.12, zeros ×1.17 / ×1.37, words ×0.80 / ×0.75; compression unchanged; gfx1100
   configuration-identical (×0.995–1.005). Bounds neutral, modulo removal exact, D5 reverted; the
   decompression-side vectorised copies are the lever, and their cost on short-sequence data is the
-  84-VGPR / 5-wave build (occupancy-target and D5-on-top variants *pending* on gfx942).
+  84-VGPR / 5-wave build; occupancy targets (7/6 waves) leave the per-chunk work unchanged and only move the unstable saturation rows, D5-on-top is negative — bounds-only stays.
 * **ZFP** (`opt/zfp-host-2026-08` + vendored-zfp branch): the HIP path is bit-exact with canonical serial (T1, 308 cases, both nodes); the host path was API-bound — 64³ calls ×2–3.3 faster on both parts, 256³ fixed-rate ×3.6–4.6 on the MI300A APU, ×1.1–1.2 on the discrete RX 7900 XT. Kernel items (fork) not started.
 
 ## 3. Cross-cutting findings worth writing up
