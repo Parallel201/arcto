@@ -228,5 +228,25 @@ Measured: (pending)
 Result: (pending)
 Verdict: (pending)
 
+### CAS-H1 — deterministic compressed bytes: zero the never-written padding            Category: C8 (hygiene)   Status: COMMITTED
+Commit: (this commit)  (branch `opt/cascaded-2026-08`)
+Files: `src/CascadedKernels.hiph` (`block_bitpack`, `block_write`, `do_cascaded_compression_kernel`)
+Found by: `test_cascaded_coverage` ("every layer configuration…" — two compressions of the same
+input compared byte for byte) fails on the *baseline* for `char, rles 0, deltas 0, bp 1` on
+gfx1100 and gfx942. The two outputs decode correctly; they differ in bytes the kernel never
+writes: (1) the bit-pack header gap between the frame of reference (`sizeof(data_type)` B) and
+the 4-B-aligned bitwidth word (1-/2-byte types: 3/2 bytes), and between that word and the
+`data_type`-aligned data (8-byte types: 4 bytes); (2) the padding of the last word of an unpacked
+array whose byte size is not a multiple of 4 (`block_write` copied `roundUpTo(out_bytes, 4)`
+bytes straight from the LDS buffer); (3) the gap word between RLE offsets and the delta header in
+the 64-B chunk-metadata staging area for 8-byte types. All three came from LDS scratch (previous
+chunk / layer data), so the stream was format-correct but not reproducible — inherited from
+nvCOMP 2.2, and the reason no byte-identical gate could exist for Cascaded.
+Change: thread 0 zeroes the header gaps after `get_for_bitwidth`; `block_write` copies full
+words and writes the tail word masked; the chunk-metadata area is zeroed once per block.
+Cost: a few scalar stores per layer; compressed sizes unchanged; decompressors (ARCTO and nvCOMP)
+ignore the bytes. Effect: Cascaded output is now byte-deterministic, so the sweeps' gates and the
+coverage test can compare bytes across commits and architectures.
+Measured: (part of the sweep; expected ≈ 0)
 ### Resource evidence — gfx942 (MI300A), ROCm 7.0.1, baseline kernels (before CAS-S2/S1/C1)
 `-Rpass-analysis=kernel-resource-usage`, wave64, 128-thread blocks (inherited): `cascaded_compression_kernel<int,128,4096>` SGPR 106 / VGPR 71 / LDS 13456 B per block / 9 SGPR spills / est. 7 waves per SIMD; `cascaded_decompression_kernel<4B,128,4096>` SGPR 106 / VGPR 73 / LDS 13192 B / 12 SGPR spills / est. 6 waves per SIMD; `get_decompress_size_kernel` 22 / 10 / 0 LDS / 8. The SGPR spills (scalar state of the nested RLE/delta/bit-pack passes) and the 13 KB of LDS per 128-thread block (≤4 blocks per CU by LDS) are the two structural costs to attack (CAS-S2 launch bounds already committed; CAS-D5 LDS shrink queued).

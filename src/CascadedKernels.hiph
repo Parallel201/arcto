@@ -678,8 +678,27 @@ __device__ void block_bitpack(
 
   const data_type frame_of_reference = *for_ptr;
   const uint32_t bitwidth = (*current_ptr & 0xFFFF0000) >> 16;
+  uint32_t* const bitwidth_ptr = current_ptr;
   current_ptr = reinterpret_cast<uint32_t*>(
       roundUpToAlignment<data_type>(current_ptr + 1));
+
+  // CAS-H1: the header has alignment gaps for some types — between the
+  // frame of reference (sizeof(data_type) B) and the 4-B-aligned bitwidth
+  // word (1-/2-byte types), and between that word and the data_type-aligned
+  // data (8-byte types). They were never written, so the compressed stream
+  // carried whatever the LDS scratch held: correct to decode, but not
+  // reproducible. Zero them (same thread that wrote the header, after the
+  // barrier above).
+  if (threadIdx.x == 0) {
+    uint8_t* gap = reinterpret_cast<uint8_t*>(for_ptr + 1);
+    while (gap < reinterpret_cast<uint8_t*>(bitwidth_ptr)) {
+      *gap++ = 0;
+    }
+    gap = reinterpret_cast<uint8_t*>(bitwidth_ptr + 1);
+    while (gap < reinterpret_cast<uint8_t*>(current_ptr)) {
+      *gap++ = 0;
+    }
+  }
 
   const int num_output_elements = roundUpDiv(
       num_elements * bitwidth, sizeof(uint32_t) * num_bits_per_byte);
@@ -933,8 +952,17 @@ __device__ BlockIOStatus block_write(
     return BlockIOStatus::out_of_bound;
   }
 
-  block_copy_words<threadblock_size>(
-      output, source, static_cast<int>(padded_out_bytes / sizeof(uint32_t)));
+  // CAS-H1: when the array is not a multiple of 4 B (unpacked 1-/2-byte
+  // elements), the padding bytes of the last word used to come from the LDS
+  // buffer past the array — scratch, not data. Copy the full words, then the
+  // tail word with its padding zeroed (little-endian: valid bytes are low).
+  const int full_words = static_cast<int>(*out_bytes / sizeof(uint32_t));
+  const int tail_bytes = static_cast<int>(*out_bytes % sizeof(uint32_t));
+  block_copy_words<threadblock_size>(output, source, full_words);
+  if (tail_bytes != 0 && threadIdx.x == 0) {
+    const uint32_t mask = (1u << (8 * tail_bytes)) - 1u;
+    output[full_words] = source[full_words] & mask;
+  }
 
   return BlockIOStatus::success;
 }
@@ -1094,6 +1122,14 @@ __device__ void do_cascaded_compression_kernel(
   // Number of output elements for the RLE layer
   __shared__ size_type num_outputs;
   size_type out_bytes;
+
+  // CAS-H1: the chunk metadata staging area has an alignment gap word between
+  // the RLE offsets and the delta header for 8-byte types; zero the whole
+  // area once so every byte flushed to the stream is defined.
+  for (int i = threadIdx.x; i < max_chunk_metadata_size / 4; i += threadblock_size) {
+    chunk_metadata[i] = 0;
+  }
+  __syncthreads();
 
   for (int partition_idx = batch_start; partition_idx < batch_size;
        partition_idx += batch_stride) {
