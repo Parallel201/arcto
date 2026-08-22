@@ -53,6 +53,8 @@
 
 #include <assert.h>
 #include <stdint.h>
+#include <limits>
+#include <type_traits>
 
 #include "arcto_device_types.h"
 #include "arcto_hipcub.hiph"
@@ -420,41 +422,28 @@ __device__ void get_for_bitwidth(
   typedef hipcub::BlockReduce<signed_data_type, threadblock_size> BlockReduce;
   __shared__ typename BlockReduce::TempStorage temp_storage;
 
-  signed_data_type thread_data;
-  int num_valid = min(num_elements, static_cast<size_type>(threadblock_size));
-  if (threadIdx.x < num_elements) {
-    thread_data = input[threadIdx.x];
+  // Single pass: every thread folds its strided share of the elements into a
+  // register-resident min/max (unit-stride, conflict-free LDS reads, no
+  // barriers), then ONE block reduction for the minimum and ONE for the
+  // maximum. Threads without elements contribute the identity values, so the
+  // reductions run over the full block. Min and max are order-independent:
+  // the results are identical to the per-128-element round structure this
+  // replaces, which cost two block reductions + two barriers per round
+  // (64 collectives for a 4096-element u8 array).
+  signed_data_type local_min = std::numeric_limits<signed_data_type>::max();
+  signed_data_type local_max = std::numeric_limits<signed_data_type>::min();
+  for (size_type idx = threadIdx.x; idx < num_elements; idx += threadblock_size) {
+    const signed_data_type v = static_cast<signed_data_type>(input[idx]);
+    local_min = (v < local_min) ? v : local_min;
+    local_max = (v > local_max) ? v : local_max;
   }
 
-  signed_data_type minimum
-      = BlockReduce(temp_storage).Reduce(thread_data, hipcub::Min(), num_valid);
+  const signed_data_type minimum
+      = BlockReduce(temp_storage).Reduce(local_min, hipcub::Min());
   __syncthreads();
-  signed_data_type maximum
-      = BlockReduce(temp_storage).Reduce(thread_data, hipcub::Max(), num_valid);
+  const signed_data_type maximum
+      = BlockReduce(temp_storage).Reduce(local_max, hipcub::Max());
   __syncthreads();
-
-  const int num_rounds = roundUpDiv(num_elements, threadblock_size);
-
-  for (int round = 1; round < num_rounds; round++) {
-    num_valid = min(
-        num_elements - round * threadblock_size,
-        static_cast<size_type>(threadblock_size));
-    if (threadIdx.x < num_valid) {
-      thread_data = input[threadIdx.x + round * threadblock_size];
-    }
-
-    const signed_data_type local_min
-        = BlockReduce(temp_storage).Reduce(thread_data, hipcub::Min(), num_valid);
-    __syncthreads();
-    const signed_data_type local_max
-        = BlockReduce(temp_storage).Reduce(thread_data, hipcub::Max(), num_valid);
-    __syncthreads();
-
-    if (threadIdx.x == 0 && local_min < minimum)
-      minimum = local_min;
-    if (threadIdx.x == 0 && local_max > maximum)
-      maximum = local_max;
-  }
 
   // Next, we store the frame of reference, the bitwidth and the number of
   // elements into the desired location.

@@ -52,3 +52,17 @@ bytes identical on both.
 Measured: (pending) gfx942 = the target; gfx1100 as a no-change check.
 Result: (pending)
 Verdict: (pending)
+
+### CAS-C1 — single-pass min/max in `get_for_bitwidth` (2 collectives instead of 2 per 128 elements)   Category: C1   Status: PENDING (not yet measured)
+Commit: (this commit)  (branch `opt/cascaded-2026-08`)
+Files: `src/CascadedKernels.hiph`
+Change: each thread folds its strided share of the array into register-resident min/max (unit-stride
+LDS reads, no barriers), then one `BlockReduce(Min)` and one `BlockReduce(Max)` over the whole block
+(threads without elements contribute the identity values). Replaces two block reductions + two
+barriers per `threadblock_size` elements (u8: 64 collectives per array, ×3 arrays per chunk with
+the default {2 RLE, bp}). Min/max are order-independent: FOR and bitwidth bit-identical.
+Prediction: 20–40 % of compression time with `use_bp` on CDNA (barrier-bound at 1–3 waves/SIMD),
+less on gfx1100; bytes identical.
+Measured: (pending — next sweep: baseline, S2, S1, C1 on gfx942 and gfx1100)
+Result: (pending)
+Verdict: (pending)
