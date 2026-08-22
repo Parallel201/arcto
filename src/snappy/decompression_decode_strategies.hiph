@@ -135,18 +135,23 @@ namespace snappy {
       v1             = ballot1<GROUPMASK_T,WARPSIZE>(t,LZ77Symbol::match_3_bytes_long_symbol__no_copy_with_4_offset_bytes(b0));
       b0             = s->q.read_byte<GROUPSIZE,WARPSIZE>(t,cur_t + 2*GROUPSIZE);
       v2             = ballot1<GROUPMASK_T,WARPSIZE>(t,LZ77Symbol::match_3_bytes_long_symbol__no_copy_with_4_offset_bytes(b0));
-      //: identical: len3_mask      = get_len3_mask(v0, v1, v2);
-      len3_mask      = SHFL10((t == 0) ? get_len3_mask<GROUPMASK_T,WARPMASK_T>(v0,v1,v2) : GROUPMASK_ZERO);
+      // v0..v2 are ballot results, i.e. wave-uniform: every lane computes the
+      // same mask. Computing it on all lanes (instead of lane 0 followed by a
+      // broadcast shuffle) keeps the whole LUT chain on wave-uniform values --
+      // scalar ALU / scalar cache on AMD -- and removes one 64-bit shuffle per
+      // batch. Same values on every lane as before.
+      len3_mask      = get_len3_mask<GROUPMASK_T,WARPMASK_T>(v0,v1,v2);
       cur_t          = compute_symbol_position_via_len3_mask<GROUPMASK_T>(t, cur, len3_mask);
       b0             = s->q.read_byte<GROUPSIZE,WARPSIZE>(t,cur_t);
       is_long_sym    = match_long_literal_or_copy_with_4_offset_bytes(b0);
       short_sym_mask = ballot1<GROUPMASK_T,WARPSIZE>(t,is_long_sym);
       batch_len      = 0;
-      b = reinterpret_cast<volatile LZ77Symbol *>(SHFL10(reinterpret_cast<uintptr_t>(b)));
+      // b (the batch slot) is computed by every lane of the decoder wave from
+      // the wave-uniform batch index; no broadcast needed.
 
       if (!(short_sym_mask & 1)) {
-        //: identical: batch_len = short_sym_mask ? (find_first_set_bit(short_sym_mask) - 1): warpsize;
-        batch_len = SHFL10((t == 0) ? (short_sym_mask) ? find_first_set_bit(short_sym_mask) - 1 : warpsize : 0);
+        // short_sym_mask is a ballot result (wave-uniform): same value on all lanes.
+        batch_len = short_sym_mask ? find_first_set_bit(short_sym_mask) - 1 : warpsize;
         if (batch_len != 0) {
           uint32_t blen = 0;
           int32_t ofs   = 0;
@@ -281,8 +286,9 @@ namespace snappy {
         v0        = ballot1<GROUPMASK_T,WARPSIZE>(t,clen & 1);
         v1        = ballot1<GROUPMASK_T,WARPSIZE>(t,(clen >> 1) & 1);
 
-        //: identical len5_mask = get_len5_mask(v0, v1);
-        len5_mask   = SHFL10((t == 0) ? get_len5_mask<GROUPMASK_T,WARPMASK_T>(v0, v1) : 0);
+        // v0/v1 are ballot results (wave-uniform): every lane computes the same
+        // mask; no lane-0 computation + broadcast shuffle.
+        len5_mask   = get_len5_mask<GROUPMASK_T,WARPMASK_T>(v0, v1);
         cur_t       = compute_symbol_position_via_len5_mask<GROUPMASK_T>(t, cur, len5_mask);
         b0          = s->q.read_byte<GROUPSIZE,WARPSIZE>(t,cur_t);
 

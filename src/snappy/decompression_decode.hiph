@@ -214,12 +214,13 @@ public:
 
     for (;;) {
       int32_t batch_len = 0;
-      volatile LZ77Symbol *b;
+      // The batch index is tracked by every lane (see the end of the loop), so
+      // every lane knows the slot without a broadcast from lane 0.
+      volatile LZ77Symbol *b = &s->q.batch[batch * BATCH_SIZE];
 
       // Wait for prefetcher
       if (t == 0) {
         WAIT_FOR_PREFETCHER(s,cur,end);
-        b = &s->q.batch[batch * BATCH_SIZE];
       }
 
       // Process small symbols in parallel: for data that does not get good compression,
@@ -267,13 +268,17 @@ public:
         if (batch_len != 0) {
           SUBMIT_BATCH_TO_SYMBOL_PROCESSOR(s,batch,batch_len);
           UPDATE_PREFETCHER(s,batch,cur);
-          batch = (batch + 1) & (BATCH_COUNT - 1);
         }
       }
       //: post-condition: symbol handled by thread/lane `0` is the last decoded symbol
       //: post-condition: batch_len and bytes_left from thread/lane `0` is correct and out of sync with the other threads
       batch_len = SHFL10(batch_len);
       bytes_left = SHFL10(bytes_left);
+      // Advance the batch slot on every lane (batch_len is wave-uniform here),
+      // so the slot pointer at the top of the loop needs no broadcast.
+      if (batch_len != 0) {
+        batch = (batch + 1) & (BATCH_COUNT - 1);
+      }
       if (t == 0) {
         WAIT_FOR_SYMBOL_PROCESSOR(s,batch);
       }

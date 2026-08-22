@@ -40,3 +40,24 @@ inputs, `-p 65536`, `-x 512` and `-x 0`, 30 reps; sweep of the three tunables
 (0/0/0 = yield-only, 1/1/2 default, 2/2/4, 4/4/8).
 Result: (pending)
 Verdict: (pending)
+
+### SNP-D4 — compute wave-uniform decoder state on all lanes (no lane-0 + broadcast)   Category: C2   Status: PENDING
+Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
+Files: `src/snappy/decompression_decode_strategies.hiph`, `src/snappy/decompression_decode.hiph`
+Change: `len3_mask`, `batch_len` (2-to-3 strategy) and `len5_mask` (2-to-5 strategy) were
+computed by lane 0 only and broadcast with a 64-bit shuffle; their inputs are ballot results,
+i.e. identical on every lane, so every lane now computes them directly. The batch slot pointer
+`b` was set by lane 0 and broadcast as a pointer; the batch index is now advanced by every lane
+(after the existing `batch_len` broadcast, where it is uniform) and the slot pointer computed by
+every lane. Removes three `SHFL10` (64-bit/pointer `ds_bpermute` pairs) per batch and one per
+2-to-5 round. Same values on every lane as before; algorithm and bytes unchanged; CUDA unchanged.
+Why (mechanism): a `(t == 0) ? f(ballots) : 0` region forces the `get_len3_mask_64` chain
+(16 dependent `k_len3lut` lookups) into a divergent VALU region and the result through the LDS
+crossbar; with all lanes computing from SGPR-resident ballots the compiler can keep the chain on
+the scalar ALU / scalar cache and `batch_len`/`len3_mask` become SGPRs, which also enables
+`readlane` broadcasts with uniform indices (SNP-D3).
+Prediction: small per-batch gain (a few hundred cycles per batch), larger on short-symbol-heavy
+data (more batches); bytes identical; ISA shows `s_load_dword`/`s_lshr_b64` in the mask chain.
+Measured: (pending) same protocol as SNP-D1.
+Result: (pending)
+Verdict: (pending)
