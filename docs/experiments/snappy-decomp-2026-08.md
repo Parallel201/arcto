@@ -52,7 +52,7 @@ SIMD from productive waves there. Side observation: decompression of copy-heavy 
 symbol-rate bound, which is what SNP-D3/D4/D7 target. Kept pending the gfx942 (wave64,
 8 waves/SIMD) measurement and the tunable sweep before a final verdict.
 
-### SNP-D4 — compute wave-uniform decoder state on all lanes (no lane-0 + broadcast)   Category: C2   Status: PENDING
+### SNP-D4 — compute wave-uniform decoder state on all lanes (no lane-0 + broadcast)   Category: C2   Status: KEPT (enabler; gfx1100 neutral)
 Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
 Files: `src/snappy/decompression_decode_strategies.hiph`, `src/snappy/decompression_decode.hiph`
 Change: `len3_mask`, `batch_len` (2-to-3 strategy) and `len5_mask` (2-to-5 strategy) were
@@ -70,10 +70,10 @@ the scalar ALU / scalar cache and `batch_len`/`len3_mask` become SGPRs, which al
 Prediction: small per-batch gain (a few hundred cycles per batch), larger on short-symbol-heavy
 data (more batches); bytes identical; ISA shows `s_load_dword`/`s_lshr_b64` in the mask chain.
 Measured: (pending) same protocol as SNP-D1.
-Result: (pending)
-Verdict: (pending)
+Result: gfx1100 (RX 7900 XT, wave32, ROCm 7.0.1 container, 30 reps, median, `-p 65536`, sweep 2 — cumulative on the branch, each vs baseline 0263261): decompression binary x512 ×1.007, tti x512 ×0.997, words x32 ×1.005 (small batch ×1.000/×1.006/×0.999); compression ×1.000; bytes identical; tests green.
+Verdict: NEUTRAL alone on gfx1100, KEPT as the enabler of SNP-D3 (`batch_len`/masks become wave-uniform SGPR values the `readlane` sites depend on). gfx942 pending.
 
-### SNP-D3 — `readfirstlane` / `readlane` instead of shuffles for wave-uniform broadcasts   Category: C2   Status: PENDING
+### SNP-D3 — `readfirstlane` / `readlane` instead of shuffles for wave-uniform broadcasts   Category: C2   Status: KEPT (gfx1100 +3–5 %)
 Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
 Files: `src/device_functions.hiph`, `src/snappy/decompression_decode_strategies.hiph`,
 `src/snappy/decompression_process.hiph`
@@ -96,10 +96,10 @@ Prediction: 5–15 % decompression throughput on the decoder/processor-bound inp
 tiny symbols), less on literal-heavy input; ISA `ds_bpermute_b32` count in `unsnap_kernel` drops;
 bytes identical.
 Measured: (pending) same protocol as SNP-D1.
-Result: (pending)
-Verdict: (pending)
+Result: gfx1100 (RX 7900 XT, wave32, ROCm 7.0.1 container, 30 reps, median, `-p 65536`, sweep 2 — cumulative on the branch, each vs baseline 0263261): decompression binary x512 89.29 → 92.38 GB/s (×1.042 vs baseline ×1.035 vs previous commit), tti x512 89.43 → 92.62 (×1.033), words x32 25.42 → 26.58 (×1.051); small batch ×1.074 / ×1.051 / ×1.065; compression ×1.000; bytes identical; tests green.
+Verdict: KEPT on gfx1100: +3.3…+5.1 % at saturation, +5…+7 % at small batch, across all three inputs — the prediction (5–15 % on decoder-bound input) holds at its lower end. gfx942 pending.
 
-### SNP-D5 — 8-byte-aligned symbol queue, one 64-bit LDS access per symbol        Category: C4   Status: PENDING
+### SNP-D5 — 8-byte-aligned symbol queue, one 64-bit LDS access per symbol        Category: C4   Status: KEPT (gfx1100 +1–2 %)
 Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
 Files: `src/snappy/symbol.hiph`
 Change: `LZ77Symbol` (len, offset; 8 bytes) is `alignas(8)`, which moves the queue `batch[]` in
@@ -116,10 +116,10 @@ decode strategies, single-thread decoder) and `get()` (processor).
 Prediction: small (LDS is not the bottleneck) but free; fewer `ds_*` instructions in the ISA;
 `SQ_LDS_BANK_CONFLICT` down; bytes identical.
 Measured: (pending) same protocol as SNP-D1.
-Result: (pending)
-Verdict: (pending)
+Result: gfx1100 (RX 7900 XT, wave32, ROCm 7.0.1 container, 30 reps, median, `-p 65536`, sweep 2 — cumulative on the branch, each vs baseline 0263261): decompression binary x512 92.38 → 93.35 (×1.053 vs baseline, ×1.011 vs SNP-D3), tti x512 92.62 → 94.36 (×1.052, ×1.019), words x32 26.58 → 26.89 (×1.063, ×1.012); small batch ×1.084 / ×1.079 / ×1.072 vs baseline; compression ×1.000; bytes identical; tests green.
+Verdict: KEPT on gfx1100: a consistent +1.1…+1.9 % on top of SNP-D3 on all inputs, as predicted (small, free). gfx942 pending.
 
-### SNP-D7a — serial decoder: one dword-window read instead of up to five byte reads   Category: C4   Status: PENDING
+### SNP-D7a — serial decoder: one dword-window read instead of up to five byte reads   Category: C4   Status: PENDING (gfx1100 ≈ neutral)
 Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
 Files: `src/snappy/decompression_state.hiph`, `src/snappy/decompression_decode.hiph`
 Change: `unsnap_queue_s::read_window5(pos)` reads two aligned dwords of the prefetch ring (one
@@ -136,8 +136,8 @@ independent `ds_read_b32` issued back to back cut that to one LDS round trip per
 Prediction: medium on text-like / copy-heavy inputs (words: decode is symbol-rate bound,
 25 GB/s vs 89 GB/s for all-literal data), nil on literal-only inputs; bytes identical.
 Measured: (pending) same protocol as SNP-D1.
-Result: (pending)
-Verdict: (pending)
+Result: gfx1100 (RX 7900 XT, wave32, ROCm 7.0.1 container, 30 reps, median, `-p 65536`, sweep 2 — cumulative on the branch, each vs baseline 0263261): decompression binary x512 93.35 → 94.44 (×1.065 vs baseline, ×1.012 vs SNP-D5), tti x512 94.36 → 94.59 (×1.055, ×1.002), words x32 26.89 → 26.76 (×1.058, ×0.995); small batch ×1.088 / ×1.075 / ×1.073 vs baseline; compression ×1.000; bytes identical; tests green.
+Verdict: NEUTRAL on gfx1100 (+1.2 % binary, ±0 tti/words — within noise): the serial path is not where the words input spends its time, contrary to the prediction. Decision deferred to gfx942 and to SNP-D7b (same mechanism on the parallel strategies).
 
 ### SNP-D7b — per-lane symbol window in the two parallel decode strategies          Category: C4   Status: PENDING
 Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
