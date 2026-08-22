@@ -109,7 +109,7 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
 | Coverage tests `test_snappy_coverage`, `test_cascaded_coverage` (every layer configuration × type × size profile, misalignment, determinism), `test_zfp_payload_exact` (ZFP-T1: HIP payload and decoded field byte-exact vs canonical serial) | gates for the optimization loops | test/coverage + zfp branches |
 | `CONFIGURE_DEPENDS` on the test source glob | a new test file is picked up by an existing build dir | test/coverage branch |
 | hipCUB include path from the imported target; deprecated generic `arctoDecompress*` API removed; MIT test CMakeLists; HLIF chunk-size table estimate from its actual type | hygiene | chore branch |
-| ZFP host path: no HIP execution policy on throwaway streams (H1a); device warm-up once per process (H1b); `hipMallocAsync`/`hipFreeAsync` for the per-call staging buffers (H2a); fixed-rate decode bit count computed on host (D4) | *pending (zfp1 run)* | zfp branch + vendored zfp branch |
+| ZFP host path: no HIP execution policy on throwaway streams (H1a); device warm-up once per process (H1b); `hipMallocAsync`/`hipFreeAsync` for the per-call staging buffers (H2a); fixed-rate decode bit count computed on host (D4) | call latency: 64³ fixed-rate compress ×0.30 (gfx1100) / ×0.59 (gfx942), decompress ×0.48 / ×0.73; 256³ fixed-rate compress ×0.82 / **×0.22**, decompress ×0.91 / **×0.27** (APU: no PCIe copies, so the API calls were the whole cost); ZFP-T1 308/308 byte-exact on both nodes at every commit | kept |
 
 ## 2. Outcome per codec (vs `main`, bytes identical, tests green)
 
@@ -125,7 +125,7 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
 * **LZ4 decompression on wave64** (`opt/lz4-decomp-wave64-2026-08`): bounds neutral, modulo
   removal exact, the vectorised copies are the lever (×2.2 / +31–48 % on literal/long-match data)
   once gated away from short-sequence data — defaults *pending* the lz4b variants.
-* **ZFP** host path: *pending* (T1 gate first).
+* **ZFP** (`opt/zfp-host-2026-08` + vendored-zfp branch): the HIP path is bit-exact with canonical serial (T1, 308 cases, both nodes); the host path was API-bound — 64³ calls ×2–3.3 faster on both parts, 256³ fixed-rate ×3.6–4.6 on the MI300A APU, ×1.1–1.2 on the discrete RX 7900 XT. Kernel items (fork) not started.
 
 ## 3. Cross-cutting findings worth writing up
 
