@@ -55,7 +55,7 @@ struct snap_state_s {
   volatile uint32_t literal_length;   ///< Number of literal bytes
   volatile uint32_t copy_length;      ///< Number of copy bytes
   volatile uint32_t copy_distance;    ///< Distance for copy bytes
-  uint16_t hash_map[1 << HASH_BITS];  ///< Low 16-bit offset from hash
+  alignas(16) uint16_t hash_map[1 << HASH_BITS];  ///< Low 16-bit offset from hash (16-B aligned: cleared with uint4 stores)
 };
 
 } // namespace snappy
