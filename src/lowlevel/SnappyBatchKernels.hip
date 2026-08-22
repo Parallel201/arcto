@@ -81,16 +81,22 @@ snap_kernel(
       &device_out_bytes[ix_chunk]);
 }
 
-__global__ void __launch_bounds__(warpsize)
+// One thread per chunk (256 threads per block): the varint parse is a few
+// dependent byte loads, so a whole workgroup per chunk with one active lane
+// (the inherited geometry) only multiplied the dispatch count by 256 and left
+// 63 of 64 lanes idle.
+constexpr unsigned GET_SIZES_THREADS_PER_BLOCK = 256;
+
+__global__ void __launch_bounds__(GET_SIZES_THREADS_PER_BLOCK)
 get_uncompressed_sizes_kernel(
   const void* const* __restrict__ device_in_ptr,
   const uint64_t* __restrict__ device_in_bytes,
-  uint64_t* __restrict__ device_out_bytes)
+  uint64_t* __restrict__ device_out_bytes,
+  const unsigned count)
 {
-  int t             = threadIdx.x;
-  int strm_id       = blockIdx.x;
+  const unsigned strm_id = blockIdx.x * blockDim.x + threadIdx.x;
 
-  if (t == 0) {
+  if (strm_id < count) {
     uint32_t uncompressed_size = 0;
     const uint8_t *cur = reinterpret_cast<const uint8_t *>(device_in_ptr[strm_id]);
     const uint8_t *end = cur + device_in_bytes[strm_id];
@@ -204,11 +210,14 @@ void gpu_get_uncompressed_sizes(
   int count,
   hipStream_t stream)
 {
-  dim3 dim_block(warpsize, 1); // only a single thread is active in any case
-  dim3 dim_grid(count, 1);
+  const unsigned count32 = (count > 0) ? static_cast<unsigned>(count) : 0u;
+  dim3 dim_block(GET_SIZES_THREADS_PER_BLOCK, 1); // one chunk per thread
+  dim3 dim_grid((count32 + GET_SIZES_THREADS_PER_BLOCK - 1) / GET_SIZES_THREADS_PER_BLOCK, 1);
 
-  get_uncompressed_sizes_kernel<<<dim_grid, dim_block, 0, stream>>>(
-    device_in_ptr, device_in_bytes, device_out_bytes);
+  if (count32 > 0) {
+    get_uncompressed_sizes_kernel<<<dim_grid, dim_block, 0, stream>>>(
+      device_in_ptr, device_in_bytes, device_out_bytes, count32);
+  }
   HipUtils::check_last_error("Failed to run Snappy kernel gpu_get_uncompressed_sizes");
 }
 

@@ -40,6 +40,13 @@
 
 #include "arcto_device_types.h"
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+#include <rocprim/functional.hpp>
+#include <rocprim/warp/warp_scan.hpp>
+#include <rocprim/warp/warp_reduce.hpp>
+#include <type_traits>
+#endif
+
 namespace arcto {
 
 /**
@@ -128,11 +135,17 @@ template <typename T>
 __device__ inline T SHFL10(T v) {
   return __shfl_sync(~0, v, 0);
 }
-template <typename T> 
+template <typename T>
 __device__ inline T SHFL1(T v, uint32_t t) {
   return __shfl_sync(~0, v, t);
 }
-template <typename T> 
+// Same as SHFL1, for call sites whose lane index is wave-uniform (the AMD path
+// maps it to v_readlane; CUDA keeps the shuffle).
+template <typename T>
+__device__ inline T SHFL1_UNIFORM(T v, uint32_t t) {
+  return __shfl_sync(~0, v, t);
+}
+template <typename T>
 __device__ inline T SHFL1_XOR(T v, const warp_mask_t m) {
   return __shfl_xor_sync(~0, v, m);
 }
@@ -148,15 +161,75 @@ __device__ inline warp_mask_t BALLOT1(int predicate) {
 //#  define SYNCWARP()       __syncwarp()
 //#  define BALLOT1(v)       __ballot_sync(~0, (v))
 #else
-template <typename T> 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+// AMD: a broadcast of lane 0 (SHFL10) or of a wave-uniform lane index
+// (SHFL1_UNIFORM) does not need the LDS crossbar. __shfl lowers to
+// ds_bpermute_b32 (an LDS-path instruction with lgkmcnt latency, two of them
+// for 64-bit values); v_readfirstlane_b32 / v_readlane_b32 read the register
+// of one lane straight into an SGPR in a few cycles, and the result being an
+// SGPR also relieves VGPR pressure. readfirstlane returns the value of the
+// lowest ACTIVE lane, so SHFL10 keeps its meaning wherever lane 0 is active --
+// every call site in the Snappy kernels is reached by all lanes of the wave.
+// SHFL1_UNIFORM must only be used where the lane index is wave-uniform
+// (loop counters, values derived from ballots or from SHFL10); a per-lane
+// index must keep using SHFL1 (ds_bpermute).
+namespace arcto_detail {
+template <typename T>
+__device__ inline T readfirstlane_any(T v) {
+  if constexpr (sizeof(T) == 4) {
+    uint32_t u; __builtin_memcpy(&u, &v, 4);
+    u = static_cast<uint32_t>(__builtin_amdgcn_readfirstlane(static_cast<int>(u)));
+    T r; __builtin_memcpy(&r, &u, 4); return r;
+  } else if constexpr (sizeof(T) == 8) {
+    uint64_t u; __builtin_memcpy(&u, &v, 8);
+    const uint32_t lo = static_cast<uint32_t>(__builtin_amdgcn_readfirstlane(static_cast<int>(u & 0xffffffffu)));
+    const uint32_t hi = static_cast<uint32_t>(__builtin_amdgcn_readfirstlane(static_cast<int>(u >> 32)));
+    u = (static_cast<uint64_t>(hi) << 32) | lo;
+    T r; __builtin_memcpy(&r, &u, 8); return r;
+  } else {
+    return __shfl(v, 0);
+  }
+}
+template <typename T>
+__device__ inline T readlane_any(T v, uint32_t lane) {
+  if constexpr (sizeof(T) == 4) {
+    uint32_t u; __builtin_memcpy(&u, &v, 4);
+    u = static_cast<uint32_t>(__builtin_amdgcn_readlane(static_cast<int>(u), static_cast<int>(lane)));
+    T r; __builtin_memcpy(&r, &u, 4); return r;
+  } else if constexpr (sizeof(T) == 8) {
+    uint64_t u; __builtin_memcpy(&u, &v, 8);
+    const uint32_t lo = static_cast<uint32_t>(__builtin_amdgcn_readlane(static_cast<int>(u & 0xffffffffu), static_cast<int>(lane)));
+    const uint32_t hi = static_cast<uint32_t>(__builtin_amdgcn_readlane(static_cast<int>(u >> 32), static_cast<int>(lane)));
+    u = (static_cast<uint64_t>(hi) << 32) | lo;
+    T r; __builtin_memcpy(&r, &u, 8); return r;
+  } else {
+    return __shfl(v, lane);
+  }
+}
+} // namespace arcto_detail
+template <typename T>
+__device__ inline T SHFL10(T v) {
+  return arcto_detail::readfirstlane_any(v);
+}
+template <typename T>
+__device__ inline T SHFL1_UNIFORM(T v, uint32_t t) {
+  return arcto_detail::readlane_any(v, t);
+}
+#else
+template <typename T>
 __device__ inline T SHFL10(T v) {
   return __shfl(v, 0);
 }
-template <typename T> 
+template <typename T>
+__device__ inline T SHFL1_UNIFORM(T v, uint32_t t) {
+  return __shfl(v, t);
+}
+#endif
+template <typename T>
 __device__ inline T SHFL1(T v, uint32_t t) {
   return __shfl(v, t);
 }
-template <typename T> 
+template <typename T>
 __device__ inline T SHFL1_XOR(T v, const warp_mask_t m) {
   return __shfl_xor(v, m);
 }
@@ -173,11 +246,23 @@ __device__ inline warp_mask_t BALLOT1(int predicate) {
 //#  define BALLOT1(v)       __ballot((v))
 #endif
 
+// Back-off used inside spin-wait loops (the Snappy decoder's three waves poll
+// each other through volatile LDS). The argument is a compile-time constant
+// from snappy/config.h and its unit depends on the platform:
+//  - CUDA sm_70+: nanoseconds, __nanosleep.
+//  - AMD: s_sleep units. There is no __nanosleep; s_sleep N parks the wave for
+//    roughly 64*N clocks (N is an immediate, 0..127) and gives the SIMD's issue
+//    slots to the other resident waves. Without it a polling wave competes for
+//    issue and LDS bandwidth with the productive waves of every other chunk
+//    resident on the same SIMD (the previous AMD fallback was clock(), i.e. a
+//    tight poll).
+//  - other CUDA targets: no-op (as upstream).
 #if (__CUDA_ARCH__ >= 700)
-#  define NANOSLEEP(d)  __nanosleep((d))
+#  define SPIN_SLEEP(d)  __nanosleep((d))
+#elif defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+#  define SPIN_SLEEP(d)  __builtin_amdgcn_s_sleep((d))
 #else
-//: includes the __HIP_PLATFORM_AMD__ case
-#  define NANOSLEEP(d)  clock()
+#  define SPIN_SLEEP(d)  clock()
 #endif
 
 /**
@@ -204,8 +289,8 @@ __device__ inline uint64_t ballot1<uint64_t,64u>(uint32_t t,int predicate,int pr
 
 template <>
 __device__ inline uint32_t ballot1<uint32_t,64u>(uint32_t t,int predicate,int predicate_excluded) {
-  uint64_t mask_64 = BALLOT1(predicate);
-  return *reinterpret_cast<uint32_t*>(&mask_64);
+  // low 32 lanes of the wave64 ballot (well-defined truncation, no pointer punning)
+  return static_cast<uint32_t>(BALLOT1(predicate));
 }
 #else
 template <>
@@ -214,6 +299,47 @@ __device__ inline uint32_t ballot1<uint32_t,32u>(uint32_t t,int predicate,int pr
 }
 #endif
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+// AMD: wave-level inclusive prefix sum and all-lanes sum through rocPRIM's
+// warp primitives. For a logical warp that is a power of two up to the
+// hardware wave size rocPRIM selects its cross-lane implementation (DPP row
+// operations / swizzles, executed at VALU rate with no LDS traffic) instead
+// of the shuffle trees below, whose every step is a ds_bpermute through the
+// LDS crossbar (6 dependent steps for 64 lanes, 12 for a 64-bit value). The
+// results are identical: an inclusive prefix sum (lane t gets the sum of
+// lanes 0..t) and the total broadcast to every lane (UseAllReduce = true).
+// The storage type of the cross-lane implementations is empty; the
+// static_assert guarantees we never silently fall back to the shared-memory
+// implementation, which would need a per-wave __shared__ buffer.
+template <unsigned GROUPSIZE,unsigned WARPSIZE>
+class WarpReduce {
+public:
+  template <typename T>
+  static __device__ inline T prefix_sum(uint32_t t, T thread_value) {
+    (void)t;
+    using scan_t = rocprim::warp_scan<T, GROUPSIZE>;
+    static_assert(std::is_empty<typename scan_t::storage_type>::value,
+                  "rocprim::warp_scan selected a shared-memory implementation; "
+                  "WarpReduce::prefix_sum would need per-wave LDS storage");
+    typename scan_t::storage_type storage;
+    T out;
+    scan_t().inclusive_scan(thread_value, out, storage, ::rocprim::plus<T>());
+    return out;
+  }
+  template <typename T>
+  static __device__ inline T sum(uint32_t t, T thread_value) {
+    (void)t;
+    using reduce_t = rocprim::warp_reduce<T, GROUPSIZE, /*UseAllReduce=*/true>;
+    static_assert(std::is_empty<typename reduce_t::storage_type>::value,
+                  "rocprim::warp_reduce selected a shared-memory implementation; "
+                  "WarpReduce::sum would need per-wave LDS storage");
+    typename reduce_t::storage_type storage;
+    T out;
+    reduce_t().reduce(thread_value, out, storage, ::rocprim::plus<T>());
+    return out;
+  }
+};
+#else
 template <unsigned GROUPSIZE,unsigned WARPSIZE>
 class WarpReduce {
 public:
@@ -222,9 +348,13 @@ public:
   template <typename T>
   static __device__ inline T sum(uint32_t t, T thread_value);
 };
+#endif
 
-// Warp reduction helpers
-#if defined(USE_WARPSIZE_64)
+// Warp reduction helpers (shuffle trees; the CUDA backend, and the reference
+// implementation the rocPRIM path above must match)
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+// (specialisations below are not used on AMD; the primary template is complete)
+#elif defined(USE_WARPSIZE_64)
 template <typename T> inline __device__ T WarpReduceSum2(T acc)     { return acc + SHFL1_XOR(acc, 1); }
 template <typename T> inline __device__ T WarpReduceSum4(T acc)     { acc = WarpReduceSum2(acc); return acc + SHFL1_XOR(acc, 2); }
 template <typename T> inline __device__ T WarpReduceSum8(T acc)     { acc = WarpReduceSum4(acc); return acc + SHFL1_XOR(acc, 4); }

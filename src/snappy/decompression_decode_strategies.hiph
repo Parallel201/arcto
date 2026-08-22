@@ -135,25 +135,36 @@ namespace snappy {
       v1             = ballot1<GROUPMASK_T,WARPSIZE>(t,LZ77Symbol::match_3_bytes_long_symbol__no_copy_with_4_offset_bytes(b0));
       b0             = s->q.read_byte<GROUPSIZE,WARPSIZE>(t,cur_t + 2*GROUPSIZE);
       v2             = ballot1<GROUPMASK_T,WARPSIZE>(t,LZ77Symbol::match_3_bytes_long_symbol__no_copy_with_4_offset_bytes(b0));
-      //: identical: len3_mask      = get_len3_mask(v0, v1, v2);
-      len3_mask      = SHFL10((t == 0) ? get_len3_mask<GROUPMASK_T,WARPMASK_T>(v0,v1,v2) : GROUPMASK_ZERO);
+      // v0..v2 are ballot results, i.e. wave-uniform: every lane computes the
+      // same mask. Computing it on all lanes (instead of lane 0 followed by a
+      // broadcast shuffle) keeps the whole LUT chain on wave-uniform values --
+      // scalar ALU / scalar cache on AMD -- and removes one 64-bit shuffle per
+      // batch. Same values on every lane as before.
+      len3_mask      = get_len3_mask<GROUPMASK_T,WARPMASK_T>(v0,v1,v2);
       cur_t          = compute_symbol_position_via_len3_mask<GROUPMASK_T>(t, cur, len3_mask);
-      b0             = s->q.read_byte<GROUPSIZE,WARPSIZE>(t,cur_t);
+      // Fetch the lane's whole symbol (tag + offset bytes) in one LDS round
+      // trip; the offset bytes are decoded from this window below instead of
+      // being re-read from the ring after the prefix-sum chain.
+      const uint64_t w_t = s->q.read_window5<GROUPSIZE,WARPSIZE>(t,cur_t);
+      b0             = static_cast<uint32_t>(w_t & 0xffu);
       is_long_sym    = match_long_literal_or_copy_with_4_offset_bytes(b0);
       short_sym_mask = ballot1<GROUPMASK_T,WARPSIZE>(t,is_long_sym);
       batch_len      = 0;
-      b = reinterpret_cast<volatile LZ77Symbol *>(SHFL10(reinterpret_cast<uintptr_t>(b)));
+      // b (the batch slot) is computed by every lane of the decoder wave from
+      // the wave-uniform batch index; no broadcast needed.
 
       if (!(short_sym_mask & 1)) {
-        //: identical: batch_len = short_sym_mask ? (find_first_set_bit(short_sym_mask) - 1): warpsize;
-        batch_len = SHFL10((t == 0) ? (short_sym_mask) ? find_first_set_bit(short_sym_mask) - 1 : warpsize : 0);
+        // short_sym_mask is a ballot result (wave-uniform): same value on all lanes.
+        // No long symbol among the group's lanes -> the whole group decoded one
+        // symbol each (GROUPSIZE == warpsize in the default configuration).
+        batch_len = short_sym_mask ? find_first_set_bit(short_sym_mask) - 1 : static_cast<int32_t>(GROUPSIZE);
         if (batch_len != 0) {
           uint32_t blen = 0;
           int32_t ofs   = 0;
           if (t < batch_len) {
             //: batch_len < GROUP_SIZE
             blen = LZ77Symbol::decode_short_symbol_len__no_copy_with_4_offset_bytes(b0);
-            ofs  = s->q.decode_short_symbol_offset__no_copy_with_4_offset_bytes(b0,cur_t);
+            ofs  = unsnap_queue_s::decode_short_symbol_offset_from_window__no_copy_with_4_offset_bytes(w_t,cur_t);
             b[t].set(blen,ofs,cur_t," (2-to-3)");
             ofs += blen;  // for correct out-of-range detection below
           }
@@ -168,8 +179,9 @@ namespace snappy {
           }
 
           if (batch_len != 0) {
-            blen = SHFL1(blen, batch_len - 1);
-            cur  = SHFL1(cur_t, batch_len - 1) + 2 + ((len3_mask >> (batch_len - 1)) & 1);
+            // batch_len is wave-uniform (derived from ballots): lane reads, not shuffles
+            blen = SHFL1_UNIFORM(blen, batch_len - 1);
+            cur  = SHFL1_UNIFORM(cur_t, batch_len - 1) + 2 + ((len3_mask >> (batch_len - 1)) & 1);
             //: opt?: Should be the same as cur <- SHFL1(cur_t,batch_len) if batch_len < GROUP_SIZE ??
             if (t == 0) {
               #ifdef ARCTO_PRINT_DEBUG_INFO
@@ -181,7 +193,7 @@ namespace snappy {
           }
         }
       }
-      return SHFL1(b0, batch_len);
+      return SHFL1_UNIFORM(b0, batch_len); // batch_len is wave-uniform
     }
   };
 
@@ -281,10 +293,13 @@ namespace snappy {
         v0        = ballot1<GROUPMASK_T,WARPSIZE>(t,clen & 1);
         v1        = ballot1<GROUPMASK_T,WARPSIZE>(t,(clen >> 1) & 1);
 
-        //: identical len5_mask = get_len5_mask(v0, v1);
-        len5_mask   = SHFL10((t == 0) ? get_len5_mask<GROUPMASK_T,WARPMASK_T>(v0, v1) : 0);
+        // v0/v1 are ballot results (wave-uniform): every lane computes the same
+        // mask; no lane-0 computation + broadcast shuffle.
+        len5_mask   = get_len5_mask<GROUPMASK_T,WARPMASK_T>(v0, v1);
         cur_t       = compute_symbol_position_via_len5_mask<GROUPMASK_T>(t, cur, len5_mask);
-        b0          = s->q.read_byte<GROUPSIZE,WARPSIZE>(t,cur_t);
+        // whole symbol (tag + offset bytes) in one LDS round trip, see 2-to-3
+        const uint64_t w_t = s->q.read_window5<GROUPSIZE,WARPSIZE>(t,cur_t);
+        b0          = static_cast<uint32_t>(w_t & 0xffu);
 
         //first_excluded_symbol = ((b0 & 3) ? ((b0 & 3) == 3) : (b0 > 3 * 4)) || (cur_t >= cur + GROUPSIZE) ||
         //                (batch_len + t >= BATCH_SIZE);
@@ -299,7 +314,7 @@ namespace snappy {
           int32_t ofs   = 0;
           if (t < batch_add) { //: differs
             blen = LZ77Symbol::decode_short_symbol_len__no_copy_with_4_offset_bytes(b0);
-            ofs  = s->q.decode_short_symbol_offset__no_copy_with_4_offset_bytes(b0,cur_t);
+            ofs  = unsnap_queue_s::decode_short_symbol_offset_from_window__no_copy_with_4_offset_bytes(w_t,cur_t);
             b[batch_len + t].set(blen,ofs,cur_t," (2-to-5)");
             ofs += blen;  // for correct out-of-range detection below
           }
@@ -310,8 +325,9 @@ namespace snappy {
           short_sym_mask = find_first_set_bit(ballot1<GROUPMASK_T,WARPSIZE>(t,blen > bytes_left || ofs > (int32_t)(dst_pos + blen)));
           if (short_sym_mask != 0) { batch_add = min(batch_add, short_sym_mask - 1); } //: differs
           if (batch_add != 0) { //: differs
-            blen = SHFL1(blen, batch_add - 1); //: differs
-            cur  = SHFL1(cur_t, batch_add - 1) + 2 + ((len5_mask >> ((batch_add - 1) * 2)) & 3); //: differs
+            // batch_add is wave-uniform (derived from a ballot): lane reads, not shuffles
+            blen = SHFL1_UNIFORM(blen, batch_add - 1); //: differs
+            cur  = SHFL1_UNIFORM(cur_t, batch_add - 1) + 2 + ((len5_mask >> ((batch_add - 1) * 2)) & 3); //: differs
             if (t == 0) {
               dst_pos += blen;
               bytes_left -= blen;

@@ -72,7 +72,15 @@
 namespace arcto {
 namespace snappy {
 
-struct LZ77Symbol {
+// The symbol queue lives in LDS and is written by the decoder wave (one symbol
+// per lane) and read by the processor wave (one symbol per lane). Aligning the
+// 8-byte symbol to 8 bytes and moving it with one 64-bit access per lane gives
+// a single ds_write_b64 / ds_read_b64 per lane at an 8-byte lane stride --
+// conflict-free and half the LDS instructions of two 32-bit volatile accesses
+// at the same stride (which hit the same bank pair twice). The in-memory
+// layout (len at +0, offset at +4) and the values are unchanged; the debug
+// layout (ARCTO_PRINT_DEBUG_INFO, three fields) keeps the field-wise path.
+struct alignas(8) LZ77Symbol {
   int32_t len;     //> 1..64 = Number of bytes
   int32_t offset;  //> copy distance if greater than zero, or negative of literal offset in byte stream
   #ifdef ARCTO_PRINT_DEBUG_INFO
@@ -86,11 +94,16 @@ public:
    * \note Argument `cur` is only used if ARCTO_PRINT_DEBUG_INFO is defined.
    */
   __device__ inline void set(int32_t len,int32_t offset,uint32_t cur,const char* context = "") volatile {
+    #ifdef ARCTO_PRINT_DEBUG_INFO
     this->len = len;
     this->offset = offset;
-    #ifdef ARCTO_PRINT_DEBUG_INFO
     this->cur = cur;
     printf("%10u\t%4u\tdecode\t%u\t<%d,%d>%s\n",(unsigned)blockIdx.x,(unsigned)threadIdx.x,this->cur,this->len,this->offset,context);
+    #else
+    (void)cur; (void)context;
+    // one 64-bit store: len in the low dword (+0), offset in the high dword (+4)
+    *reinterpret_cast<volatile uint64_t*>(this) =
+        (static_cast<uint64_t>(static_cast<uint32_t>(offset)) << 32) | static_cast<uint32_t>(len);
     #endif
   }
 
@@ -99,10 +112,15 @@ public:
    * \note Can be used for debugging purposes.
    */
   __device__ inline void get(int32_t& len,int32_t& offset) volatile {
+    #ifdef ARCTO_PRINT_DEBUG_INFO
     len = this->len;
     offset = this->offset;
-    #ifdef ARCTO_PRINT_DEBUG_INFO
     printf("%10u\t%4u\tprocess\t%u\t<%d,%d>\n",(unsigned)blockIdx.x,(unsigned)threadIdx.x,this->cur,this->len,this->offset);
+    #else
+    // one 64-bit load, same layout as set()
+    const uint64_t v = *reinterpret_cast<const volatile uint64_t*>(this);
+    len = static_cast<int32_t>(static_cast<uint32_t>(v & 0xffffffffu));
+    offset = static_cast<int32_t>(static_cast<uint32_t>(v >> 32));
     #endif
   }
 

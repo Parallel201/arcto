@@ -324,12 +324,19 @@ do_snap(
     s->copy_length    = 0;
     s->copy_distance  = 0;
   }
-  //: NOTE: We interpreted the code below as initializing the hashmap entries to zero by means of uint32_t operations.
-  //: NOTE: The original CUDA implementation incremented with `i += 4*GROUPSIZE=128`, which
-  //: might leave some hashmap entries unitialized, e.g. those with index `i*2` in [128,255].
+  // Clear the whole hash map (8 KB) with 16-byte LDS stores: sizeof/16 uint4
+  // words spread over the group's lanes, i.e. 8 stores per lane on wave64.
+  // The previous loop strode by 2*GROUPSIZE dwords over sizeof/4 dwords, which
+  // covers the table for a 32-lane group but only HALF of it for a 64-lane
+  // group: on wave64 the compressor started with stale LDS entries from the
+  // previous block on that CU (validated against the data before use, so the
+  // stream stayed valid, but match choice -- and thus the bytes -- depended on
+  // LDS history). Every entry is now zero on entry, on every wave size.
   if ( GROUPSIZE == WARPSIZE || t < GROUPSIZE ) {
-    for (uint32_t i = t; i < sizeof(s->hash_map) / (2*sizeof(uint16_t)); i += 2*GROUPSIZE) {
-      *reinterpret_cast<volatile uint32_t *>(&s->hash_map[i * 2]) = 0;
+    static_assert(sizeof(s->hash_map) % 16 == 0, "hash map must be a whole number of uint4");
+    uint4* const hm4 = reinterpret_cast<uint4*>(s->hash_map);
+    for (uint32_t i = t; i < sizeof(s->hash_map) / 16; i += GROUPSIZE) {
+      hm4[i] = make_uint4(0, 0, 0, 0);
     }
   }
   __syncthreads();
