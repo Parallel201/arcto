@@ -67,5 +67,26 @@ Measured: (pending — next sweep: baseline, S2, S1, C1 on gfx942 and gfx1100)
 Result: (pending)
 Verdict: (pending)
 
+### CAS-S4 — `BLOCK_SCAN_WARP_SCANS` for the three Cascaded block scans                 Category: C2   Status: PENDING
+Commit: (this commit)  (branch `opt/cascaded-2026-08`)
+Files: `src/CascadedKernels.hiph`
+Change: the `hipcub::BlockScan` typedefs in `block_rle_compress` (run-count exclusive sum),
+`block_rle_decompress` (run-offset exclusive sum per round) and `block_delta_decompress`
+(prefix sum per round) take `ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM`, which defaults to
+`hipcub::BLOCK_SCAN_WARP_SCANS` on AMD (rocPRIM `using_warp_scan`) and to hipCUB/CUB's default
+`BLOCK_SCAN_RAKING` elsewhere. Overridable per build.
+Why (mechanism): rocPRIM's `using_warp_scan` does one in-register DPP/`ds_swizzle` scan per
+wave and exchanges only the per-wave prefixes through LDS (one `ds_write` + one `ds_read` per
+wave, one barrier); `reduce_then_scan` (hipCUB's mapping of RAKING) reduces per wave, scans the
+wave totals in one wave, then scans again — two LDS round trips and an extra barrier per block
+scan. Every RLE round (`threadblock_size` runs) and every delta round (`threadblock_size`
+elements) pays one block scan, so a 4096-element chunk pays 16 (128-thread) / 8 (256-thread)
+scans per delta layer. Output bytes identical (same sums, integer arithmetic).
+Prediction: +2–6 % decompression on delta/RLE-heavy inputs (ints_mixed), ≈ 0 on zeros (one
+run per chunk) and TTI; compression ±1 % (one scan per RLE layer); bytes identical.
+Measured: (pending) `benchmark_cascaded_chunked`, exact-bytes ladder, `test_cascaded_coverage`.
+Result: (pending)
+Verdict: (pending)
+
 ### Resource evidence — gfx942 (MI300A), ROCm 7.0.1, baseline kernels (before CAS-S2/S1/C1)
 `-Rpass-analysis=kernel-resource-usage`, wave64, 128-thread blocks (inherited): `cascaded_compression_kernel<int,128,4096>` SGPR 106 / VGPR 71 / LDS 13456 B per block / 9 SGPR spills / est. 7 waves per SIMD; `cascaded_decompression_kernel<4B,128,4096>` SGPR 106 / VGPR 73 / LDS 13192 B / 12 SGPR spills / est. 6 waves per SIMD; `get_decompress_size_kernel` 22 / 10 / 0 LDS / 8. The SGPR spills (scalar state of the nested RLE/delta/bit-pack passes) and the 13 KB of LDS per 128-thread block (≤4 blocks per CU by LDS) are the two structural costs to attack (CAS-S2 launch bounds already committed; CAS-D5 LDS shrink queued).

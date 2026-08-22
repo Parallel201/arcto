@@ -105,6 +105,19 @@ constexpr size_t num_bits_per_byte = 8;
 constexpr int cascaded_compress_threadblock_size = (arcto::warpsize >= 64) ? 256 : 128;
 constexpr int cascaded_decompress_threadblock_size = (arcto::warpsize >= 64) ? 256 : 128;
 
+// CAS-S4: block-scan algorithm for the RLE and delta scans. hipCUB's default
+// (BLOCK_SCAN_RAKING) maps to rocPRIM's reduce_then_scan; BLOCK_SCAN_WARP_SCANS
+// maps to using_warp_scan: one DPP/ds_swizzle scan per wave plus a single LDS
+// exchange of the wave prefixes, i.e. fewer LDS round trips per block scan on
+// wave64 blocks. Overridable per build; CUDA keeps CUB's default.
+#ifndef ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM
+#  if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+#    define ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM hipcub::BLOCK_SCAN_WARP_SCANS
+#  else
+#    define ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM hipcub::BLOCK_SCAN_RAKING
+#  endif
+#endif
+
 /**
  * Helper function to calculate the size in byte of the chunk metadata. The size
  * is guaranteed to be a multiple of the data type size, and a multiple of 4.
@@ -165,7 +178,7 @@ __device__ void block_rle_compress(
   // Note: `tmp_buffer` is used because we cannot calculate adjacent differences
   // in place.
 
-  typedef hipcub::BlockScan<size_type, threadblock_size> BlockScan;
+  typedef hipcub::BlockScan<size_type, threadblock_size, ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM> BlockScan;
   __shared__ typename BlockScan::TempStorage temp_storage;
 
   const size_type num_inputs_per_thread
@@ -281,7 +294,7 @@ __device__ void block_rle_decompress(
   // first use prefix sum to calculate the output offsets, and then each thread
   // stores the value of the run into the output locations.
 
-  typedef hipcub::BlockScan<run_type, threadblock_size> BlockScan;
+  typedef hipcub::BlockScan<run_type, threadblock_size, ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM> BlockScan;
   __shared__ typename BlockScan::TempStorage temp_storage;
 
   *output_num_elements = 0;
@@ -358,7 +371,7 @@ __device__ void block_delta_decompress(
     size_type input_num_elements,
     data_type* output_buffer)
 {
-  typedef hipcub::BlockScan<data_type, threadblock_size> BlockScan;
+  typedef hipcub::BlockScan<data_type, threadblock_size, ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM> BlockScan;
   __shared__ typename BlockScan::TempStorage temp_storage;
 
   const int num_rounds = roundUpDiv(input_num_elements, threadblock_size);
