@@ -1606,7 +1606,7 @@ args_type parse_args(int argc, char ** argv) {
     {"t", "tab_separator", "Use tabs instead of commas when "
         "'--csv_output' is specificed.",
         bool_to_string(args.use_tabs)},
-    {"w", "file_with_page_sizes", "File(s) contain pages, each prefix "
+    {"F", "file_with_page_sizes", "File(s) contain pages, each prefix "
         "with int64 size.", bool_to_string(args.has_page_sizes)},
     {"p", "chunk_size", "Chunk size when splitting uncompressed data.",
         std::to_string(args.chunk_size)},
