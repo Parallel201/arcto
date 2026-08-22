@@ -23,7 +23,7 @@ leave the bits unchanged, and the test also pins the partial-block, all-zero-blo
 Measured: gfx942 (MI300A, ROCm 7.0.1): **308 cases byte-exact vs canonical serial** on the
 baseline (LLNL cccbb9d HIP backend) and on every commit of this branch — the HIP encoder/decoder
 are bit-exact with the serial backend for every type/shape/mode combination tested, including
-rate 12.5 (word sharing), partial blocks and all-zero blocks. gfx1100: (zfp1 run queued).
+rate 12.5 (word sharing), partial blocks and all-zero blocks. gfx1100 (RX 7900 XT): 308/308 on every commit as well.
 
 ### ZFP-H1a — no HIP execution policy on throwaway streams (ARCTO side)                 Category: C8   Status: COMMITTED (measure with the batch)
 Commit: (this commit)  (branch `opt/zfp-host-2026-08`)
@@ -74,5 +74,12 @@ compress ×0.66, decompress ×0.75. The per-call hipMalloc/hipFree of the stagin
 at 256³: `hipFree` synchronises and returns memory to the OS) and the device counter round trip
 were most of the wall time of a call on the MI300A (unified memory makes the H2D/D2H copies cheap,
 so the API overhead dominated even more than predicted).
-Result: LARGE — the ZFP host path was API-bound; bytes identical (ZFP-T1 308/308).
-Verdict: KEPT (all three); gfx1100 pending (zfp1 run queued).
+gfx1100 (RX 7900 XT, discrete, PCIe): 64³ fixed_rate compress 0.596 → 0.181 ms (×0.30), decompress
+0.405 → 0.196 ms (×0.48); 64³ fixed_precision compress ×0.51, decompress ×0.49; 256³ fixed_rate
+compress 3.58 → 2.93 ms (×0.82), decompress ×0.91; 256³ fixed_precision compress ×0.91, decompress
+1.96 → 2.36 ms (×1.20 — inside this benchmark's ±20 % band: the T1 commit, identical code, reads
+×1.04–1.10 on the same node; to be re-read with more runs before any claim). The discrete part keeps
+the PCIe copies of the host-resident stream, so the large-field gains are smaller than on the APU.
+Result: LARGE on small/medium fields on both parts (the per-call API work dominated), large at 256³
+on the APU; bytes identical (ZFP-T1 308/308 on both nodes).
+Verdict: KEPT (all three).
