@@ -47,6 +47,17 @@
 
 #define READ_BYTE(pos) s->q.buf[(pos) & (PREFETCH_SIZE - 1)]
 
+// SNP-D8 knobs (AMD only): 4-bytes-per-lane output paths for literals and for
+// non-overlapping copies. Both default on; each can be disabled per build
+// (-DARCTO_SNAPPY_DWORD_LITERALS=0 / -DARCTO_SNAPPY_DWORD_COPIES=0) so the two
+// mechanisms can be measured and gated per architecture independently.
+#ifndef ARCTO_SNAPPY_DWORD_LITERALS
+#  define ARCTO_SNAPPY_DWORD_LITERALS 1
+#endif
+#ifndef ARCTO_SNAPPY_DWORD_COPIES
+#  define ARCTO_SNAPPY_DWORD_COPIES 1
+#endif
+
 namespace arcto
 {
   namespace snappy
@@ -182,7 +193,7 @@ namespace arcto
             if (dist > 0)
             {
               // Copy
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+#if (defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)) && ARCTO_SNAPPY_DWORD_COPIES
               if ((uint32_t)dist >= (uint32_t)blen)
               {
                 // No overlap between source [out-dist, out-dist+blen) and the
@@ -230,7 +241,7 @@ namespace arcto
             {
               // Literal
               dist = -dist;
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+#if (defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)) && ARCTO_SNAPPY_DWORD_LITERALS
               // AMD: 4 bytes per lane per step (unaligned dword loads and
               // stores are supported), LITERAL_SECTORS/4 dwords per lane so a
               // step still covers LITERAL_SECTORS*GROUPSIZE bytes as before.

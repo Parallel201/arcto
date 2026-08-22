@@ -286,3 +286,15 @@ fewer resident blocks; the ring depth is not the bottleneck) — REJECT; 4-secto
 literal step with SNP-D8's dword path); sleeps 0/0/0 ×0.992 / ×0.993 / ×0.999 — neutral (see D1).
 Verdict: candidate to make `LITERAL_SECTORS=8` the AMD default once gfx942 confirms; ring and
 granule stay as inherited.
+
+### SNP-D8k — knobs to measure D8's two mechanisms separately                          Category: C3   Status: KNOBS (defaults = D8 as measured)
+Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
+Files: `src/snappy/decompression_process.hiph`
+Change: `ARCTO_SNAPPY_DWORD_LITERALS` and `ARCTO_SNAPPY_DWORD_COPIES` (both 1 by default, AMD only)
+select the dword literal path and the dword non-overlapping-copy path independently. Default
+build identical to SNP-D8. Variants to run on gfx942 and gfx1100: `…_COPIES=0` and `…_LITERALS=0`.
+Prediction (from the gfx942 sweep-5 pattern): copies=0 recovers the synth_binary loss on gfx942
+and keeps the TTI gain; literals=0 loses the TTI gain.
+Measured: (pending)
+Result: (pending)
+Verdict: (pending)
