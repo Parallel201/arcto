@@ -1,30 +1,21 @@
-##
-# Copyright 2020 NVIDIA Corporation.  All rights reserved.
+# Copyright (C) 2026 Cristiano Künas. Licensed under the MIT license.
 #
-# Please refer to the NVIDIA end user license agreement (EULA) associated
-# with this source code for terms and conditions that govern your use of
-# this software. Any use, reproduction, disclosure, or distribution of
-# this software and related documentation outside the terms of the EULA
-# is strictly prohibited.
+# Unit tests for the high-level (manager) infrastructure: one executable and
+# one ctest entry per *_test.cpp in this directory. Binaries stay next to this
+# directory's build output (build/src/highlevel/test/<name>).
 
-# Modifications Copyright (C) 2025-2026 Cristiano Künas.
-
-function(add_unit_test test_file)
-  get_filename_component(test_name "${test_file}" NAME_WE)
-  add_executable(${test_name} ${test_file})
-  target_include_directories(${test_name} PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR})
-  if (CUDA_BACKEND)
-    target_link_libraries(${test_name} PRIVATE arcto CUDA::cudart)
-  else (CUDA_BACKEND)
-    target_link_libraries(${test_name} PRIVATE arcto hip::host)
-  endif (CUDA_BACKEND)
-  add_test(NAME ${test_name} COMMAND ${test_name})
-endfunction()
-
-file(GLOB tests *_test.cpp)
-
+file(GLOB ARCTO_UNIT_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*_test.cpp")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
-foreach(file ${tests})
-  add_unit_test(${file})
+foreach(test_source IN LISTS ARCTO_UNIT_TEST_SOURCES)
+  get_filename_component(test_name "${test_source}" NAME_WE)
+  add_executable(${test_name} "${test_source}")
+  target_include_directories(${test_name} PRIVATE
+    "${CMAKE_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/src/highlevel")
+  if (CUDA_BACKEND)
+    target_link_libraries(${test_name} PRIVATE arcto CUDA::cudart)
+  else()
+    target_link_libraries(${test_name} PRIVATE arcto hip::host)
+  endif()
+  add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
