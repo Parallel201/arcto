@@ -158,3 +158,24 @@ from SNP-D7a so the two can be judged independently.
 Measured: (pending) same protocol as SNP-D1.
 Result: (pending)
 Verdict: (pending)
+
+### SNP-D2 — rocPRIM DPP warp scan / all-lanes reduce instead of shuffle trees        Category: C2   Status: PENDING
+Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
+Files: `src/device_functions.hiph`
+Change: on AMD, `WarpReduce<GROUPSIZE,WARPSIZE>::prefix_sum` (inclusive prefix sum used by both
+decode strategies and by the symbol processor's combine loop) and `::sum` (all-lanes total, used
+for the processor's `start_mask`) are implemented with `rocprim::warp_scan<T,GROUPSIZE>::inclusive_scan`
+and `rocprim::warp_reduce<T,GROUPSIZE,UseAllReduce=true>::reduce` instead of the hand-written
+`SHFL1`/`SHFL1_XOR` trees (6 dependent `ds_bpermute` steps for 64 lanes, 12 for a 64-bit value).
+For a logical warp equal to the hardware wave (64 on CDNA, 32 on the gfx1100 wave32 build) rocPRIM
+selects its cross-lane DPP implementation (row operations / swizzles, no LDS traffic, empty
+storage type — a `static_assert` guards against a silent shared-memory fallback). Results
+identical (inclusive prefix sum, total broadcast to all lanes). CUDA keeps the shuffle trees.
+Why (mechanism): every shuffle step is an LDS-path instruction with `lgkmcnt` latency; DPP row
+operations execute at VALU rate. The processor's combine loop runs a prefix sum + a 64-bit
+all-reduce + ~5 shuffles per 64 output bytes, the decode strategies one prefix sum per batch.
+Prediction: 10–25 % on short-symbol data (words, tiny symbols) where the combine loop dominates,
+small on literal-heavy data; bytes identical; ISA `ds_bpermute_b32` count drops further.
+Measured: (pending) same protocol as SNP-D1.
+Result: (pending)
+Verdict: (pending)

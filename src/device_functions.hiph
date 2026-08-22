@@ -40,6 +40,13 @@
 
 #include "arcto_device_types.h"
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+#include <rocprim/functional.hpp>
+#include <rocprim/warp/warp_scan.hpp>
+#include <rocprim/warp/warp_reduce.hpp>
+#include <type_traits>
+#endif
+
 namespace arcto {
 
 /**
@@ -292,6 +299,47 @@ __device__ inline uint32_t ballot1<uint32_t,32u>(uint32_t t,int predicate,int pr
 }
 #endif
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+// AMD: wave-level inclusive prefix sum and all-lanes sum through rocPRIM's
+// warp primitives. For a logical warp that is a power of two up to the
+// hardware wave size rocPRIM selects its cross-lane implementation (DPP row
+// operations / swizzles, executed at VALU rate with no LDS traffic) instead
+// of the shuffle trees below, whose every step is a ds_bpermute through the
+// LDS crossbar (6 dependent steps for 64 lanes, 12 for a 64-bit value). The
+// results are identical: an inclusive prefix sum (lane t gets the sum of
+// lanes 0..t) and the total broadcast to every lane (UseAllReduce = true).
+// The storage type of the cross-lane implementations is empty; the
+// static_assert guarantees we never silently fall back to the shared-memory
+// implementation, which would need a per-wave __shared__ buffer.
+template <unsigned GROUPSIZE,unsigned WARPSIZE>
+class WarpReduce {
+public:
+  template <typename T>
+  static __device__ inline T prefix_sum(uint32_t t, T thread_value) {
+    (void)t;
+    using scan_t = rocprim::warp_scan<T, GROUPSIZE>;
+    static_assert(std::is_empty<typename scan_t::storage_type>::value,
+                  "rocprim::warp_scan selected a shared-memory implementation; "
+                  "WarpReduce::prefix_sum would need per-wave LDS storage");
+    typename scan_t::storage_type storage;
+    T out;
+    scan_t().inclusive_scan(thread_value, out, storage, ::rocprim::plus<T>());
+    return out;
+  }
+  template <typename T>
+  static __device__ inline T sum(uint32_t t, T thread_value) {
+    (void)t;
+    using reduce_t = rocprim::warp_reduce<T, GROUPSIZE, /*UseAllReduce=*/true>;
+    static_assert(std::is_empty<typename reduce_t::storage_type>::value,
+                  "rocprim::warp_reduce selected a shared-memory implementation; "
+                  "WarpReduce::sum would need per-wave LDS storage");
+    typename reduce_t::storage_type storage;
+    T out;
+    reduce_t().reduce(thread_value, out, storage, ::rocprim::plus<T>());
+    return out;
+  }
+};
+#else
 template <unsigned GROUPSIZE,unsigned WARPSIZE>
 class WarpReduce {
 public:
@@ -300,9 +348,13 @@ public:
   template <typename T>
   static __device__ inline T sum(uint32_t t, T thread_value);
 };
+#endif
 
-// Warp reduction helpers
-#if defined(USE_WARPSIZE_64)
+// Warp reduction helpers (shuffle trees; the CUDA backend, and the reference
+// implementation the rocPRIM path above must match)
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+// (specialisations below are not used on AMD; the primary template is complete)
+#elif defined(USE_WARPSIZE_64)
 template <typename T> inline __device__ T WarpReduceSum2(T acc)     { return acc + SHFL1_XOR(acc, 1); }
 template <typename T> inline __device__ T WarpReduceSum4(T acc)     { acc = WarpReduceSum2(acc); return acc + SHFL1_XOR(acc, 2); }
 template <typename T> inline __device__ T WarpReduceSum8(T acc)     { acc = WarpReduceSum4(acc); return acc + SHFL1_XOR(acc, 4); }
