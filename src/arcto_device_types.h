@@ -43,6 +43,21 @@ typedef int32_t signed_warp_mask_t;
 constexpr uint32_t uwarpsize = sizeof(warp_mask_t)*8;
 constexpr int32_t warpsize = uwarpsize;
 
+// The compile-time wave size above must be the wavefront size the device code
+// is actually compiled for (the wave-level primitives, ballots and masks
+// assume it). hip-clang exposes the latter in device passes; a mismatch is a
+// build error, not a runtime surprise (e.g. a wave32 build on gfx9, or a
+// wave64 build of an RDNA target without -mwavefrontsize64 — see CMake).
+#if defined(__HIP_DEVICE_COMPILE__)
+# if defined(__AMDGCN_WAVEFRONT_SIZE__)
+static_assert(warpsize == __AMDGCN_WAVEFRONT_SIZE__,
+    "ARCTO wave size (USE_WARPSIZE_32 / default 64) differs from the wavefront size of this device compilation");
+# elif defined(__AMDGCN_WAVEFRONT_SIZE)
+static_assert(warpsize == __AMDGCN_WAVEFRONT_SIZE,
+    "ARCTO wave size (USE_WARPSIZE_32 / default 64) differs from the wavefront size of this device compilation");
+# endif
+#endif
+
 } // namespace arcto
 
 #endif // ARCTO_DEVICE_TYPES_HIPH

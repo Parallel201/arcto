@@ -183,13 +183,15 @@ void arcto::HipUtils::check_wave_size()
     check(
         hipDeviceGetAttribute(&hw_warp, hipDeviceAttributeWarpSize, device),
         "hipDeviceGetAttribute(WarpSize) in check_wave_size()");
-    if (hw_warp != warpsize) {
+    // A wave64 build runs on every AMD device (RDNA executes wave64 code
+    // objects; CMake compiles them with -mwavefrontsize64). A wave32 build
+    // only runs where the hardware's native wavefront is 32 (gfx10+).
+    if (warpsize == 32 && hw_warp != 32) {
       std::ostringstream oss;
-      oss << "ARCTO was compiled for wavefront size " << warpsize
-          << " but device " << device << " has wavefront size " << hw_warp
-          << ". Rebuild with "
-          << (hw_warp == 32 ? "-D USE_WARPSIZE_32=ON" : "-D USE_WARPSIZE_32=OFF")
-          << ".";
+      oss << "ARCTO was compiled for wavefront size 32 (USE_WARPSIZE_32=ON) "
+          << "but device " << device << " has a native wavefront size of "
+          << hw_warp << " and cannot run wave32 code. Rebuild with "
+          << "-D USE_WARPSIZE_32=OFF (wave64 runs on every AMD GPU).";
       throw std::runtime_error(oss.str());
     }
   });

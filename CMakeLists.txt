@@ -85,7 +85,8 @@ macro(setup_cuda_build)
         "'cmake -DCUB_DIR=...' or 'export CUB_DIR=...'). You can download cub "
         "from 'https://github.com/ROCmSoftwarePlatform/hipCUB'.")
   endif()
-  find_path(CUB_PARENT_DIR NAMES "cub/cub.cuh" PATHS "${CUB_DIR}" "${CUDAToolkit_INCLUDE_DIRS}")
+  # CUDA 12 ships CUB in <toolkit>/include, CUDA 13 under <toolkit>/include/cccl
+  find_path(CUB_PARENT_DIR NAMES "cub/cub.cuh" PATHS "${CUB_DIR}" ${CUDAToolkit_INCLUDE_DIRS} PATH_SUFFIXES cccl)
   if(NOT CUB_PARENT_DIR)
     message(FATAL_ERROR "Unable to locate 'cub/cub.cuh'. Please specify a path "
         "to cub via 'CUB_DIR'")
@@ -126,10 +127,36 @@ macro(setup_hip_amd_build)
   find_package(hip REQUIRED)
   add_compile_definitions(__HIP_PLATFORM_HCC__ __HIP_PLATFORM_AMD__)
   include_directories(${HIP_INCLUDE_DIRS})
+  # One wave size per build. The device code asserts that this choice matches
+  # the wavefront size the compiler targets (arcto_device_types.h), and the
+  # runtime refuses a wave32 build on a wave64-only device (HipUtils).
+  # gfx9 (CDNA/GCN) is wave64 only; gfx10/11/12 (RDNA) run wave32 natively
+  # and wave64 with -mwavefrontsize64, so a wave64 build targets both families.
+  set(_arcto_has_gfx9 OFF)
+  set(_arcto_has_rdna OFF)
+  foreach(_t IN LISTS CMAKE_HIP_ARCHITECTURES)
+    if(_t MATCHES "^gfx9")
+      set(_arcto_has_gfx9 ON)
+    elseif(_t MATCHES "^gfx1[0-9]")
+      set(_arcto_has_rdna ON)
+    endif()
+  endforeach()
   if(USE_WARPSIZE_32)
+    if(_arcto_has_gfx9)
+      message(FATAL_ERROR "USE_WARPSIZE_32=ON but CMAKE_HIP_ARCHITECTURES contains a gfx9 target, which is wave64 only: build wave32 for RDNA targets only, or build wave64 (USE_WARPSIZE_32=OFF) for both.")
+    endif()
     add_compile_definitions("USE_WARPSIZE_32")
+    message(STATUS "ARCTO wave size: 32 (RDNA native)")
   else()
     add_compile_definitions("ENABLE_HIP_OPT_WARPSIZE64")
+    if(_arcto_has_rdna)
+      # make RDNA targets compile wave64 code objects so that one library
+      # serves every listed target with the same compile-time wave size
+      set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mwavefrontsize64")
+      message(STATUS "ARCTO wave size: 64 (RDNA targets compiled with -mwavefrontsize64)")
+    else()
+      message(STATUS "ARCTO wave size: 64")
+    endif()
   endif()
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endmacro()
