@@ -173,11 +173,23 @@ __device__ inline warp_mask_t BALLOT1(int predicate) {
 //#  define BALLOT1(v)       __ballot((v))
 #endif
 
+// Back-off used inside spin-wait loops (the Snappy decoder's three waves poll
+// each other through volatile LDS). The argument is a compile-time constant
+// from snappy/config.h and its unit depends on the platform:
+//  - CUDA sm_70+: nanoseconds, __nanosleep.
+//  - AMD: s_sleep units. There is no __nanosleep; s_sleep N parks the wave for
+//    roughly 64*N clocks (N is an immediate, 0..127) and gives the SIMD's issue
+//    slots to the other resident waves. Without it a polling wave competes for
+//    issue and LDS bandwidth with the productive waves of every other chunk
+//    resident on the same SIMD (the previous AMD fallback was clock(), i.e. a
+//    tight poll).
+//  - other CUDA targets: no-op (as upstream).
 #if (__CUDA_ARCH__ >= 700)
-#  define NANOSLEEP(d)  __nanosleep((d))
+#  define SPIN_SLEEP(d)  __nanosleep((d))
+#elif defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+#  define SPIN_SLEEP(d)  __builtin_amdgcn_s_sleep((d))
 #else
-//: includes the __HIP_PLATFORM_AMD__ case
-#  define NANOSLEEP(d)  clock()
+#  define SPIN_SLEEP(d)  clock()
 #endif
 
 /**

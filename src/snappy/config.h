@@ -98,14 +98,30 @@ namespace arcto
 
     constexpr unsigned DECOMP_THREADS_PER_BLOCK = 3 * warpsize; // 3 warps per stream, 1 stream per block
 
+    // Back-off amounts for the three spin-wait loops of the decoder (see
+    // SPIN_SLEEP in device_functions.hiph). The unit is platform dependent.
 #if defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__)
-    constexpr unsigned PREFETCH_SLEEP_NS = 1600;
-    constexpr unsigned DECODE_SLEEP_NS = 50;
-    constexpr unsigned PROCESS_SLEEP_NS = 100;
+    // AMD: s_sleep units, each roughly 64 clocks, immediate 0..127. The
+    // purpose is to yield the SIMD to productive waves, not precise timing;
+    // the values are tunables (override with -DARCTO_SNAPPY_*_SLEEP=n).
+#  ifndef ARCTO_SNAPPY_PREFETCH_SLEEP
+#    define ARCTO_SNAPPY_PREFETCH_SLEEP 2
+#  endif
+#  ifndef ARCTO_SNAPPY_DECODE_SLEEP
+#    define ARCTO_SNAPPY_DECODE_SLEEP 1
+#  endif
+#  ifndef ARCTO_SNAPPY_PROCESS_SLEEP
+#    define ARCTO_SNAPPY_PROCESS_SLEEP 1
+#  endif
+    constexpr unsigned PREFETCH_SLEEP = ARCTO_SNAPPY_PREFETCH_SLEEP;
+    constexpr unsigned DECODE_SLEEP = ARCTO_SNAPPY_DECODE_SLEEP;
+    constexpr unsigned PROCESS_SLEEP = ARCTO_SNAPPY_PROCESS_SLEEP;
 #else
-    constexpr unsigned PREFETCH_SLEEP_NS = 1600;
-    constexpr unsigned DECODE_SLEEP_NS = 50;
-    constexpr unsigned PROCESS_SLEEP_NS = 100;
+    // CUDA: nanoseconds for __nanosleep on sm_70+ (no-op below); the
+    // inherited nvCOMP values.
+    constexpr unsigned PREFETCH_SLEEP = 1600;
+    constexpr unsigned DECODE_SLEEP = 50;
+    constexpr unsigned PROCESS_SLEEP = 100;
 #endif
 
     // Not supporting streams longer than this (not what snappy is intended for)

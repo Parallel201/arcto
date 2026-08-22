@@ -91,7 +91,7 @@ namespace arcto
           {
             while ((batch_len = s->q.batch_len[batch]) == 0)
             {
-              NANOSLEEP(PROCESS_SLEEP_NS);
+              SPIN_SLEEP(PROCESS_SLEEP);
             }
           }
           else

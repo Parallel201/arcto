@@ -104,7 +104,7 @@ namespace arcto
                 blen = 0;
                 break;
               }
-              NANOSLEEP(PREFETCH_SLEEP_NS);
+              SPIN_SLEEP(PREFETCH_SLEEP);
             }
           }
           blen = SHFL10(blen);
