@@ -36,7 +36,7 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
 | Snappy comp | SNP-C2 | one barrier per literal/copy pair via double-buffered match state | −1…−4 % | −2…−6 % | reverted |
 | Snappy comp | SNP-C1 | one-round-ahead prefetch of the match-search word | −4…−7 % | −4…−7 % | reverted |
 | Cascaded decomp | CAS-D2 | multi-item (4/thread) block scan in delta decompression: 4× fewer scans+barriers per chunk | ints +8.6 % (sat), +5 % (x0); zeros −1.6 %; TTI ≈ | ints +9 % (sat), +8 % (x0); TTI +2 % | kept |
-| Cascaded decomp | CAS-D1 | load-balanced expansion of long RLE runs (run ends in LDS + binary search; block vote on a length threshold) | zeros ×7.9 (sat) / ×6.7 (x0); ints −6.5 % (sat) at threshold 16; TTI ≈ | zeros ×3.0 (sat) / ×4.45 (x0); ints −9 % (sat) / −4.6 % (x0); TTI ≈ | kept; threshold 4/64/256 *pending* |
+| Cascaded decomp | CAS-D1 → D1f → D1w | load-balanced expansion of long RLE runs: block-wide vote on an absolute run length (D1), on run > F × average (D1f), then **wave-local** (each wave balances its own runs' output; wave ballot, no block barrier) | D1: zeros ×7.9 (sat) / ×6.7 (x0), ints −6.5 % (sat) at any cutoff (4/16/64/256) and any factor (4/8/16) — the block vote itself cost it; D1w *pending (final sweep)* | D1: zeros ×3.0 (sat) / ×4.45 (x0); ints −9 % (sat) / −4.6 % (x0); D1w *pending* | D1w kept (final numbers pending) |
 | Cascaded comp | CAS-C1 | single-pass min/max in `get_for_bitwidth` (2 block reduces instead of 2 per 128 elements) | ints ×1.54, TTI ×1.70, zeros ×1.05 | ints ×1.44, TTI ×1.57, zeros ×1.14 | kept (largest Cascaded compression win) |
 | Cascaded comp | CAS-C4 | incremental input-window indices in `block_bitpack` (no per-word integer division) | ≈ 0 (±1 %) | ≈ 0 (−1 %, in drift) | neutral-kept |
 | LZ4 decomp | LZ4-D2 | incremental `i % dist` in the overlapped-match repeat copy | ≈ 0 (wave32 uses the doubling path) | ≈ 0 on non-repetitive inputs; zeros *pending* | kept (exact, cheaper per byte) |
@@ -50,7 +50,7 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
 | Snappy decomp | SNP-D12 | 32-lane decode groups inside a wave64 (knob) | n/a | TTI +8 % (x0), words −9 % | input-dependent, knob off by default |
 | Cascaded | CAS-S4 | `BLOCK_SCAN_WARP_SCANS` (rocPRIM `using_warp_scan`) for the three block scans | decomp ints +3 %, others ≈ | comp +16–19 %, decomp +10–15 % | kept (big on CDNA) |
 | Cascaded comp | CAS-S6 | 32-bit scan type for in-chunk run counts (was `size_t`) | +1–1.6 % | +2–4 % | kept |
-| LZ4 decomp | LZ4-D5 | token / LSIC / offset through `readfirstlane` (scalar sequence parsing) | *pending (lz4b)* | *pending (lz4b)* | — |
+| LZ4 decomp | LZ4-D5 | token / LSIC / offset through `readfirstlane` (scalar sequence parsing) | ±1–3 % mixed | words −5…−8 %, others ≈ | reverted |
 
 ### C3 — memory-access width and cache policy
 
@@ -61,8 +61,8 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
 | Snappy decomp | SNP-D8 copies | 4 bytes per lane for non-overlapping copies | +8 % binary | −23 % binary | **split**: wave32 only (`USE_WARPSIZE_32`) |
 | Snappy decomp | SNP-D7a/b | dword window reads in the serial decoder / per-lane symbol window | neutral | neutral | neutral-kept |
 | Snappy comp | SNP-C3 | dword literal emission in `StoreLiterals` | +0.4…+0.7 % | −0.4…−4 % | reverted |
-| Cascaded | CAS-S5 | 16-byte cooperative copies (chunk load, layer read/write, final store) when 16-B aligned | *pending (cas3)* | *pending (cas3)* | — |
-| LZ4 decomp | LZ4-D1 / D1s | E17 wave32-only vectorised copies and doubling repeat re-enabled on wave64 (knobs: decompression side, compression side, short-length cutoff) | n/a (curated config kept) | with everything on: binary/TTI decomp ×2.2 (x0), +31/+48 % (sat); words −25 % decomp, −44 % comp → split; variants *pending (lz4b)* | defaults *pending* |
+| Cascaded | CAS-S5 / S5s | 16-byte cooperative copies (chunk load, layer read/write) when 16-B aligned; the decompression final store measured neutral/negative and returned to the element loop | comp ints +16–21 %, zeros +41 %, TTI +18 %; decomp ≈ | comp ints +7–11 %, zeros +22 %, TTI +15 %; decomp store −7…−12 % at saturation (noisy window) → split off | kept (compression side) |
+| LZ4 decomp | LZ4-D1 / D1s / D1w | E17 wave32-only vectorised copies and doubling repeat on wave64 (knobs: decompression side, compression side, short-length cutoff) | n/a (curated config kept; cutoff 128 ≈ neutral) | decompression side on: binary/TTI ×2.15–2.18 (x0), +30/+45 % (sat), zeros −5 % (sat), words −17…−24 % at every cutoff — the kernel grows from 66 VGPRs/7 waves to 84 VGPRs/5 waves per SIMD (report), the latency-bound short-sequence input loses two waves of latency hiding; compression side on: words compression −54 % | **wave64 default: decompression side on, compression side off**, knobs kept; occupancy-target variants (7/6 waves) *pending* |
 
 ### C4 — LDS layout and traffic
 
@@ -103,7 +103,8 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
 | Item | Effect | Status |
 |---|---|---|
 | Benchmark `-x` duplication bug: `multi_file()` inserted a range of the vector into itself; with libstdc++ every reallocating round appended *empty* chunks — 160 of 8208 chunks at `-x 512` (503 MB instead of 513 MB). Snappy/LZ4 tolerate empty chunks (all relative comparisons stay valid, 2 % short of nominal); Cascaded reported `arctoErrorCannotDecompress` and the benchmark aborted on every `-x` run. | fixed (`reserve` + element-wise copy) | test/coverage branch |
-| Cascaded compressor non-determinism (CAS-H1): bit-pack header gaps (1-/2-/8-byte types), tail word of odd unpacked arrays and a chunk-metadata gap word were never written — LDS scratch went into the stream (format-correct, not reproducible; inherited from nvCOMP 2.2) | zero-filled; output now byte-deterministic | cascaded branch |
+| Cascaded compressor non-determinism (CAS-H1/H1b): bit-pack header gaps (1-/2-/8-byte types), tail word of odd unpacked arrays and a chunk-metadata gap word were never written — LDS scratch went into the stream (format-correct, not reproducible; inherited from nvCOMP 2.2) | zero-filled (folded into the header write); output now byte-deterministic; cost −1…−3 % compression | cascaded branch |
+| Cascaded **decoder layer order** (CAS-H3): for `0 < num_RLEs < num_deltas` the inverse layers ran in the wrong order (RLE⁻¹ before the first Δ⁻¹) and the API returned wrong data with `arctoSuccess`; equivalent to the correct order only for `num_RLEs ≥ num_deltas` or `num_RLEs == 0` (nvCOMP's default and the pure-delta cases) — inherited from nvCOMP 2.2, found by the coverage test once H1/H2 let it reach `{1 RLE, 2 deltas}` | decoder mirrors the encoder's layer indices; the full 96-configuration × 8-type coverage matrix now passes on both nodes (72 684 assertions) | cascaded branch |
 | Cascaded compressor **hang** (CAS-H2): with `num_deltas ≥ 2`, a chunk that runs out of elements before its last delta layer (1-element partition; all-equal chunk collapsed by an RLE layer) made `block_delta_compress` loop to `size_t(0) − 1` — an infinite GPU loop, inherited from nvCOMP 2.2 and invisible with the default `{2 RLEs, 1 delta}`; found by the coverage test once CAS-H1 let it run its full matrix | degenerate partitions take the raw-copy fallback | cascaded branch |
 | Per-repetition CSV in the chunked benchmarks (`ARCTO_PER_REP_CSV`, `ARCTO_PER_REP_TAG`); `-F` short flag; README | enables medians/IQR per commit | chore branch |
 | Coverage tests `test_snappy_coverage`, `test_cascaded_coverage` (every layer configuration × type × size profile, misalignment, determinism), `test_zfp_payload_exact` (ZFP-T1: HIP payload and decoded field byte-exact vs canonical serial) | gates for the optimization loops | test/coverage + zfp branches |
@@ -143,6 +144,14 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
 4. Measurement hygiene mattered as much as the kernels: the benchmark's duplicate-chunk bug, the
    Cascaded padding non-determinism, the MI300A run-to-run drift and one baseline outlier (LZ4-D7
    on gfx1100, −21 % that an interleaved A/B showed to be exactly 0) all shaped verdicts.
+5. The coverage tests paid for themselves beyond the gates: three inherited Cascaded defects
+   (non-deterministic bytes, a GPU hang for `num_deltas ≥ 2` on exhausted chunks, and a silent
+   wrong-order decode for `0 < num_RLEs < num_deltas`) surfaced only because the new test walks every
+   layer configuration for every type — none is reachable from nvCOMP's default configuration.
+6. Register growth is the hidden price of vectorised copy paths on wave64: LZ4's decoder moved from
+   66 to 84 VGPRs (7 → 5 waves per SIMD) with the dword paths compiled in — ×2.2 on long copies,
+   −24 % on short-sequence data from the lost latency hiding — so such paths need either an
+   occupancy target or a per-workload switch, not a blanket default.
 
 ## 4. Open / next
 
