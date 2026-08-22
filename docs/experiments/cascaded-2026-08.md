@@ -234,9 +234,27 @@ instructions and `s_waitcnt` round trips; for the default `int` type the chunk l
 store are 4 KB each per chunk, the layer arrays 1–4 KB. Same bytes in the same order.
 Prediction: +1–4 % on both directions for the default type (the layers dominate), more for
 1-byte types whose element loops were byte-wide; bytes identical.
-Measured: (pending)
-Result: (pending)
-Verdict: (pending)
+Measured (vs S6 c375cab, 30 reps): gfx1100 compression ints ×1.16 (x0) / ×1.21 (x32), zeros ×1.41
+(x512), TTI ×1.18 (x512); decompression ×0.99–1.00 (zeros x512 ×0.976). gfx942 compression ints
+×1.07 / ×1.11, zeros ×1.22, TTI ×1.15 (x512) / ×1.045 (x0); decompression ints ×0.875 (x32) /
+×0.96 (x0), TTI ×0.93 (x512) / ×1.06 (x0), zeros ×1.04 — but the following commit (H1, compression
+only) read TTI decompression ×0.72 on the same node minutes later, so the gfx942 decompression rows
+of this window are not trustworthy. Bytes identical, tests green.
+Result: the compression-side copies (chunk load, layer write) are a clear win on both parts; the
+decompression final store gains nothing on gfx1100 and is at best neutral on gfx942.
+Verdict: SPLIT (CAS-S5s, next commit): keep the 16-B helper for the chunk load, `block_write` and
+`block_read`; the decompression final store returns to the element loop.
+
+### CAS-S5s — keep the element loop for the decompression final store                    Category: C3   Status: COMMITTED
+Commit: (this commit)  (branch `opt/cascaded-2026-08`)
+Files: `src/CascadedKernels.hiph` (`cascaded_decompression_fcn`)
+Change: only the final LDS → global store reverts to the inherited element loop; everything else of
+S5 stays. Bytes identical.
+Measured: (final sweep)
+
+### CAS-H1 (measured) — the zero-fill costs compression ints ×0.985 / zeros ×0.98 / TTI ≈ on gfx1100
+and ×0.97 / ×0.95 / ×0.97 on gfx942 (x32/x512; thread-0 serial byte stores per bit-pack call); kept
+for byte-determinism.
 
 ### CAS-H1 — deterministic compressed bytes: zero the never-written padding            Category: C8 (hygiene)   Status: COMMITTED
 Commit: (this commit)  (branch `opt/cascaded-2026-08`)

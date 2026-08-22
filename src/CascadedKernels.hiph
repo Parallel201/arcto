@@ -1733,9 +1733,14 @@ __device__ void cascaded_decompression_fcn(
         break;
       }
 
-      // CAS-S5: 16 B per lane when aligned
-      block_copy_elements<data_type, threadblock_size>(
-          decompressed_ptr, shared_input_buffer, static_cast<int>(num_elements));
+      // CAS-S5s: the final LDS -> global store keeps the element loop — the
+      // 16-B variant measured neutral on gfx1100 and negative at saturation
+      // on gfx942 (the 4 KB per chunk already stream well as dword stores
+      // from 256 lanes), while the compression-side copies gained 7–22 %.
+      for (int element_idx = threadIdx.x; element_idx < num_elements;
+           element_idx += threadblock_size) {
+        decompressed_ptr[element_idx] = shared_input_buffer[element_idx];
+      }
       decompressed_ptr += num_elements;
       decompressed_num_elements += num_elements;
 
