@@ -99,7 +99,7 @@ template <
     typename size_type,
     int threadblock_size,
     int chunk_size = default_chunk_size>
-__global__ void cascaded_compression_kernel(
+__global__ void __launch_bounds__(threadblock_size) cascaded_compression_kernel(
     int batch_size,
     const data_type* const* uncompressed_data,
     const size_type* uncompressed_bytes,
@@ -153,7 +153,7 @@ template <
     typename size_type,
     int threadblock_size,
     int chunk_size = default_chunk_size>
-__global__ void cascaded_decompression_kernel_type_check(
+__global__ void __launch_bounds__(threadblock_size) cascaded_decompression_kernel_type_check(
     int batch_size,
     const void* const* compressed_data,
     const size_type* compressed_bytes,
@@ -172,7 +172,7 @@ __global__ void cascaded_decompression_kernel_type_check(
     if (type == ARCTO_TYPE_CHAR || type == ARCTO_TYPE_UCHAR) {
       // allocate shmem and run fcn for 1-byte type
       const int shmem_size = compute_smem_size<chunk_size, 1, 4>();
-      __shared__ uint8_t shmem[shmem_size];
+      __shared__ uint8_t shmem[shmem_size] __attribute__((aligned(16)));
 
       arcto::template cascaded_decompression_fcn<
           uint8_t,
@@ -194,7 +194,7 @@ __global__ void cascaded_decompression_kernel_type_check(
     if (type == ARCTO_TYPE_SHORT || type == ARCTO_TYPE_USHORT) {
       // allocate shmem and run fcn for 2-byte type
       const int shmem_size = compute_smem_size<chunk_size, 2, 4>();
-      __shared__ uint8_t shmem[shmem_size];
+      __shared__ uint8_t shmem[shmem_size] __attribute__((aligned(16)));
 
       arcto::template cascaded_decompression_fcn<
           uint16_t,
@@ -216,7 +216,7 @@ __global__ void cascaded_decompression_kernel_type_check(
     if (type == ARCTO_TYPE_INT || type == ARCTO_TYPE_UINT) {
       // allocate shmem and run fcn for 4-byte type
       const int shmem_size = compute_smem_size<chunk_size, 4, 4>();
-      __shared__ uint8_t shmem[shmem_size];
+      __shared__ uint8_t shmem[shmem_size] __attribute__((aligned(16)));
 
       arcto::template cascaded_decompression_fcn<
           uint32_t,
@@ -238,7 +238,7 @@ __global__ void cascaded_decompression_kernel_type_check(
     if (type == ARCTO_TYPE_LONGLONG || type == ARCTO_TYPE_ULONGLONG) {
       // allocate shmem and run fcn for 8-byte type
       const int shmem_size = compute_smem_size<chunk_size, 8, 8>();
-      __shared__ uint8_t shmem[shmem_size];
+      __shared__ uint8_t shmem[shmem_size] __attribute__((aligned(16)));
 
       arcto::template cascaded_decompression_fcn<
           uint64_t,
@@ -259,7 +259,7 @@ __global__ void cascaded_decompression_kernel_type_check(
   }
 }
 
-__global__ void get_decompress_size_kernel(
+__global__ void __launch_bounds__(cascaded_decompress_threadblock_size) get_decompress_size_kernel(
     const void* const* device_compressed_ptrs,
     const size_t* device_compressed_bytes,
     size_t* device_uncompressed_bytes,

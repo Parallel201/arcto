@@ -53,7 +53,10 @@
 
 #include <assert.h>
 #include <stdint.h>
+#include <limits>
+#include <type_traits>
 
+#include "arcto_device_types.h"
 #include "arcto_hipcub.hiph"
 
 namespace arcto
@@ -91,8 +94,67 @@ constexpr int default_chunk_size = 4096;
 constexpr size_t partition_metadata_size = 8;
 constexpr size_t num_bits_per_byte = 8;
 
-constexpr int cascaded_compress_threadblock_size = 128;
-constexpr int cascaded_decompress_threadblock_size = 128;
+// Threads per block: 256 (4 waves) on wave64 targets, 128 (4 waves) otherwise.
+// The LDS footprint of a block is fixed by the 4 KB chunk, not by the thread
+// count, so on CDNA (64 KB LDS per CU) a 256-thread block doubles the resident
+// waves per CU at the same LDS and halves the number of "per threadblock_size
+// elements" rounds of every stage; on wave32 (RDNA3) and on the CUDA backend
+// 128 threads are the four waves nvCOMP designed for. All device code is
+// templated on the constant; the element-to-thread mapping only changes the
+// schedule, never the results.
+constexpr int cascaded_compress_threadblock_size = (arcto::warpsize >= 64) ? 256 : 128;
+constexpr int cascaded_decompress_threadblock_size = (arcto::warpsize >= 64) ? 256 : 128;
+
+// CAS-S4: block-scan algorithm for the RLE and delta scans. hipCUB's default
+// (BLOCK_SCAN_RAKING) maps to rocPRIM's reduce_then_scan; BLOCK_SCAN_WARP_SCANS
+// maps to using_warp_scan: one DPP/ds_swizzle scan per wave plus a single LDS
+// exchange of the wave prefixes, i.e. fewer LDS round trips per block scan on
+// wave64 blocks. Overridable per build; CUDA keeps CUB's default.
+// CAS-D2: elements per thread in each round of the delta-decompression block
+// scan (see block_delta_decompress). 4 on AMD (one 16-B slab of 32-bit values
+// per lane per round; 4x fewer block scans and barriers per chunk), 1 on the
+// CUDA backend (nvCOMP's original schedule). Overridable per build.
+#ifndef ARCTO_CASCADED_DELTA_ITEMS
+#  if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+#    define ARCTO_CASCADED_DELTA_ITEMS 4
+#  else
+#    define ARCTO_CASCADED_DELTA_ITEMS 1
+#  endif
+#endif
+
+// CAS-D1 / D1w: wave-local load-balanced expansion of RLE runs in
+// block_rle_decompress when a wave's round holds a run longer than FACTOR x
+// the wave's average run (see there). On by default on AMD; the CUDA backend
+// keeps nvCOMP's one-thread-per-run fill. Both overridable per build.
+#ifndef ARCTO_CASCADED_RLE_BALANCED
+#  if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+#    define ARCTO_CASCADED_RLE_BALANCED 1
+#  else
+#    define ARCTO_CASCADED_RLE_BALANCED 0
+#  endif
+#endif
+#ifndef ARCTO_CASCADED_RLE_BALANCE_FACTOR
+#  define ARCTO_CASCADED_RLE_BALANCE_FACTOR 8
+#endif
+
+// CAS-C2: RLE compression reads each thread's slab of consecutive elements
+// into registers once (see block_rle_compress). On by default on AMD; the CUDA
+// backend keeps nvCOMP's LDS re-reads. Overridable per build.
+#ifndef ARCTO_CASCADED_RLE_SLAB
+#  if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+#    define ARCTO_CASCADED_RLE_SLAB 1
+#  else
+#    define ARCTO_CASCADED_RLE_SLAB 0
+#  endif
+#endif
+
+#ifndef ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM
+#  if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+#    define ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM hipcub::BLOCK_SCAN_WARP_SCANS
+#  else
+#    define ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM hipcub::BLOCK_SCAN_RAKING
+#  endif
+#endif
 
 /**
  * Helper function to calculate the size in byte of the chunk metadata. The size
@@ -125,7 +187,8 @@ template <
     typename data_type,
     typename size_type,
     typename run_type,
-    int threadblock_size>
+    int threadblock_size,
+    int max_num_inputs>
 __device__ void block_rle_compress(
     const data_type* input_buffer,
     const size_type num_inputs,
@@ -154,15 +217,85 @@ __device__ void block_rle_compress(
   // Note: `tmp_buffer` is used because we cannot calculate adjacent differences
   // in place.
 
-  typedef hipcub::BlockScan<size_type, threadblock_size> BlockScan;
+  // CAS-S6: in-chunk quantities (run counts per thread, output index) are
+  // < 65536 by construction (`chunk_num_elements < 65536`), so the block scan
+  // runs on 32-bit values instead of the 64-bit `size_type` (size_t): single
+  // VALU ops and half the LDS traffic in the scan on AMD; same sums.
+  typedef uint32_t scan_type;
+  typedef hipcub::BlockScan<scan_type, threadblock_size, ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM> BlockScan;
   __shared__ typename BlockScan::TempStorage temp_storage;
 
   const size_type num_inputs_per_thread
       = roundUpDiv(num_inputs, threadblock_size);
 
+#if ARCTO_CASCADED_RLE_SLAB
+  // CAS-C2: the thread's slab of consecutive elements is read from LDS once
+  // into registers (it is at most `max_num_inputs / threadblock_size` long:
+  // every layer input is bounded by the chunk) and both passes — the run-end
+  // count and the compaction — run on the registers. The inherited code read
+  // every element from LDS three times (once in the count pass, twice in the
+  // compaction pass). The only LDS read beyond the slab is the element that
+  // follows it. Same run ends, same order: output identical.
+  constexpr int max_slab = roundUpDiv(max_num_inputs, threadblock_size);
+  const int first = threadIdx.x * num_inputs_per_thread;
+  const int my_n = (first < static_cast<int>(num_inputs))
+                       ? min(static_cast<int>(num_inputs_per_thread),
+                             static_cast<int>(num_inputs) - first)
+                       : 0;
+
+  data_type slab[max_slab];
+#pragma unroll
+  for (int i = 0; i < max_slab; i++) {
+    slab[i] = (i < my_n) ? input_buffer[first + i] : static_cast<data_type>(0);
+  }
+  // the element after the slab (defined whenever the slab does not end the input)
+  const data_type next_beyond = (first + my_n < static_cast<int>(num_inputs))
+                                    ? input_buffer[first + my_n]
+                                    : static_cast<data_type>(0);
+
   // Step 1: Count the number of last elements of the current thread
 
-  size_type num_outputs_current_thread = 0;
+  scan_type num_outputs_current_thread = 0;
+#pragma unroll
+  for (int i = 0; i < max_slab; i++) {
+    if (i < my_n) {
+      const int idx = first + i;
+      const data_type nxt
+          = (i + 1 < max_slab && i + 1 < my_n) ? slab[(i + 1 < max_slab) ? i + 1 : i]
+                                               : next_beyond;
+      num_outputs_current_thread += (idx + 1 == static_cast<int>(num_inputs)) || (nxt != slab[i]);
+    }
+  }
+
+  __syncthreads();
+
+  // Step 2: Use prefix sum to get the output location
+
+  scan_type output_idx;
+  BlockScan(temp_storage).ExclusiveSum(num_outputs_current_thread, output_idx);
+
+  __syncthreads();
+
+  // Step 3: For each last element, store the index and the value
+
+#pragma unroll
+  for (int i = 0; i < max_slab; i++) {
+    if (i < my_n) {
+      const int idx = first + i;
+      const data_type nxt
+          = (i + 1 < max_slab && i + 1 < my_n) ? slab[(i + 1 < max_slab) ? i + 1 : i]
+                                               : next_beyond;
+      if ((idx + 1 == static_cast<int>(num_inputs)) || (nxt != slab[i])) {
+        tmp_buffer[output_idx] = idx + 1;
+        val_buffer[output_idx] = slab[i];
+        output_idx++;
+      }
+    }
+  }
+#else
+  // Step 1: Count the number of last elements of the current thread
+
+  scan_type num_outputs_current_thread = 0;
 
   data_type val = input_buffer[threadIdx.x * num_inputs_per_thread];
   data_type next_val;
@@ -186,7 +319,7 @@ __device__ void block_rle_compress(
 
   // Step 2: Use prefix sum to get the output location
 
-  size_type output_idx;
+  scan_type output_idx;
   BlockScan(temp_storage).ExclusiveSum(num_outputs_current_thread, output_idx);
 
   __syncthreads();
@@ -215,6 +348,7 @@ __device__ void block_rle_compress(
     }
     val = next_val;
   }
+#endif
 
   if (threadIdx.x == threadblock_size - 1) {
     // After step 2, `output_idx` of the last thread is the sum of the number of
@@ -270,8 +404,13 @@ __device__ void block_rle_decompress(
   // first use prefix sum to calculate the output offsets, and then each thread
   // stores the value of the run into the output locations.
 
-  typedef hipcub::BlockScan<run_type, threadblock_size> BlockScan;
+  typedef hipcub::BlockScan<run_type, threadblock_size, ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM> BlockScan;
   __shared__ typename BlockScan::TempStorage temp_storage;
+#if ARCTO_CASCADED_RLE_BALANCED
+  // CAS-D1: end offset (within the round) of every run of the round, so that
+  // all threads can expand the round's output cooperatively.
+  __shared__ run_type run_end[threadblock_size];
+#endif
 
   *output_num_elements = 0;
 
@@ -287,6 +426,49 @@ __device__ void block_rle_decompress(
     BlockScan(temp_storage)
         .ExclusiveSum(current_count, output_offset, aggregate);
 
+#if ARCTO_CASCADED_RLE_BALANCED
+    // CAS-D1 / D1w: with one thread per run, a long run serialises its whole
+    // expansion on one lane while the rest of the block idles (a 4096-element
+    // run = 4096 dependent LDS stores by one lane). The balancing is WAVE-LOCAL
+    // (D1w): each wave owns the contiguous output range of its own runs; when
+    // one of its runs is much longer than the wave's average (a wave ballot —
+    // no block barrier, no LDS vote, which cost ~8 % on mixed-run data in the
+    // block-wide first version), every lane of the wave fills a strided slice
+    // of the wave's range and finds the owning run by a binary search over the
+    // wave's run ends in LDS (log2(64) = 6 reads, wave-uniform addresses for
+    // neighbouring lanes). Rounds of comparable runs keep the per-run fill.
+    // Same values to the same positions: output identical.
+    {
+      constexpr int W = arcto::warpsize;
+      const int lane = threadIdx.x % W;
+      const int wave = threadIdx.x / W;
+      const run_type wave_start = __shfl(output_offset, 0, W);
+      const run_type wave_end = __shfl(static_cast<run_type>(output_offset + current_count), W - 1, W);
+      const uint32_t wave_total = static_cast<uint32_t>(wave_end - wave_start);
+      const bool dominant = static_cast<uint32_t>(current_count) * W
+                            > ARCTO_CASCADED_RLE_BALANCE_FACTOR * wave_total;
+      if (__ballot(dominant) != 0) {
+        run_end[threadIdx.x] = output_offset + current_count; // wave-private region
+        __threadfence_block();
+        const int runs_in_round = min(threadblock_size, static_cast<int>(num_runs) - round * threadblock_size);
+        const int runs_in_wave = min(W, runs_in_round - wave * W);
+        data_type* const wave_output = output_buffer + *output_num_elements + wave_start;
+        const data_type* const wave_vals = val_buffer + round * threadblock_size + wave * W;
+        const run_type* const wave_ends = run_end + wave * W;
+        for (int o = lane; o < static_cast<int>(wave_total); o += W) {
+          const run_type target = static_cast<run_type>(wave_start + o);
+          int lo = 0, hi = runs_in_wave - 1;
+          while (lo < hi) {
+            const int mid = (lo + hi) >> 1;
+            if (wave_ends[mid] > target)
+              hi = mid;
+            else
+              lo = mid + 1;
+          }
+          wave_output[o] = wave_vals[lo];
+        }
+      } else
+#endif
     if (idx < num_runs) {
       const auto current_val = val_buffer[idx];
       for (int element_idx = 0; element_idx < current_count; element_idx++) {
@@ -294,6 +476,9 @@ __device__ void block_rle_decompress(
             = current_val;
       }
     }
+#if ARCTO_CASCADED_RLE_BALANCED
+    }
+#endif
 
     *output_num_elements += aggregate;
 
@@ -347,27 +532,41 @@ __device__ void block_delta_decompress(
     size_type input_num_elements,
     data_type* output_buffer)
 {
-  typedef hipcub::BlockScan<data_type, threadblock_size> BlockScan;
+  typedef hipcub::BlockScan<data_type, threadblock_size, ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM> BlockScan;
   __shared__ typename BlockScan::TempStorage temp_storage;
 
-  const int num_rounds = roundUpDiv(input_num_elements, threadblock_size);
+  // CAS-D2: each round scans `threadblock_size * ITEMS` elements, ITEMS
+  // consecutive elements per thread (blocked arrangement), so a 4 KB chunk of
+  // 32-bit values needs 16 / ITEMS (128 threads) or 8 / ITEMS (256 threads)
+  // block scans and barriers instead of one per `threadblock_size` elements.
+  // The carried `initial_value` makes the result identical to the one-item
+  // version (integer sums, any association).
+  constexpr int ITEMS = ARCTO_CASCADED_DELTA_ITEMS;
+  constexpr int TILE = threadblock_size * ITEMS;
+  const int num_rounds = roundUpDiv(input_num_elements, TILE);
 
   for (int round = 0; round < num_rounds; round++) {
-    const size_type idx = round * threadblock_size + threadIdx.x;
+    const size_type base = round * TILE + threadIdx.x * ITEMS;
 
-    data_type input_val = 0;
-    if (idx < input_num_elements)
-      input_val = input_buffer[idx];
+    data_type input_vals[ITEMS];
+#pragma unroll
+    for (int i = 0; i < ITEMS; i++) {
+      input_vals[i] = (base + i < input_num_elements) ? input_buffer[base + i]
+                                                      : static_cast<data_type>(0);
+    }
 
-    data_type output_val;
+    data_type output_vals[ITEMS];
     data_type aggregate;
     BlockScan(temp_storage)
         .ExclusiveScan(
-            input_val, output_val, initial_value, hipcub::Sum(), aggregate);
+            input_vals, output_vals, initial_value, hipcub::Sum(), aggregate);
     initial_value += aggregate;
 
-    if (idx < input_num_elements)
-      output_buffer[idx] = output_val;
+#pragma unroll
+    for (int i = 0; i < ITEMS; i++) {
+      if (base + i < input_num_elements)
+        output_buffer[base + i] = output_vals[i];
+    }
 
     __syncthreads();
   }
@@ -411,41 +610,28 @@ __device__ void get_for_bitwidth(
   typedef hipcub::BlockReduce<signed_data_type, threadblock_size> BlockReduce;
   __shared__ typename BlockReduce::TempStorage temp_storage;
 
-  signed_data_type thread_data;
-  int num_valid = min(num_elements, static_cast<size_type>(threadblock_size));
-  if (threadIdx.x < num_elements) {
-    thread_data = input[threadIdx.x];
+  // Single pass: every thread folds its strided share of the elements into a
+  // register-resident min/max (unit-stride, conflict-free LDS reads, no
+  // barriers), then ONE block reduction for the minimum and ONE for the
+  // maximum. Threads without elements contribute the identity values, so the
+  // reductions run over the full block. Min and max are order-independent:
+  // the results are identical to the per-128-element round structure this
+  // replaces, which cost two block reductions + two barriers per round
+  // (64 collectives for a 4096-element u8 array).
+  signed_data_type local_min = std::numeric_limits<signed_data_type>::max();
+  signed_data_type local_max = std::numeric_limits<signed_data_type>::min();
+  for (size_type idx = threadIdx.x; idx < num_elements; idx += threadblock_size) {
+    const signed_data_type v = static_cast<signed_data_type>(input[idx]);
+    local_min = (v < local_min) ? v : local_min;
+    local_max = (v > local_max) ? v : local_max;
   }
 
-  signed_data_type minimum
-      = BlockReduce(temp_storage).Reduce(thread_data, hipcub::Min(), num_valid);
+  const signed_data_type minimum
+      = BlockReduce(temp_storage).Reduce(local_min, hipcub::Min());
   __syncthreads();
-  signed_data_type maximum
-      = BlockReduce(temp_storage).Reduce(thread_data, hipcub::Max(), num_valid);
+  const signed_data_type maximum
+      = BlockReduce(temp_storage).Reduce(local_max, hipcub::Max());
   __syncthreads();
-
-  const int num_rounds = roundUpDiv(num_elements, threadblock_size);
-
-  for (int round = 1; round < num_rounds; round++) {
-    num_valid = min(
-        num_elements - round * threadblock_size,
-        static_cast<size_type>(threadblock_size));
-    if (threadIdx.x < num_valid) {
-      thread_data = input[threadIdx.x + round * threadblock_size];
-    }
-
-    const signed_data_type local_min
-        = BlockReduce(temp_storage).Reduce(thread_data, hipcub::Min(), num_valid);
-    __syncthreads();
-    const signed_data_type local_max
-        = BlockReduce(temp_storage).Reduce(thread_data, hipcub::Max(), num_valid);
-    __syncthreads();
-
-    if (threadIdx.x == 0 && local_min < minimum)
-      minimum = local_min;
-    if (threadIdx.x == 0 && local_max > maximum)
-      maximum = local_max;
-  }
 
   // Next, we store the frame of reference, the bitwidth and the number of
   // elements into the desired location.
@@ -467,6 +653,23 @@ __device__ void get_for_bitwidth(
       bitwidth = sizeof(int) * num_bits_per_byte - __clz(range);
     }
     *bitwidth_ptr = (bitwidth << 16) | static_cast<uint32_t>(num_elements);
+
+    // CAS-H1: the header's alignment gaps — between the frame of reference
+    // (sizeof(data_type) B) and this 4-B word (1-/2-byte types) and between
+    // this word and the data_type-aligned data (8-byte types) — were never
+    // written and carried LDS scratch into the stream. Zero them here, in the
+    // same single-thread section that writes the header (no extra divergent
+    // section: H1b).
+    uint8_t* gap = reinterpret_cast<uint8_t*>(frame_of_reference + 1);
+    while (gap < reinterpret_cast<uint8_t*>(bitwidth_ptr)) {
+      *gap++ = 0;
+    }
+    gap = reinterpret_cast<uint8_t*>(bitwidth_ptr + 1);
+    uint8_t* const data_start = reinterpret_cast<uint8_t*>(
+        roundUpToAlignment<data_type>(bitwidth_ptr + 1));
+    while (gap < data_start) {
+      *gap++ = 0;
+    }
   }
 }
 
@@ -508,6 +711,7 @@ __device__ void block_bitpack(
   current_ptr = reinterpret_cast<uint32_t*>(
       roundUpToAlignment<data_type>(current_ptr + 1));
 
+
   const int num_output_elements = roundUpDiv(
       num_elements * bitwidth, sizeof(uint32_t) * num_bits_per_byte);
   if (out_bytes != nullptr) {
@@ -520,35 +724,66 @@ __device__ void block_bitpack(
                  + num_output_elements * sizeof(uint32_t);
   }
 
-  for (int out_idx = threadIdx.x; out_idx < num_output_elements;
-       out_idx += threadblock_size) {
-    // The kernel works by assigning each 4B element of the bitpacked data to a
-    // thread. The kernel then iterates over chunks of input, filling the bits
-    // for each element, and then writing the stored bits to the output.
-    const int out_bit_start = out_idx * sizeof(uint32_t) * num_bits_per_byte;
-    const int out_bit_end
-        = out_bit_start + sizeof(uint32_t) * num_bits_per_byte;
-    const int input_idx_start = out_bit_start / bitwidth;
-    const int input_idx_end = roundUpDiv(out_bit_end, bitwidth);
+  if (num_output_elements > 0) {
+    // CAS-C4: a thread's output words are `threadblock_size` apart, so its
+    // input window [out_bit_start / bitwidth, ceil(out_bit_end / bitwidth))
+    // advances by a fixed quotient/remainder per iteration — keep it with an
+    // incremental division (two divisions per thread up front instead of two
+    // per output word; `bitwidth` is a runtime divisor here, the words are
+    // identical). bitwidth > 0 whenever there are output words.
+    constexpr int word_bits = sizeof(uint32_t) * num_bits_per_byte;
+    const int step_bits = threadblock_size * word_bits;
+    const int step_q = step_bits / bitwidth;
+    const int step_r = step_bits % bitwidth;
+    const int first_bit = threadIdx.x * word_bits;
+    int start_q = first_bit / bitwidth;
+    int start_r = first_bit % bitwidth;
+    // input_idx_end = ceil((out_bit_start + word_bits) / bitwidth)
+    //               = (out_bit_start + word_bits + bitwidth - 1) / bitwidth
+    int end_q = (first_bit + word_bits + bitwidth - 1) / bitwidth;
+    int end_r = (first_bit + word_bits + bitwidth - 1) % bitwidth;
 
-    uint32_t output_val = 0;
-    for (int input_idx = input_idx_start; input_idx < input_idx_end;
-         input_idx++) {
-      unsigned_data_type input_val = 0;
-      if (input_idx < num_elements)
-        input_val = static_cast<unsigned_data_type>(
-            input[input_idx] - frame_of_reference);
+    for (int out_idx = threadIdx.x; out_idx < num_output_elements;
+         out_idx += threadblock_size) {
+      // The kernel works by assigning each 4B element of the bitpacked data to
+      // a thread. The kernel then iterates over chunks of input, filling the
+      // bits for each element, and then writing the stored bits to the output.
+      const int out_bit_start = out_idx * word_bits;
+      const int input_idx_start = start_q;
+      const int input_idx_end = end_q;
 
-      auto padded_val = static_cast<padded_data_type>(input_val);
-      const int offset = input_idx * bitwidth - out_bit_start;
-      if (offset > 0) {
-        padded_val <<= offset;
-      } else {
-        padded_val >>= -offset;
+      uint32_t output_val = 0;
+      for (int input_idx = input_idx_start; input_idx < input_idx_end;
+           input_idx++) {
+        unsigned_data_type input_val = 0;
+        if (input_idx < num_elements)
+          input_val = static_cast<unsigned_data_type>(
+              input[input_idx] - frame_of_reference);
+
+        auto padded_val = static_cast<padded_data_type>(input_val);
+        const int offset = input_idx * bitwidth - out_bit_start;
+        if (offset > 0) {
+          padded_val <<= offset;
+        } else {
+          padded_val >>= -offset;
+        }
+        output_val |= static_cast<uint32_t>(padded_val);
       }
-      output_val |= static_cast<uint32_t>(padded_val);
+      current_ptr[out_idx] = output_val;
+
+      start_q += step_q;
+      start_r += step_r;
+      if (start_r >= static_cast<int>(bitwidth)) {
+        start_r -= bitwidth;
+        start_q++;
+      }
+      end_q += step_q;
+      end_r += step_r;
+      if (end_r >= static_cast<int>(bitwidth)) {
+        end_r -= bitwidth;
+        end_q++;
+      }
     }
-    current_ptr[out_idx] = output_val;
   }
 }
 
@@ -623,6 +858,65 @@ enum class BlockIOStatus
   out_of_bound
 };
 
+// CAS-S5: cooperative copy of `num_words` 32-bit words. When both pointers are
+// 16-byte aligned the body moves 16 bytes per lane per instruction
+// (global_load/store_dwordx4, ds_read/write_b128) and only the last < 4 words
+// go one word per lane; otherwise (or on the CUDA backend, which keeps
+// nvCOMP's word loop) one word per lane as before. Same bytes, same order.
+template <int threadblock_size>
+__device__ inline void block_copy_words(
+    uint32_t* dst, const uint32_t* src, const int num_words)
+{
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+  if (((reinterpret_cast<uintptr_t>(dst) | reinterpret_cast<uintptr_t>(src))
+       & 15u)
+      == 0) {
+    const int num_vec = num_words / 4;
+    uint4* const dst4 = reinterpret_cast<uint4*>(dst);
+    const uint4* const src4 = reinterpret_cast<const uint4*>(src);
+    for (int i = threadIdx.x; i < num_vec; i += threadblock_size) {
+      dst4[i] = src4[i];
+    }
+    for (int i = num_vec * 4 + threadIdx.x; i < num_words;
+         i += threadblock_size) {
+      dst[i] = src[i];
+    }
+    return;
+  }
+#endif
+  for (int i = threadIdx.x; i < num_words; i += threadblock_size) {
+    dst[i] = src[i];
+  }
+}
+
+// CAS-S5: cooperative copy of `num_elements` elements of `data_type`; the
+// 4-byte-aligned prefix goes through block_copy_words, the remaining < 4 bytes
+// (1-/2-byte types in a partial chunk) element by element.
+template <typename data_type, int threadblock_size>
+__device__ inline void block_copy_elements(
+    data_type* dst, const data_type* src, const int num_elements)
+{
+  const size_t num_bytes = static_cast<size_t>(num_elements) * sizeof(data_type);
+  if (((reinterpret_cast<uintptr_t>(dst) | reinterpret_cast<uintptr_t>(src))
+       & 3u)
+      == 0) {
+    const int num_words = static_cast<int>(num_bytes / 4);
+    block_copy_words<threadblock_size>(
+        reinterpret_cast<uint32_t*>(dst),
+        reinterpret_cast<const uint32_t*>(src),
+        num_words);
+    for (int i = static_cast<int>((static_cast<size_t>(num_words) * 4) / sizeof(data_type))
+                 + threadIdx.x;
+         i < num_elements; i += threadblock_size) {
+      dst[i] = src[i];
+    }
+  } else {
+    for (int i = threadIdx.x; i < num_elements; i += threadblock_size) {
+      dst[i] = src[i];
+    }
+  }
+}
+
 /**
  * Write a buffer with a single threadblock, optionally with bitpacking.
  *
@@ -670,10 +964,16 @@ __device__ BlockIOStatus block_write(
     return BlockIOStatus::out_of_bound;
   }
 
-  for (int element_idx = threadIdx.x;
-       element_idx < padded_out_bytes / sizeof(uint32_t);
-       element_idx += blockDim.x) {
-    output[element_idx] = source[element_idx];
+  // CAS-H1: when the array is not a multiple of 4 B (unpacked 1-/2-byte
+  // elements), the padding bytes of the last word used to come from the LDS
+  // buffer past the array — scratch, not data. Copy the full words, then the
+  // tail word with its padding zeroed (little-endian: valid bytes are low).
+  const int full_words = static_cast<int>(*out_bytes / sizeof(uint32_t));
+  const int tail_bytes = static_cast<int>(*out_bytes % sizeof(uint32_t));
+  block_copy_words<threadblock_size>(output, source, full_words);
+  if (tail_bytes != 0 && threadIdx.x == 0) {
+    const uint32_t mask = (1u << (8 * tail_bytes)) - 1u;
+    output[full_words] = source[full_words] & mask;
   }
 
   return BlockIOStatus::success;
@@ -719,10 +1019,8 @@ __device__ BlockIOStatus block_read(
     dest_ptr = reinterpret_cast<uint32_t*>(output);
   }
 
-  for (int element_idx = threadIdx.x; element_idx < roundUpDiv(in_byte, 4);
-       element_idx += threadblock_size) {
-    dest_ptr[element_idx] = input[element_idx];
-  }
+  block_copy_words<threadblock_size>(
+      dest_ptr, input, static_cast<int>(roundUpDiv(in_byte, 4)));
   __syncthreads();
 
   if (use_bp) {
@@ -795,11 +1093,11 @@ __device__ void do_cascaded_compression_kernel(
   constexpr size_t storage_num_elements = roundUpDiv(
       chunk_size + 4 + sizeof(data_type), sizeof(shared_storage_type));
 
-  __shared__ shared_storage_type shared_element_storage_0[storage_num_elements];
+  __shared__ shared_storage_type shared_element_storage_0[storage_num_elements] __attribute__((aligned(16)));
   data_type* shared_element_buffer_0
       = reinterpret_cast<data_type*>(shared_element_storage_0);
 
-  __shared__ shared_storage_type shared_element_storage_1[storage_num_elements];
+  __shared__ shared_storage_type shared_element_storage_1[storage_num_elements] __attribute__((aligned(16)));
   data_type* shared_element_buffer_1
       = reinterpret_cast<data_type*>(shared_element_storage_1);
 
@@ -836,6 +1134,14 @@ __device__ void do_cascaded_compression_kernel(
   // Number of output elements for the RLE layer
   __shared__ size_type num_outputs;
   size_type out_bytes;
+
+  // CAS-H1: the chunk metadata staging area has an alignment gap word between
+  // the RLE offsets and the delta header for 8-byte types; zero the whole
+  // area once so every byte flushed to the stream is defined.
+  for (int i = threadIdx.x; i < max_chunk_metadata_size / 4; i += threadblock_size) {
+    chunk_metadata[i] = 0;
+  }
+  __syncthreads();
 
   for (int partition_idx = batch_start; partition_idx < batch_size;
        partition_idx += batch_stride) {
@@ -892,13 +1198,11 @@ __device__ void do_cascaded_compression_kernel(
           static_cast<size_type>(chunk_num_elements));
 
       // Threadblock collectively loads current chunk from input uncompressed
-      // buffer to shared memory buffer
-      for (int element_idx = threadIdx.x;
-           element_idx < num_elements_current_chunk;
-           element_idx += blockDim.x) {
-        shared_element_buffer_0[element_idx]
-            = input_buffer_current_chunk[element_idx];
-      }
+      // buffer to shared memory buffer (CAS-S5: 16 B per lane when aligned)
+      block_copy_elements<data_type, threadblock_size>(
+          shared_element_buffer_0,
+          input_buffer_current_chunk,
+          static_cast<int>(num_elements_current_chunk));
       __syncthreads();
 
       int rle_remaining = comp_opts.num_RLEs;
@@ -912,7 +1216,7 @@ __device__ void do_cascaded_compression_kernel(
            layer_idx++) {
         if (rle_remaining > 0) {
           // Run RLE
-          block_rle_compress<data_type, size_type, run_type, threadblock_size>(
+          block_rle_compress<data_type, size_type, run_type, threadblock_size, chunk_num_elements>(
               shared_input_buffer,
               num_elements_current_chunk,
               shared_output_buffer,
@@ -953,6 +1257,18 @@ __device__ void do_cascaded_compression_kernel(
         }
 
         if (delta_remaining > 0) {
+          // CAS-H2: a chunk that has no elements left cannot take another
+          // delta layer (a partition with fewer elements than delta layers, or
+          // an all-equal chunk that an RLE layer collapsed to one run):
+          // block_delta_compress would iterate to `input_size - 1` = SIZE_MAX
+          // and the inherited kernel hung the GPU here. The decoder applies
+          // every configured layer, so the only format-consistent outcome is
+          // the raw copy of the partition.
+          if (num_elements_current_chunk == 0) {
+            use_compression = false;
+            goto afterlastchunk;
+          }
+
           // Run Delta
           block_delta_compress<data_type, size_type>(
               shared_input_buffer,
@@ -1074,7 +1390,16 @@ __device__ constexpr int compute_smem_size()
   constexpr int tot_elt_storage = 2 * (storage_num_elts * storage_width);
   constexpr int run_width = 2;
   constexpr int chunk_num_elements = chunk_size / width;
-  constexpr int tot_count_bytes = 2 * (chunk_num_elements * run_width);
+  constexpr int count_bytes = chunk_num_elements * run_width;
+  // CAS-D5: the bit-unpack scratch of the RLE count arrays aliases the dead
+  // element buffer whenever it fits there (every data type of 2+ bytes), so
+  // only the count array itself is allocated; 1-byte types keep a dedicated
+  // scratch (their 2-byte counts outgrow the element buffer). Must agree with
+  // `cascaded_decompression_fcn`.
+  constexpr bool count_scratch_aliases_output
+      = count_bytes <= storage_num_elts * storage_width;
+  constexpr int tot_count_bytes
+      = count_scratch_aliases_output ? count_bytes : 2 * count_bytes;
 
   return 64 + tot_elt_storage + tot_count_bytes + (4 * 8);
 }
@@ -1171,9 +1496,26 @@ __device__ void cascaded_decompression_fcn(
   shmem = static_cast<void*>(
       static_cast<uint8_t*>(shmem) + (chunk_num_elements * sizeof(run_type)));
 
-  uint32_t* temp_count_array = static_cast<uint32_t*>(shmem);
-  shmem = static_cast<void*>(
-      static_cast<uint8_t*>(shmem) + (chunk_num_elements * sizeof(run_type)));
+  // CAS-D5: while a count array is being read, `shared_output_buffer` (the
+  // previous layer's input, already consumed) is dead — the final-array read
+  // below already uses it as its unpack scratch — so the count-array scratch
+  // lives there whenever it fits: for every data type of 2+ bytes the count
+  // array (2 B per element) is no larger than the element buffer
+  // (chunk_size + 4 + sizeof(data_type) B). For 1-byte types it is twice the
+  // element buffer, so a dedicated region stays. LDS per block (4 KB chunk):
+  // u16 16.4 → 12.3 KB, u32 12.4 → 10.3 KB, u64 10.4 → 9.3 KB before the scan
+  // scratch, i.e. one to two more resident blocks per 64 KB CU. Must agree
+  // with `compute_smem_size`.
+  constexpr bool count_scratch_aliases_output
+      = chunk_num_elements * sizeof(run_type)
+        <= storage_num_elements * sizeof(shared_storage_type);
+  uint32_t* temp_count_array = nullptr;
+  if (!count_scratch_aliases_output) {
+    temp_count_array = static_cast<uint32_t*>(shmem);
+    shmem = static_cast<void*>(
+        static_cast<uint8_t*>(shmem)
+        + (chunk_num_elements * sizeof(run_type)));
+  }
 
   // RLE offsets
   uint32_t* rle_offsets = static_cast<uint32_t*>(shmem);
@@ -1329,9 +1671,19 @@ __device__ void cascaded_decompression_fcn(
       int rle_remaining = num_RLEs;
       int delta_remaining = num_deltas;
 
+      // CAS-H3: the compressor applies, for k = 0, 1, ...: [RLE if k < num_RLEs]
+      // then [delta if k < num_deltas]; the inverse must undo, for k descending:
+      // [delta if k < num_deltas] then [RLE if k < num_RLEs]. The inherited
+      // tie-break (`delta_remaining >= rle_remaining`, then
+      // `rle_remaining >= delta_remaining` after the decrement) is equivalent
+      // only when num_RLEs >= num_deltas or num_RLEs == 0; for
+      // 0 < num_RLEs < num_deltas (e.g. {1, 2}) it undid the RLE layer before
+      // the first delta and produced wrong data without any error. Found by
+      // test_cascaded_coverage.
       for (int layer_idx = 0; layer_idx < max(num_RLEs, num_deltas);
            layer_idx++) {
-        if (delta_remaining > 0 && delta_remaining >= rle_remaining) {
+        const int k = max(num_RLEs, num_deltas) - 1 - layer_idx;
+        if (k < num_deltas) {
           // Decompress the delta layer
           block_delta_decompress<data_type, size_type, threadblock_size>(
               shared_input_buffer,
@@ -1351,7 +1703,7 @@ __device__ void cascaded_decompression_fcn(
           delta_remaining--;
         }
 
-        if (rle_remaining > 0 && rle_remaining >= delta_remaining) {
+        if (k < num_RLEs) {
           // Load the count array from global memory to shared memory
           if (block_read<run_type, size_type, threadblock_size>(
                   rle0_ptr + rle_offsets[rle_remaining - 1] / 4,
@@ -1359,7 +1711,9 @@ __device__ void cascaded_decompression_fcn(
                   partition_end_ptr,
                   reinterpret_cast<run_type*>(count_array),
                   nullptr,
-                  temp_count_array,
+                  count_scratch_aliases_output
+                      ? reinterpret_cast<uint32_t*>(shared_output_buffer)
+                      : temp_count_array,
                   bitpacking)
               != BlockIOStatus::success) {
             is_decompression_successful = false;
@@ -1401,6 +1755,10 @@ __device__ void cascaded_decompression_fcn(
         break;
       }
 
+      // CAS-S5s: the final LDS -> global store keeps the element loop — the
+      // 16-B variant measured neutral on gfx1100 and negative at saturation
+      // on gfx942 (the 4 KB per chunk already stream well as dword stores
+      // from 256 lanes), while the compression-side copies gained 7–22 %.
       for (int element_idx = threadIdx.x; element_idx < num_elements;
            element_idx += threadblock_size) {
         decompressed_ptr[element_idx] = shared_input_buffer[element_idx];
