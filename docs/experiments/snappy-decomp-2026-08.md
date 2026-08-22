@@ -13,7 +13,7 @@ Gates: see `docs/experiments/README.md`. Benchmark: `benchmark_snappy_chunked`.
 
 ---
 
-### SNP-D1 — yield the SIMD in the decoder's spin-waits (`s_sleep`)        Category: C1   Status: PENDING
+### SNP-D1 — yield the SIMD in the decoder's spin-waits (`s_sleep`)        Category: C1   Status: PENDING (gfx1100 neutral; gfx942 pending)
 Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
 Files: `src/device_functions.hiph`, `src/snappy/config.h`, `src/snappy/decompression_decode.hiph`,
 `src/snappy/decompression_prefetch.hiph`, `src/snappy/decompression_process.hiph`
@@ -38,8 +38,19 @@ Measured: (pending) lunaris gfx1100 wave32 and sdumont2nd4014 gfx942 wave64, ROC
 container, `benchmark_snappy_chunked` on tti_rsf_64x64x64_t050 / synth_binary / words
 inputs, `-p 65536`, `-x 512` and `-x 0`, 30 reps; sweep of the three tunables
 (0/0/0 = yield-only, 1/1/2 default, 2/2/4, 4/4/8).
-Result: (pending)
-Verdict: (pending)
+Result (gfx1100, RX 7900 XT, wave32, ROCm 7.0.1 container, commit f1a3e62 vs baseline 0263261,
+30 reps, median [Q1–Q3], `-p 65536`): decompression synth_binary x512 89.05 → 89.70 GB/s
+(×1.007), tti_rsf x512 89.78 → 89.54 (×0.997), words x32 25.17 → 25.45 (×1.011); small batch
+(x0) ×1.001 / ×1.007 / ×1.003; compression unchanged (27.06 / 26.97 / 3.75 GB/s, ×1.000);
+exact-bytes ladder identical on all six fixtures; all Snappy tests green. ctest of the
+underlying test branch: 1 pre-existing failure, `BitPackGPU_test` (legacy Cascaded unit test,
+gfx1100 wave32; unrelated to Snappy — to be investigated on the Cascaded branch).
+Verdict: NEUTRAL on gfx1100 (≤ +1 % decompression, within noise). The prediction "tens of %"
+did not hold on RDNA3 wave32: the polling waves are not stealing a measurable share of the
+SIMD from productive waves there. Side observation: decompression of copy-heavy input (words,
+25 GB/s) is 3.5× slower than of all-literal input (TTI/binary, ~89 GB/s) — the decoder is
+symbol-rate bound, which is what SNP-D3/D4/D7 target. Kept pending the gfx942 (wave64,
+8 waves/SIMD) measurement and the tunable sweep before a final verdict.
 
 ### SNP-D4 — compute wave-uniform decoder state on all lanes (no lane-0 + broadcast)   Category: C2   Status: PENDING
 Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
