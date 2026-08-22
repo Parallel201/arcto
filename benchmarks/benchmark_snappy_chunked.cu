@@ -28,13 +28,8 @@
 
 #include "benchmark_template_chunked.cuh"
 
-#ifdef __HIP_PLATFORM_AMD__
 #include "arcto/snappy.h"
-#else
-#include "nvcomp/snappy.h"
-#endif
 
-#ifdef __HIP_PLATFORM_AMD__
 GENERATE_CHUNKED_BENCHMARK(
     arctoBatchedSnappyCompressGetTempSize,
     arctoBatchedSnappyCompressGetMaxOutputChunkSize,
@@ -43,13 +38,3 @@ GENERATE_CHUNKED_BENCHMARK(
     arctoBatchedSnappyDecompressAsync,
     inputAlwaysValid,
     arctoBatchedSnappyDefaultOpts);
-#else
-GENERATE_CHUNKED_BENCHMARK(
-    nvcompBatchedSnappyCompressGetTempSize,
-    nvcompBatchedSnappyCompressGetMaxOutputChunkSize,
-    nvcompBatchedSnappyCompressAsync,
-    nvcompBatchedSnappyDecompressGetTempSize,
-    nvcompBatchedSnappyDecompressAsync,
-    inputAlwaysValid,
-    nvcompBatchedSnappyDefaultOpts);
-#endif

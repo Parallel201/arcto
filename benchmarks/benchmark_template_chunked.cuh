@@ -31,18 +31,19 @@
 
 #include "benchmark_common.h"
 
-#ifdef __HIP_PLATFORM_AMD__
+// ARCTO's own API on every platform: HIP on AMD, and on NVIDIA the same HIP
+// source built with the CUDA backend (include/cuda_shim maps the HIP runtime
+// calls). Comparisons against nvCOMP build the same sources with
+// ARCTO_BENCHMARK_NVCOMP (see benchmark_nvcomp_compat.h).
+#if defined(ARCTO_BENCHMARK_NVCOMP)
+#include "benchmark_nvcomp_compat.h"
+#else
 #include "arcto.h"
 #include "arcto/host_batch.h"
 #include "arcto/host_batch_adaptive.h"
 #include "arcto/lz4.h"
 #include "arcto/snappy.h"
 #include "arcto/cascaded.h"
-#else
-#include "nvcomp.h"
-#include "nvcomp/lz4.h"
-#include "nvcomp/snappy.h"
-#include "nvcomp/cascaded.h"
 #endif
 
 #include <algorithm>
@@ -58,10 +59,8 @@
 #include <cassert>
 #include <cstdlib>
 
-#ifdef __HIP_PLATFORM_AMD__
 #include <hip/hip_runtime.h>
 #include <thrust/device_vector.h>
-#include <thrust/system/hip/execution_policy.h>
 #define gpuStream_t hipStream_t
 #define gpuEvent_t hipEvent_t
 #define gpuSuccess hipSuccess
@@ -78,29 +77,6 @@
 #define gpuMemcpyHostToDevice hipMemcpyHostToDevice
 #define gpuMemcpyDeviceToHost hipMemcpyDeviceToHost
 #define gpuSetDevice hipSetDevice
-// Note: arcto uses C API without namespaces
-#else
-#include <cuda_runtime.h>
-#include <thrust/device_vector.h>
-#include <thrust/system/cuda/execution_policy.h>
-#define gpuStream_t cudaStream_t
-#define gpuEvent_t cudaEvent_t
-#define gpuSuccess cudaSuccess
-#define gpuStreamCreate cudaStreamCreate
-#define gpuStreamDestroy cudaStreamDestroy
-#define gpuStreamSynchronize cudaStreamSynchronize
-#define gpuEventCreate cudaEventCreate
-#define gpuEventRecord cudaEventRecord
-#define gpuEventElapsedTime cudaEventElapsedTime
-#define gpuEventDestroy cudaEventDestroy
-#define gpuMalloc cudaMalloc
-#define gpuFree cudaFree
-#define gpuMemcpy cudaMemcpy
-#define gpuMemcpyHostToDevice cudaMemcpyHostToDevice
-#define gpuMemcpyDeviceToHost cudaMemcpyDeviceToHost
-#define gpuSetDevice cudaSetDevice
-// Note: nvcomp uses C API without namespaces
-#endif
 
 #define GENERATE_CHUNKED_BENCHMARK( \
     comp_get_temp, \
@@ -377,7 +353,6 @@ multi_file(const std::vector<std::string>& filenames, const size_t chunk_size,
 }
 }
 
-#ifdef __HIP_PLATFORM_AMD__
 template<
     typename CompGetTempT,
     typename CompGetSizeT,
@@ -1022,493 +997,6 @@ run_benchmark_template(
     }
   }
 }
-#else
-// CUDA version
-template<
-    typename CompGetTempT,
-    typename CompGetSizeT,
-    typename CompAsyncT,
-    typename DecompGetTempT,
-    typename DecompAsyncT,
-    typename IsInputValidT,
-    typename FormatOptsT>
-void
-run_benchmark_template(
-    CompGetTempT BatchedCompressGetTempSize,
-    CompGetSizeT BatchedCompressGetMaxOutputChunkSize,
-    CompAsyncT BatchedCompressAsync,
-    DecompGetTempT BatchedDecompressGetTempSize,
-    DecompAsyncT BatchedDecompressAsync,
-    IsInputValidT IsInputValid,
-    const FormatOptsT format_opts,
-    const std::vector<std::vector<char>>& data,
-    const bool warmup,
-    const size_t count,
-    const bool csv_output,
-    const bool use_tabs,
-    const size_t duplicates,
-    const size_t num_files,
-    const bool /*pinned_input*/,
-    const bool /*report_phases*/,
-    const bool /*adaptive_tiled*/)
-{
-  benchmark::benchmark_assert(IsInputValid(data), "Invalid input data");
-
-  const std::string separator = use_tabs ? "\t" : ",";
-
-  size_t total_bytes = 0;
-  size_t chunk_size = 0;
-  for (const std::vector<char>& part : data) {
-    total_bytes += part.size();
-    if (part.size() > chunk_size) {
-      chunk_size = part.size();
-    }
-  }
-
-  // build up metadata
-  BatchData input_data(data);
-
-  cudaStream_t stream;
-  GPU_CHECK(cudaStreamCreate(&stream));
-
-  const size_t batch_size = input_data.size();
-
-  std::vector<size_t> h_input_sizes(batch_size);
-  GPU_CHECK(cudaMemcpy(h_input_sizes.data(), input_data.sizes(),
-      sizeof(size_t)*batch_size, cudaMemcpyDeviceToHost));
-
-  size_t compressed_size = 0;
-  double comp_time = 0.0;
-  double decomp_time = 0.0;
-  std::vector<double> comp_throughputs;
-  std::vector<double> decomp_throughputs;
-  std::vector<double> comp_times_ms;
-  std::vector<double> decomp_times_ms;
-  comp_throughputs.reserve(count);
-  decomp_throughputs.reserve(count);
-  comp_times_ms.reserve(count);
-  decomp_times_ms.reserve(count);
-
-  // Measure H2D transfer overhead (representative of input upload cost)
-  float h2d_ms = 0.0f;
-  if (!warmup && total_bytes > 0) {
-    void* d_transfer_buf;
-    GPU_CHECK(cudaMalloc(&d_transfer_buf, total_bytes));
-    uint8_t* dst = static_cast<uint8_t*>(d_transfer_buf);
-    cudaEvent_t ts, te;
-    GPU_CHECK(cudaEventCreate(&ts));
-    GPU_CHECK(cudaEventCreate(&te));
-    GPU_CHECK(cudaEventRecord(ts, stream));
-    for (const auto& chunk : data) {
-      GPU_CHECK(cudaMemcpyAsync(dst, chunk.data(), chunk.size(),
-          cudaMemcpyHostToDevice, stream));
-      dst += chunk.size();
-    }
-    GPU_CHECK(cudaEventRecord(te, stream));
-    GPU_CHECK(cudaStreamSynchronize(stream));
-    GPU_CHECK(cudaEventElapsedTime(&h2d_ms, ts, te));
-    GPU_CHECK(cudaFree(d_transfer_buf));
-    GPU_CHECK(cudaEventDestroy(ts));
-    GPU_CHECK(cudaEventDestroy(te));
-  }
-
-  for (size_t iter = 0; iter < count; ++iter) {
-    // compression
-    nvcompStatus_t status;
-
-    // Compress on the GPU using batched API
-    size_t comp_temp_bytes;
-    status = BatchedCompressGetTempSize(
-        batch_size, chunk_size, format_opts, &comp_temp_bytes);
-    benchmark::benchmark_assert(status == nvcompSuccess,
-        "BatchedCompressGetTempSize() failed.");
-
-    void* d_comp_temp;
-    GPU_CHECK(cudaMalloc(&d_comp_temp, comp_temp_bytes));
-
-    size_t max_out_bytes;
-    status = BatchedCompressGetMaxOutputChunkSize(
-        chunk_size, format_opts, &max_out_bytes);
-    benchmark::benchmark_assert(status == nvcompSuccess,
-        "BatchedGetMaxOutputChunkSize() failed.");
-
-    BatchData compress_data(max_out_bytes, batch_size);
-
-    cudaEvent_t start, end;
-    GPU_CHECK(cudaEventCreate(&start));
-    GPU_CHECK(cudaEventCreate(&end));
-    GPU_CHECK(cudaEventRecord(start, stream));
-
-    status = BatchedCompressAsync(
-        input_data.ptrs(),
-        input_data.sizes(),
-        chunk_size,
-        batch_size,
-        d_comp_temp,
-        comp_temp_bytes,
-        compress_data.ptrs(),
-        compress_data.sizes(),
-        format_opts,
-        stream);
-    benchmark::benchmark_assert(status == nvcompSuccess,
-        "BatchedCompressAsync() failed.");
-
-    GPU_CHECK(cudaEventRecord(end, stream));
-    GPU_CHECK(cudaStreamSynchronize(stream));
-
-    // free compression memory
-    GPU_CHECK(cudaFree(d_comp_temp));
-
-    float compress_ms;
-    GPU_CHECK(cudaEventElapsedTime(&compress_ms, start, end));
-    if (!warmup) {
-      comp_throughputs.push_back((double)total_bytes / (1.0e9 * compress_ms * 1.0e-3));
-      comp_times_ms.push_back(compress_ms);
-    }
-
-    // compute compression ratio
-    std::vector<size_t> compressed_sizes_host(compress_data.size());
-    GPU_CHECK(cudaMemcpy(
-        compressed_sizes_host.data(),
-        compress_data.sizes(),
-        compress_data.size() * sizeof(*compress_data.sizes()),
-        cudaMemcpyDeviceToHost));
-
-    size_t comp_bytes = 0;
-    for (const size_t s : compressed_sizes_host) {
-      comp_bytes += s;
-    }
-
-    // Decompression
-    size_t decomp_temp_bytes;
-    status = BatchedDecompressGetTempSize(
-        compress_data.size(), chunk_size, &decomp_temp_bytes);
-    benchmark::benchmark_assert(status == nvcompSuccess,
-        "BatchedDecompressGetTempSize() failed.");
-
-    void* d_decomp_temp;
-    GPU_CHECK(cudaMalloc(&d_decomp_temp, decomp_temp_bytes));
-
-    size_t* d_decomp_sizes;
-    GPU_CHECK(cudaMalloc(
-        (void**)&d_decomp_sizes, batch_size*sizeof(*d_decomp_sizes)));
-
-    nvcompStatus_t* d_decomp_statuses;
-    GPU_CHECK(cudaMalloc(
-        (void**)&d_decomp_statuses, batch_size*sizeof(*d_decomp_statuses)));
-
-    std::vector<void*> h_output_ptrs(batch_size);
-    for (size_t i = 0; i < batch_size; ++i) {
-      GPU_CHECK(cudaMalloc((void**)&h_output_ptrs[i], h_input_sizes[i]));
-    }
-    void ** d_output_ptrs;
-    GPU_CHECK(cudaMalloc((void**)&d_output_ptrs,
-        sizeof(*d_output_ptrs)*batch_size));
-    GPU_CHECK(cudaMemcpy(d_output_ptrs, h_output_ptrs.data(),
-        sizeof(*d_output_ptrs)*batch_size, cudaMemcpyHostToDevice));
-
-    GPU_CHECK(cudaEventRecord(start, stream));
-    status = BatchedDecompressAsync(
-        compress_data.ptrs(),
-        compress_data.sizes(),
-        input_data.sizes(),
-        d_decomp_sizes,
-        batch_size,
-        d_decomp_temp,
-        decomp_temp_bytes,
-        d_output_ptrs,
-        d_decomp_statuses,
-        stream);
-    benchmark::benchmark_assert(
-        status == nvcompSuccess,
-        "BatchedDecompressAsync() not successful");
-
-    GPU_CHECK(cudaEventRecord(end, stream));
-    GPU_CHECK(cudaStreamSynchronize(stream));
-
-    float decompress_ms;
-    GPU_CHECK(cudaEventElapsedTime(&decompress_ms, start, end));
-    GPU_CHECK(cudaEventDestroy(start));
-    GPU_CHECK(cudaEventDestroy(end));
-    if (!warmup) {
-      decomp_throughputs.push_back((double)total_bytes / (1.0e9 * decompress_ms * 1.0e-3));
-      decomp_times_ms.push_back(decompress_ms);
-    }
-
-    GPU_CHECK(cudaFree(d_output_ptrs));
-
-    // verify success each time
-    std::vector<size_t> h_decomp_sizes(batch_size);
-    GPU_CHECK(cudaMemcpy(h_decomp_sizes.data(), d_decomp_sizes,
-      sizeof(*d_decomp_sizes)*batch_size, cudaMemcpyDeviceToHost));
-
-    std::vector<nvcompStatus_t> h_decomp_statuses(batch_size);
-    GPU_CHECK(cudaMemcpy(h_decomp_statuses.data(), d_decomp_statuses,
-      sizeof(*d_decomp_statuses)*batch_size, cudaMemcpyDeviceToHost));
-    for (size_t i = 0; i < batch_size; ++i) {
-      benchmark::benchmark_assert(h_decomp_statuses[i] == nvcompSuccess, "Batch item not successfuly decompressed: i=" + std::to_string(i) + ": status=" +
-      std::to_string(h_decomp_statuses[i]));
-      benchmark::benchmark_assert(h_decomp_sizes[i] == h_input_sizes[i], "Batch item of wrong size: i=" + std::to_string(i) + ": act_size=" +
-      std::to_string(h_decomp_sizes[i]) + " exp_size=" +
-      std::to_string(h_input_sizes[i]));
-    }
-
-    GPU_CHECK(cudaFree(d_decomp_temp));
-    GPU_CHECK(cudaFree(d_decomp_sizes));
-    GPU_CHECK(cudaFree(d_decomp_statuses));
-
-    // only verify last iteration
-    if (iter + 1 == count) {
-      std::vector<void*> h_input_ptrs(batch_size);
-      GPU_CHECK(cudaMemcpy(h_input_ptrs.data(), input_data.ptrs(),
-          sizeof(void*)*batch_size, cudaMemcpyDeviceToHost));
-      for (size_t i = 0; i < batch_size; ++i) {
-        std::vector<uint8_t> exp_data(h_input_sizes[i]);
-        GPU_CHECK(cudaMemcpy(exp_data.data(), h_input_ptrs[i],
-            h_input_sizes[i], cudaMemcpyDeviceToHost));
-        std::vector<uint8_t> act_data(h_decomp_sizes[i]);
-        GPU_CHECK(cudaMemcpy(act_data.data(), h_output_ptrs[i],
-            h_decomp_sizes[i], cudaMemcpyDeviceToHost));
-        for (size_t j = 0; j < h_input_sizes[i]; ++j) {
-          if (act_data[j] != exp_data[j]) {
-            benchmark::benchmark_assert(false, "Batch item decompressed output did not match input: i="+std::to_string(i) + ": j=" + std::to_string(j) + " act=" + std::to_string(act_data[j]) + " exp=" +
-            std::to_string(exp_data[j]));
-          }
-        }
-      }
-    }
-
-    for (size_t i = 0; i < batch_size; ++i) {
-      GPU_CHECK(cudaFree(h_output_ptrs[i]));
-    }
-
-    // count everything from our iteration
-    compressed_size += comp_bytes;
-    comp_time += compress_ms * 1.0e-3;
-    decomp_time += decompress_ms * 1.0e-3;
-  }
-  GPU_CHECK(cudaStreamDestroy(stream));
-
-  // Save accumulated values before averaging
-  const size_t total_compressed_accumulated = compressed_size;
-  const double total_comp_time_s = comp_time;
-
-  // average iterations
-  compressed_size /= count;
-  comp_time /= count;
-  decomp_time /= count;
-
-  if (!warmup) {
-    // Per-repetition output. The aggregated CSV below reports mean + stddev,
-    // which is adequate for kernel throughput but does not satisfy the thesis
-    // measurement protocol, which requires the raw per-repetition values to be
-    // preserved. Those values already exist in the vectors; this only writes
-    // them out.
-    //
-    // Driven by the environment rather than a CLI flag on purpose: a flag would
-    // have to be threaded through the run_benchmark macro, its forward
-    // declaration, both backend variants and every call site, whereas this is
-    // one local block. Same pattern as FLETCHER_COMP_LOG in fletcher-modern.
-    //
-    //   ARCTO_PER_REP_CSV=<path>   append per-repetition rows to <path>
-    //   ARCTO_PER_REP_TAG=<label>  identifies the configuration within a sweep
-    //
-    // Rows are appended, so one file accumulates a whole sweep; the header is
-    // written only while the file is still empty.
-    if (const char* per_rep_path = std::getenv("ARCTO_PER_REP_CSV")) {
-      if (per_rep_path[0] != '\0' && !comp_throughputs.empty()) {
-        const char* per_rep_tag = std::getenv("ARCTO_PER_REP_TAG");
-        std::ofstream frep(per_rep_path, std::ios::app);
-        if (frep) {
-          frep.seekp(0, std::ios::end);
-          if (frep.tellp() == std::streampos(0)) {
-            frep << "Tag,Rep,ChunkSize,NumFiles,Duplicates,UncompressedBytes,"
-                    "Chunks,CompThroughputGBs,DecompThroughputGBs,"
-                    "CompTimeMs,DecompTimeMs\n";
-          }
-          for (size_t r = 0; r < comp_throughputs.size(); ++r) {
-            frep << (per_rep_tag ? per_rep_tag : "") << ',' << r << ','
-                 << chunk_size << ',' << num_files << ',' << duplicates << ','
-                 << total_bytes << ',' << data.size() << ','
-                 << std::fixed << std::setprecision(6)
-                 << comp_throughputs[r] << ','
-                 << (r < decomp_throughputs.size() ? decomp_throughputs[r] : 0.0) << ','
-                 << comp_times_ms[r] << ','
-                 << (r < decomp_times_ms.size() ? decomp_times_ms[r] : 0.0) << '\n';
-          }
-        }
-      }
-    }
-
-    const double comp_ratio = (double)total_bytes / compressed_size;
-    const double compression_throughput_gbs = (double)total_bytes / (1.0e9 * comp_time);
-    const double decompression_throughput_gbs = (double)total_bytes / (1.0e9 * decomp_time);
-    const double effective_bw_gbs = compression_throughput_gbs / comp_ratio;
-    const double space_saved_bytes = (double)(total_bytes - compressed_size);
-    const double space_saved_pct = (total_bytes > 0) ? (100.0 * space_saved_bytes / total_bytes) : 0.0;
-    const float d2h_ms = (total_bytes > 0)
-        ? static_cast<float>(h2d_ms * (double)compressed_size / (double)total_bytes)
-        : 0.0f;
-    const double transfer_ms = h2d_ms + d2h_ms;
-    const double comp_time_ms = comp_time * 1.0e3;
-    const double decomp_time_ms = decomp_time * 1.0e3;
-    const double comp_total_ms = comp_time_ms + transfer_ms;
-    const double decomp_total_ms = decomp_time_ms + transfer_ms;
-    const double comp_pct = (comp_total_ms > 0) ? (100.0 * comp_time_ms / comp_total_ms) : 100.0;
-    const double decomp_pct = (decomp_total_ms > 0) ? (100.0 * decomp_time_ms / decomp_total_ms) : 100.0;
-    const double avg_chunk_time_ms = (batch_size > 0) ? (comp_time_ms / batch_size) : 0.0;
-    const double chunks_per_second = (comp_time > 0) ? ((double)batch_size / comp_time) : 0.0;
-
-    if (!csv_output) {
-      const int LW = 26;
-      auto lbl = [&](const std::string& s) -> std::string {
-        return "  " + s + std::string(std::max(0, LW - (int)s.size()), ' ');
-      };
-      std::cout << std::fixed;
-
-      std::cout << "Compression:" << std::endl;
-      std::cout << lbl("Throughput:")
-                << std::setprecision(2) << compression_throughput_gbs << " GB/s" << std::endl;
-      std::cout << lbl("Effective Bandwidth:")
-                << std::setprecision(2) << effective_bw_gbs << " GB/s" << std::endl;
-      std::cout << lbl("Total Time:")
-                << std::setprecision(1) << comp_total_ms << " ms" << std::endl;
-      std::cout << lbl("Compression Time:")
-                << std::setprecision(1) << comp_time_ms
-                << " ms (" << std::setprecision(1) << comp_pct << "%)" << std::endl;
-      std::cout << lbl("Transfer Time:")
-                << std::setprecision(1) << transfer_ms
-                << " ms (" << std::setprecision(1) << (100.0 - comp_pct) << "%)" << std::endl;
-      std::cout << lbl("Compression Ratio:")
-                << std::setprecision(2) << comp_ratio << "x" << std::endl;
-      std::cout << lbl("Space Saved:")
-                << std::setprecision(2) << (space_saved_bytes * 1.0e-6)
-                << " MB (" << std::setprecision(1) << space_saved_pct << "%)" << std::endl;
-      std::cout << std::endl;
-
-      std::cout << "Decompression:" << std::endl;
-      std::cout << lbl("Throughput:")
-                << std::setprecision(2) << decompression_throughput_gbs << " GB/s" << std::endl;
-      std::cout << lbl("Total Time:")
-                << std::setprecision(1) << decomp_total_ms << " ms" << std::endl;
-      std::cout << lbl("Decompression Time:")
-                << std::setprecision(1) << decomp_time_ms
-                << " ms (" << std::setprecision(1) << decomp_pct << "%)" << std::endl;
-      std::cout << lbl("Transfer Time:")
-                << std::setprecision(1) << transfer_ms
-                << " ms (" << std::setprecision(1) << (100.0 - decomp_pct) << "%)" << std::endl;
-      std::cout << std::endl;
-
-      std::cout << "Chunk Statistics:" << std::endl;
-      std::cout << lbl("Number of Chunks:") << batch_size << std::endl;
-      std::cout << lbl("Chunk Size:")
-                << std::setprecision(0) << (chunk_size / 1024.0) << " KB" << std::endl;
-      std::cout << lbl("Avg Time per Chunk:")
-                << std::setprecision(3) << avg_chunk_time_ms << " ms" << std::endl;
-      std::cout << lbl("Chunks per Second:")
-                << std::setprecision(0) << chunks_per_second << std::endl;
-      std::cout << std::endl;
-
-      const double total_input_gb = (double)total_bytes * count * 1.0e-9;
-      const double total_output_gb = (double)total_compressed_accumulated * 1.0e-9;
-      std::cout << "Accumulated Statistics (" << count << " iteration"
-                << (count != 1 ? "s" : "") << "):" << std::endl;
-      std::cout << lbl("Total Data Processed:")
-                << std::setprecision(2) << total_input_gb
-                << " GB -> " << total_output_gb << " GB" << std::endl;
-      std::cout << lbl("Total Time:")
-                << std::setprecision(2) << total_comp_time_s << " s" << std::endl;
-      std::cout << lbl("Avg Compression Ratio:")
-                << std::setprecision(2) << comp_ratio << "x" << std::endl;
-      auto stddev = [](const std::vector<double>& v) -> double {
-        if (v.size() < 2) return 0.0;
-        const double mean = std::accumulate(v.begin(), v.end(), 0.0) / v.size();
-        double sq = 0.0;
-        for (double x : v) sq += (x - mean) * (x - mean);
-        return std::sqrt(sq / v.size());
-      };
-      if (count > 1 && !comp_throughputs.empty()) {
-        const double tmin = *std::min_element(comp_throughputs.begin(), comp_throughputs.end());
-        const double tmax = *std::max_element(comp_throughputs.begin(), comp_throughputs.end());
-        const double comp_std  = stddev(comp_throughputs);
-        const double decomp_std = stddev(decomp_throughputs);
-        const double comp_time_std = stddev(comp_times_ms);
-        const double decomp_time_std = stddev(decomp_times_ms);
-        std::cout << lbl("Throughput Range:")
-                  << std::setprecision(2) << tmin << " - " << tmax << " GB/s" << std::endl;
-        std::cout << lbl("Comp Throughput StdDev:")
-                  << std::setprecision(2) << comp_std << " GB/s" << std::endl;
-        std::cout << lbl("Decomp Throughput StdDev:")
-                  << std::setprecision(2) << decomp_std << " GB/s" << std::endl;
-        std::cout << lbl("Comp Time StdDev:")
-                  << std::setprecision(3) << comp_time_std << " ms" << std::endl;
-        std::cout << lbl("Decomp Time StdDev:")
-                  << std::setprecision(3) << decomp_time_std << " ms" << std::endl;
-      }
-      std::cout << lbl("Avg Throughput:")
-                << std::setprecision(2) << compression_throughput_gbs << " GB/s" << std::endl;
-      std::cout << std::endl;
-    } else {
-      // CSV header
-      std::cout << "Files";
-      std::cout << separator << "Duplicate data";
-      std::cout << separator << "Size in MB";
-      std::cout << separator << "Pages";
-      std::cout << separator << "Avg page size in KB";
-      std::cout << separator << "Max page size in KB";
-      std::cout << separator << "Ucompressed size in bytes";
-      std::cout << separator << "Compressed size in bytes";
-      std::cout << separator << "Compression ratio";
-      std::cout << separator << "Compression throughput (uncompressed) in GB/s";
-      std::cout << separator << "Decompression throughput (uncompressed) in GB/s";
-      std::cout << separator << "Compression time (ms)";
-      std::cout << separator << "Decompression time (ms)";
-      std::cout << separator << "Transfer H2D (ms)";
-      std::cout << separator << "Transfer D2H (ms)";
-      std::cout << separator << "Total time (ms)";
-      std::cout << separator << "Avg chunk time (ms)";
-      std::cout << separator << "Comp throughput stddev (GB/s)";
-      std::cout << separator << "Decomp throughput stddev (GB/s)";
-      std::cout << separator << "Comp time stddev (ms)";
-      std::cout << separator << "Decomp time stddev (ms)";
-      std::cout << std::endl;
-
-      // CSV values
-      std::cout << num_files;
-      std::cout << separator << duplicates;
-      std::cout << separator << std::fixed << std::setprecision(6) << (total_bytes * 1e-6);
-      std::cout << separator << data.size();
-      std::cout << separator << ((1e-3 * total_bytes) / data.size());
-      std::cout << separator << (1e-3 * chunk_size);
-      std::cout << separator << total_bytes;
-      std::cout << separator << compressed_size;
-      std::cout << separator << std::setprecision(2) << comp_ratio;
-      std::cout << separator << compression_throughput_gbs;
-      std::cout << separator << decompression_throughput_gbs;
-      std::cout << separator << std::setprecision(3) << comp_time_ms;
-      std::cout << separator << decomp_time_ms;
-      std::cout << separator << h2d_ms;
-      std::cout << separator << d2h_ms;
-      std::cout << separator << comp_total_ms;
-      std::cout << separator << std::setprecision(6) << avg_chunk_time_ms;
-      {
-        auto stddev = [](const std::vector<double>& v) -> double {
-          if (v.size() < 2) return 0.0;
-          const double mean = std::accumulate(v.begin(), v.end(), 0.0) / v.size();
-          double sq = 0.0;
-          for (double x : v) sq += (x - mean) * (x - mean);
-          return std::sqrt(sq / v.size());
-        };
-        std::cout << separator << std::setprecision(4) << stddev(comp_throughputs);
-        std::cout << separator << stddev(decomp_throughputs);
-        std::cout << separator << stddev(comp_times_ms);
-        std::cout << separator << stddev(decomp_times_ms);
-      }
-      std::cout << std::endl;
-    }
-  }
-}
-#endif
 
 void run_benchmark(
     const std::vector<std::vector<char>>& data,
@@ -1733,13 +1221,8 @@ int main(int argc, char** argv)
   GPU_CHECK(gpuSetDevice(args.gpu));
 
   if (!args.csv_output) {
-#ifdef __HIP_PLATFORM_AMD__
     hipDeviceProp_t props;
     GPU_CHECK(hipGetDeviceProperties(&props, args.gpu));
-#else
-    cudaDeviceProp props;
-    GPU_CHECK(cudaGetDeviceProperties(&props, args.gpu));
-#endif
     std::cout << "GPU Information:" << std::endl;
     std::cout << "  Device:          " << props.name << std::endl;
     std::cout << "  Compute Units:   " << props.multiProcessorCount << std::endl;

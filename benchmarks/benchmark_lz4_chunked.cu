@@ -28,53 +28,25 @@
 
 #include "benchmark_template_chunked.cuh"
 
-#ifdef __HIP_PLATFORM_AMD__
 #include "arcto/lz4.h"
-#else
-#include "nvcomp/lz4.h"
-#endif
 
 // Test for the asynchronous C++ interface
-#ifdef __HIP_PLATFORM_AMD__
 static arctoBatchedLZ4Opts_t arctoBatchedLZ4TestOpts
     = {ARCTO_TYPE_CHAR};
-#else
-static nvcompBatchedLZ4Opts_t nvcompBatchedLZ4TestOpts
-    = {NVCOMP_TYPE_CHAR};
-#endif
 
 static bool isLZ4InputValid(const std::vector<std::vector<char>>& data)
 {
-#ifdef __HIP_PLATFORM_AMD__
   arctoType_t data_type = arctoBatchedLZ4TestOpts.data_type;
-#else
-  nvcompType_t data_type = nvcompBatchedLZ4TestOpts.data_type;
-#endif
 
   size_t typeSize = 0;
-#ifdef __HIP_PLATFORM_AMD__
   if (data_type == ARCTO_TYPE_CHAR || data_type == ARCTO_TYPE_UCHAR
       || data_type == ARCTO_TYPE_BITS) {
-#else
-  if (data_type == NVCOMP_TYPE_CHAR || data_type == NVCOMP_TYPE_UCHAR
-      || data_type == NVCOMP_TYPE_BITS) {
-#endif
     typeSize = 1;
-#ifdef __HIP_PLATFORM_AMD__
   } else if (
       data_type == ARCTO_TYPE_SHORT || data_type == ARCTO_TYPE_USHORT) {
-#else
-  } else if (
-      data_type == NVCOMP_TYPE_SHORT || data_type == NVCOMP_TYPE_USHORT) {
-#endif
     typeSize = 2;
-#ifdef __HIP_PLATFORM_AMD__
   } else if (
       data_type == ARCTO_TYPE_INT || data_type == ARCTO_TYPE_UINT) {
-#else
-  } else if (
-      data_type == NVCOMP_TYPE_INT || data_type == NVCOMP_TYPE_UINT) {
-#endif
     typeSize = 4;
   }
 
@@ -91,7 +63,6 @@ static bool isLZ4InputValid(const std::vector<std::vector<char>>& data)
   return valid;
 }
 
-#ifdef __HIP_PLATFORM_AMD__
 GENERATE_CHUNKED_BENCHMARK(
     arctoBatchedLZ4CompressGetTempSize,
     arctoBatchedLZ4CompressGetMaxOutputChunkSize,
@@ -100,13 +71,3 @@ GENERATE_CHUNKED_BENCHMARK(
     arctoBatchedLZ4DecompressAsync,
     isLZ4InputValid,
     arctoBatchedLZ4TestOpts);
-#else
-GENERATE_CHUNKED_BENCHMARK(
-    nvcompBatchedLZ4CompressGetTempSize,
-    nvcompBatchedLZ4CompressGetMaxOutputChunkSize,
-    nvcompBatchedLZ4CompressAsync,
-    nvcompBatchedLZ4DecompressGetTempSize,
-    nvcompBatchedLZ4DecompressAsync,
-    isLZ4InputValid,
-    nvcompBatchedLZ4TestOpts);
-#endif

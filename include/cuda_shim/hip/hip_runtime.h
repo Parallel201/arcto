@@ -65,6 +65,13 @@
   #define hipStreamCreate cudaStreamCreate
   #define hipStreamDestroy cudaStreamDestroy
   #define hipStreamSynchronize cudaStreamSynchronize
+  #define hipDeviceAttributeWarpSize cudaDevAttrWarpSize
+  #define hipMemGetInfo cudaMemGetInfo
+  #define hipStreamNonBlocking cudaStreamNonBlocking
+  #define hipStreamCreateWithFlags cudaStreamCreateWithFlags
+  #define hipEventSynchronize cudaEventSynchronize
+  #define hipEventDestroy cudaEventDestroy
+  #define hipSetDevice cudaSetDevice
   #define hipStream_t cudaStream_t
   #define hipSuccess cudaSuccess
 #else

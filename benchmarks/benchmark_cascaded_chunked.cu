@@ -28,13 +28,8 @@
 
 #include "benchmark_template_chunked.cuh"
 
-#ifdef __HIP_PLATFORM_AMD__
 #include "arcto/cascaded.h"
-#else
-#include "nvcomp/cascaded.h"
-#endif
 
-#ifdef __HIP_PLATFORM_AMD__
 GENERATE_CHUNKED_BENCHMARK(
     arctoBatchedCascadedCompressGetTempSize,
     arctoBatchedCascadedCompressGetMaxOutputChunkSize,
@@ -43,13 +38,3 @@ GENERATE_CHUNKED_BENCHMARK(
     arctoBatchedCascadedDecompressAsync,
     inputAlwaysValid,
     arctoBatchedCascadedDefaultOpts);
-#else
-GENERATE_CHUNKED_BENCHMARK(
-    nvcompBatchedCascadedCompressGetTempSize,
-    nvcompBatchedCascadedCompressGetMaxOutputChunkSize,
-    nvcompBatchedCascadedCompressAsync,
-    nvcompBatchedCascadedDecompressGetTempSize,
-    nvcompBatchedCascadedDecompressAsync,
-    inputAlwaysValid,
-    nvcompBatchedCascadedDefaultOpts);
-#endif
