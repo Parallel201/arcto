@@ -17,7 +17,7 @@ integration branch.
 
 ---
 
-### SNP-C5 — clear the whole hash map with 16-byte LDS stores (fixes the wave64 half-clear)   Category: C4   Status: KEPT (correctness; neutral on gfx1100, gfx942 pending)
+### SNP-C5 — clear the whole hash map with 16-byte LDS stores (fixes the wave64 half-clear)   Category: C4   Status: KEPT (correctness; neutral gfx1100, +1…+3 % gfx942)
 Commit: (this commit)  (branch `opt/snappy-comp-2026-08`)
 Files: `src/snappy/compression.hiph`, `src/snappy/compression_state.hiph`
 Change: `hash_map` (4096 × `uint16_t` = 8 KB in LDS) is `alignas(16)` and cleared with `uint4`
@@ -37,8 +37,10 @@ Measured: (pending) `benchmark_snappy_chunked` compression column, exact-bytes l
 `test_snappy_coverage` (determinism check: two compressions identical).
 Result: gfx1100 (RX 7900 XT, wave32, ROCm 7.0.1 container, 30 reps, median, `-p 65536`; compression GB/s at saturation binary / tti / words = 27.07 / 27.02 / 3.75 baseline, small batch 1.12 / 1.27 / 1.87): compression ×1.001 / ×0.999 / ×0.998 (x0 ×1.002 / ×1.001 / ×1.001); decompression unchanged; exact-bytes ladder identical (wave32 clears the whole table either way); tests green incl. the determinism check.
 Verdict: KEPT — a correctness/determinism fix for wave64 with no measurable cost on wave32. gfx942 sweep pending (bytes may legitimately move there).
+Result gfx942 (MI300A, wave64, ROCm 7.0.1 container, 30 reps, median, `-p 65536`; compression GB/s at saturation binary / tti / words = 56.31 / 72.92 / 5.79 baseline, small batch 0.74 / 1.22 / 1.18; each ratio is vs the previous commit in the lineage): ×1.010 / ×0.999 / ×1.021 at saturation, ×1.017 / ×0.992 / ×1.027 at small batch. Bytes identical on the ladder (the half-cleared table on wave64 produced the same bytes here because stale slots only ever cause a missed or false-positive match that the verifier rejects; the fix still removes run-to-run nondeterminism of the match search).
+Verdict (final): KEPT — +1…+3 % on gfx942 (fewer false-positive hash hits from a fully cleared table), neutral on gfx1100; correctness fix for wave64.
 
-### SNP-C2 — one barrier per literal/copy pair (double-buffered match results)        Category: C1   Status: NEGATIVE on gfx1100 (−1…−4 %) — revert candidate, gfx942 pending
+### SNP-C2 — one barrier per literal/copy pair (double-buffered match results)        Category: C1   Status: NEGATIVE on gfx1100 (−1…−4 %) and gfx942 (−2…−6 %) — REVERTED
 Commit: (this commit)  (branch `opt/snappy-comp-2026-08`)
 Files: `src/snappy/compression.hiph`, `src/snappy/compression_state.hiph`
 Change: `literal_length`, `copy_length`, `copy_distance` become 2-slot arrays indexed by iteration
@@ -55,8 +57,10 @@ Prediction: ~5–10 % compression throughput; bytes identical (gfx1100) / identi
 Measured: (pending) same protocol as SNP-C5.
 Result: gfx1100 (RX 7900 XT, wave32, ROCm 7.0.1 container, 30 reps, median, `-p 65536`; compression GB/s at saturation binary / tti / words = 27.07 / 27.02 / 3.75 baseline, small batch 1.12 / 1.27 / 1.87): compression ×0.990 / ×0.997 / ×0.964 at saturation, ×0.966 / ×0.994 / ×0.960 at small batch; bytes identical; tests green.
 Verdict: NEGATIVE on gfx1100, contrary to the prediction: removing the top-of-loop barrier made the compressor 1–4 % slower on the copy-heavy inputs (binary, words) and left TTI flat. The barrier was evidently not a cost on the critical path on RDNA3 (two waves only), and the double-buffered slots add LDS address arithmetic and live state to every iteration. To be reverted unless gfx942 disagrees.
+Result gfx942 (MI300A, wave64, ROCm 7.0.1 container, 30 reps, median, `-p 65536`; compression GB/s at saturation binary / tti / words = 56.31 / 72.92 / 5.79 baseline, small batch 0.74 / 1.22 / 1.18; each ratio is vs the previous commit in the lineage): ×0.978 / ×0.998 / ×0.944 at saturation, ×0.972 / ×1.005 / ×0.920 at small batch (vs C5).
+Verdict (final): NEGATIVE on both architectures (−2…−6 % gfx942, −1…−4 % gfx1100) — REVERTED. The double-buffered match state costs registers/LDS traffic on every round and the barrier it removes is cheap on AMD (`s_barrier` on a single-wave... no: the block is one wave per chunk and the barrier is a wave-level no-op on one wave; on multi-wave blocks it is one `s_barrier`), so there was nothing to win.
 
-### SNP-C1 — one-round-ahead prefetch of the match-search data word                  Category: C3   Status: NEGATIVE on gfx1100 (−4…−7 %) — revert candidate, gfx942 pending
+### SNP-C1 — one-round-ahead prefetch of the match-search data word                  Category: C3   Status: NEGATIVE on gfx1100 (−4…−7 %) and gfx942 (−4…−7 %) — REVERTED
 Commit: (this commit)  (branch `opt/snappy-comp-2026-08`)
 Files: `src/snappy/compression.hiph`
 Change: in `FindFourByteMatch` each round loaded its lane's 4-byte window (`unaligned_load32`, two
@@ -73,8 +77,10 @@ binary, TTI), ≈ 0 on highly compressible data; bytes identical.
 Measured: (pending) same protocol as SNP-C5.
 Result: gfx1100 (RX 7900 XT, wave32, ROCm 7.0.1 container, 30 reps, median, `-p 65536`; compression GB/s at saturation binary / tti / words = 27.07 / 27.02 / 3.75 baseline, small batch 1.12 / 1.27 / 1.87): vs SNP-C2: compression ×0.959 / ×0.993 / ×0.931 at saturation, ×0.941 / ×1.004 / ×0.927 at small batch (cumulative vs baseline ×0.950 / ×0.991 / ×0.897); bytes identical; tests green.
 Verdict: NEGATIVE on gfx1100: on compressible data most match searches end in the first round, so the one-ahead load (two aligned dword loads + funnel shift per lane) is pure overhead every round, and because vector-memory counters retire in order the round's verification load cannot be consumed before the speculative one completes. The prediction 'nil on compressible data' was wrong by 4–7 %; on the literal-heavy TTI it is ≈ 0 as predicted. To be reverted unless gfx942 disagrees.
+Result gfx942 (MI300A, wave64, ROCm 7.0.1 container, 30 reps, median, `-p 65536`; compression GB/s at saturation binary / tti / words = 56.31 / 72.92 / 5.79 baseline, small batch 0.74 / 1.22 / 1.18; each ratio is vs the previous commit in the lineage): ×0.935 / ×0.957 / ×0.935 at saturation, ×0.932 / ×0.951 / ×0.946 at small batch (vs C2).
+Verdict (final): NEGATIVE on both architectures (−4…−7 % gfx942, −4…−7 % gfx1100) — REVERTED. The one-ahead load is wasted on every round that ends early (most, on compressible data) and costs VGPRs/LDS bandwidth on all of them.
 
-### SNP-C3 — dword literal emission in `StoreLiterals` (AMD)                            Category: C3   Status: ≈ NEUTRAL / slightly positive on gfx1100, gfx942 pending
+### SNP-C3 — dword literal emission in `StoreLiterals` (AMD)                            Category: C3   Status: ≈ neutral gfx1100, slightly negative gfx942 — REVERTED
 Commit: (this commit)  (branch `opt/snappy-comp-2026-08`)
 Files: `src/snappy/compression.hiph`
 Change (AMD only; CUDA keeps the byte loop): the emitting wave copied a literal run byte by byte
@@ -88,3 +94,6 @@ Prediction: small; visible only on random/binary/TTI inputs; bytes identical.
 Measured: (pending) same protocol as SNP-C5.
 Result: gfx1100 (RX 7900 XT, wave32, ROCm 7.0.1 container, 30 reps, median, `-p 65536`; compression GB/s at saturation binary / tti / words = 27.07 / 27.02 / 3.75 baseline, small batch 1.12 / 1.27 / 1.87): vs SNP-C1: compression ×1.007 / ×1.004 / ×1.000 at saturation, ×1.000 / ×0.997 / ×0.999 at small batch; bytes identical; tests green.
 Verdict: Small positive on the literal-heavy inputs (+0.4…+0.7 %), as predicted; kept pending gfx942.
+
+Result gfx942 (MI300A, wave64, ROCm 7.0.1 container, 30 reps, median, `-p 65536`; compression GB/s at saturation binary / tti / words = 56.31 / 72.92 / 5.79 baseline, small batch 0.74 / 1.22 / 1.18; each ratio is vs the previous commit in the lineage): ×0.990 / ×0.996 / ×0.992 at saturation, ×0.956 / ×1.000 / ×1.000 at small batch (vs C1).
+Verdict (final): neutral on gfx1100 (+0.4…+0.7 %), slightly negative on gfx942 (−0.4…−1 % at saturation, −4 % binary at small batch) — REVERTED. The literal-emission store is not where the compressor's time goes (the match search is), and the dword path adds per-literal tail logic; not worth carrying.
