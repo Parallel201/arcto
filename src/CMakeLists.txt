@@ -112,6 +112,19 @@ endif()
 
 include_directories("${arcto_SOURCE_DIR}/src")
 
+# hipCUB/rocPRIM block and warp primitives are used by the Cascaded and RLE
+# kernels (arcto_hipcub.hiph). Take the include directories from the imported
+# target so the dependency is explicit instead of resolving by accident through
+# HIP_INCLUDE_DIRS. Deliberately NOT target_link_libraries(): hip::hipcub pulls
+# hip::device, whose interface adds --offload-arch=<gfx> to every source of the
+# target -- including the host-only .cpp files compiled by the C++ compiler,
+# which then fail with "unrecognized command-line option". The CUDA backend
+# uses CUB from the toolkit.
+if (NOT CUDA_BACKEND)
+  target_include_directories(arcto PRIVATE
+    $<TARGET_PROPERTY:hip::hipcub,INTERFACE_INCLUDE_DIRECTORIES>)
+endif()
+
 if (bitcomp_FOUND)
   target_include_directories(arcto INTERFACE ${BITCOMP_INCLUDE_DIRS})
   target_link_libraries(arcto PRIVATE bitcomp)
