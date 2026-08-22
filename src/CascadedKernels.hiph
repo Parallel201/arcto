@@ -110,6 +110,18 @@ constexpr int cascaded_decompress_threadblock_size = (arcto::warpsize >= 64) ? 2
 // maps to using_warp_scan: one DPP/ds_swizzle scan per wave plus a single LDS
 // exchange of the wave prefixes, i.e. fewer LDS round trips per block scan on
 // wave64 blocks. Overridable per build; CUDA keeps CUB's default.
+// CAS-D2: elements per thread in each round of the delta-decompression block
+// scan (see block_delta_decompress). 4 on AMD (one 16-B slab of 32-bit values
+// per lane per round; 4x fewer block scans and barriers per chunk), 1 on the
+// CUDA backend (nvCOMP's original schedule). Overridable per build.
+#ifndef ARCTO_CASCADED_DELTA_ITEMS
+#  if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+#    define ARCTO_CASCADED_DELTA_ITEMS 4
+#  else
+#    define ARCTO_CASCADED_DELTA_ITEMS 1
+#  endif
+#endif
+
 #ifndef ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM
 #  if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
 #    define ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM hipcub::BLOCK_SCAN_WARP_SCANS
@@ -374,24 +386,38 @@ __device__ void block_delta_decompress(
   typedef hipcub::BlockScan<data_type, threadblock_size, ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM> BlockScan;
   __shared__ typename BlockScan::TempStorage temp_storage;
 
-  const int num_rounds = roundUpDiv(input_num_elements, threadblock_size);
+  // CAS-D2: each round scans `threadblock_size * ITEMS` elements, ITEMS
+  // consecutive elements per thread (blocked arrangement), so a 4 KB chunk of
+  // 32-bit values needs 16 / ITEMS (128 threads) or 8 / ITEMS (256 threads)
+  // block scans and barriers instead of one per `threadblock_size` elements.
+  // The carried `initial_value` makes the result identical to the one-item
+  // version (integer sums, any association).
+  constexpr int ITEMS = ARCTO_CASCADED_DELTA_ITEMS;
+  constexpr int TILE = threadblock_size * ITEMS;
+  const int num_rounds = roundUpDiv(input_num_elements, TILE);
 
   for (int round = 0; round < num_rounds; round++) {
-    const size_type idx = round * threadblock_size + threadIdx.x;
+    const size_type base = round * TILE + threadIdx.x * ITEMS;
 
-    data_type input_val = 0;
-    if (idx < input_num_elements)
-      input_val = input_buffer[idx];
+    data_type input_vals[ITEMS];
+#pragma unroll
+    for (int i = 0; i < ITEMS; i++) {
+      input_vals[i] = (base + i < input_num_elements) ? input_buffer[base + i]
+                                                      : static_cast<data_type>(0);
+    }
 
-    data_type output_val;
+    data_type output_vals[ITEMS];
     data_type aggregate;
     BlockScan(temp_storage)
         .ExclusiveScan(
-            input_val, output_val, initial_value, hipcub::Sum(), aggregate);
+            input_vals, output_vals, initial_value, hipcub::Sum(), aggregate);
     initial_value += aggregate;
 
-    if (idx < input_num_elements)
-      output_buffer[idx] = output_val;
+#pragma unroll
+    for (int i = 0; i < ITEMS; i++) {
+      if (base + i < input_num_elements)
+        output_buffer[base + i] = output_vals[i];
+    }
 
     __syncthreads();
   }

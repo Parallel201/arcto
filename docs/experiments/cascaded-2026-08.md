@@ -112,5 +112,24 @@ Measured: (pending) `benchmark_cascaded_chunked`, exact-bytes ladder, `test_casc
 Result: (pending)
 Verdict: (pending)
 
+### CAS-D2 — multi-item block scan in delta decompression                               Category: C1   Status: PENDING
+Commit: (this commit)  (branch `opt/cascaded-2026-08`)
+Files: `src/CascadedKernels.hiph` (`block_delta_decompress`)
+Change: each round scans `threadblock_size * ARCTO_CASCADED_DELTA_ITEMS` elements with
+`BlockScan::ExclusiveScan(T (&)[ITEMS], T (&)[ITEMS], initial, Sum, aggregate)` (blocked
+arrangement: ITEMS consecutive elements per thread), carrying `initial_value += aggregate`
+across rounds exactly as before. Default ITEMS = 4 on AMD, 1 on the CUDA backend (nvCOMP's
+original one-element-per-thread rounds); overridable per build (`-DARCTO_CASCADED_DELTA_ITEMS=N`).
+Why (mechanism): a 4 KB chunk of 32-bit values paid 16 (128 threads) / 8 (256 threads) block
+scans + barriers per delta layer; with ITEMS = 4 it pays 4 / 2. The per-thread slab is 16 B of
+LDS (four `ds_read_b32` at a 16-B lane stride, or one `ds_read_b128` when the compiler can prove
+alignment); the scan itself is the same wave-level primitive with a 4-element serial prefix per
+lane first. Integer sums in any association give identical output bytes.
+Prediction: +3–10 % decompression on delta-using inputs (default opts have one delta layer),
+≈ 0 on zeros; bytes identical. Try ITEMS = 2 / 8 as flag variants.
+Measured: (pending) `benchmark_cascaded_chunked`, exact-bytes ladder, `test_cascaded_coverage`.
+Result: (pending)
+Verdict: (pending)
+
 ### Resource evidence — gfx942 (MI300A), ROCm 7.0.1, baseline kernels (before CAS-S2/S1/C1)
 `-Rpass-analysis=kernel-resource-usage`, wave64, 128-thread blocks (inherited): `cascaded_compression_kernel<int,128,4096>` SGPR 106 / VGPR 71 / LDS 13456 B per block / 9 SGPR spills / est. 7 waves per SIMD; `cascaded_decompression_kernel<4B,128,4096>` SGPR 106 / VGPR 73 / LDS 13192 B / 12 SGPR spills / est. 6 waves per SIMD; `get_decompress_size_kernel` 22 / 10 / 0 LDS / 8. The SGPR spills (scalar state of the nested RLE/delta/bit-pack passes) and the 13 KB of LDS per 128-thread block (≤4 blocks per CU by LDS) are the two structural costs to attack (CAS-S2 launch bounds already committed; CAS-D5 LDS shrink queued).
