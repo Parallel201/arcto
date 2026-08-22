@@ -255,7 +255,7 @@ Result: gfx1100 (RX 7900 XT, wave32, 30 reps, sweep 5, commit cb7bd08 vs SNP-D10
 Result (gfx942, MI300A, wave64, 30 reps, sweep 5, cb7bd08 vs SNP-D10 b19be64): decompression tti x512 295.7 → 313.6 GB/s (×1.061), tti x0 4.70 → 5.33 (×1.134); synth_binary x512 191.9 → 153.8 (×0.801!), x0 2.37 → 1.84 (×0.777!); words x32 46.38 → 45.16 (×0.974), x0 ×0.980; bytes identical; tests green. The sign flips with the input: literal-heavy TTI gains as on gfx1100, the copy-heavy `synth_binary` (ratio ≈ 3, many non-overlapping short copies) loses a fifth. Hypothesis: on CDNA3 the unaligned dword global loads/stores of the non-overlapping *copy* path are expensive (split transactions), whereas on RDNA3 they are cheap — the literal path should be fine on both. Action: two compile-time knobs (`ARCTO_SNAPPY_DWORD_LITERALS`, `ARCTO_SNAPPY_DWORD_COPIES`) and a per-knob A/B on gfx942; expected outcome: keep literals on both architectures, gate copies to wave32. (Head 94624af measured in the same sweep: tti x512 280.8 — a −10 % swing against cb7bd08 with identical device code; the MI300A saturation medians carry that much drift run to run, so verdicts lean on the small-batch numbers and paired A/Bs.)
 Verdict: KEPT on gfx1100: the largest single gain of the branch on literal-heavy data (+15–17 % at saturation, +10–14 % at small batch); a 2 % loss on the copy-heavy words input, where short literals pay two LDS dword loads for 1–3 bytes. gfx942 pending (sweep 5).
 
-### SNP-D12 — experiment knob: 32-lane decode groups inside a wave64 (+ punning hygiene)   Category: C6   Status: KNOB (default off) — variant pending on gfx942
+### SNP-D12 — experiment knob: 32-lane decode groups inside a wave64 (+ punning hygiene)   Category: C6   Status: KNOB (default off) — MEASURED gfx942: input-dependent
 Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
 Files: `src/snappy/decompression.hiph`, `src/snappy/decompression_decode_strategies.hiph`,
 `src/snappy/decompression_decode_warp_scans.hiph`, `src/device_functions.hiph`
@@ -272,11 +272,11 @@ Why (mechanism): nvCOMP tuned the parallel strategies for 32 symbols per batch; 
 batch doubled (64) and the serial mask chain doubled (16 lookups). Whether 64 wide symbols per
 batch outweigh the longer chain is unknown a priori.
 Prediction: unknown (either way); bytes identical. To be measured as a flag variant on gfx942.
-Measured: (pending) `94fb297+ -DARCTO_SNAPPY_DECODE_GROUP=32` on gfx942 only.
-Result: (pending)
-Verdict: (pending)
+Measured: gfx942 (MI300A), `94624af -DARCTO_SNAPPY_DECODE_GROUP=32` vs the head reference (30 reps; bytes identical; tests green).
+Result: decompression tti x512 356 GB/s (×1.26 vs ~282, IQR 344–370 — large, but in this node's noisy saturation regime), tti x0 5.81 (×1.08, tight); binary x512 156.5 (≈), x0 1.84 (≈); words x32 42.6 (×0.95), words x0 7.74 (×0.91, tight). Half the decode lanes per batch cost the short-symbol input 5–9 %, while the literal-heavy stream gains from the halved mask chains (8 instead of 16 serial lookups per batch).
+Verdict: INPUT-DEPENDENT — stays an opt-in knob (default = whole wave). A per-chunk choice would need a cheap symbol-density signal; not adopted as a default.
 
-### SNP-D11 — compile-time tunables: prefetch ring, granule, literal step, sleep amounts   Category: C6   Status: MEASURED (gfx1100); gfx942 pending
+### SNP-D11 — compile-time tunables: prefetch ring, granule, literal step, sleep amounts   Category: C6   Status: MEASURED (gfx1100, gfx942)
 Commit: none (flag variants of the branch head 94624af, full rebuild each)
 Change: `-DLOG2_PREFETCH_SIZE=13` (8 KB ring), `-DPREFETCH_SECTORS=4` (256-B granules),
 `-DLITERAL_SECTORS=8` (two dwords per lane per literal step), `-DARCTO_SNAPPY_*_SLEEP=0`.
