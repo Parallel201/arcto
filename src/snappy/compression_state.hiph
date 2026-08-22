@@ -52,9 +52,15 @@ struct snap_state_s {
   uint8_t *dst_base;                  ///< Base ptr to output compressed data
   uint8_t *dst;                       ///< Current ptr to uncompressed data
   uint8_t *end;                       ///< End of uncompressed data buffer
-  volatile uint32_t literal_length;   ///< Number of literal bytes
-  volatile uint32_t copy_length;      ///< Number of copy bytes
-  volatile uint32_t copy_distance;    ///< Distance for copy bytes
+  // The three per-iteration results of the match-finding wave are
+  // double-buffered by iteration parity: during iteration k WARP1 writes slot
+  // (k+1)&1 while every thread read slot k&1 at the top of the iteration, and
+  // those reads completed before the barrier that ended iteration k-1. The
+  // read-then-overwrite barrier of the original loop is therefore unnecessary
+  // (one __syncthreads per literal/copy pair instead of two).
+  volatile uint32_t literal_length[2]; ///< Number of literal bytes
+  volatile uint32_t copy_length[2];    ///< Number of copy bytes
+  volatile uint32_t copy_distance[2];  ///< Distance for copy bytes
   alignas(16) uint16_t hash_map[1 << HASH_BITS];  ///< Low 16-bit offset from hash (16-B aligned: cleared with uint4 stores)
 };
 

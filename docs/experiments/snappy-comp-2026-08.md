@@ -37,3 +37,21 @@ Measured: (pending) `benchmark_snappy_chunked` compression column, exact-bytes l
 `test_snappy_coverage` (determinism check: two compressions identical).
 Result: (pending)
 Verdict: (pending)
+
+### SNP-C2 — one barrier per literal/copy pair (double-buffered match results)        Category: C1   Status: PENDING
+Commit: (this commit)  (branch `opt/snappy-comp-2026-08`)
+Files: `src/snappy/compression.hiph`, `src/snappy/compression_state.hiph`
+Change: `literal_length`, `copy_length`, `copy_distance` become 2-slot arrays indexed by iteration
+parity. In iteration k every thread reads slot `k&1` (WARP1's results from iteration k−1) and
+WARP1 (`FindFourByteMatch` + `Match60`) writes slot `(k+1)&1`, so the `__syncthreads` that stood
+between "read the three fields" and "WARP1 overwrites them" is gone; the end-of-iteration barrier
+(WARP0 needs WARP1's results next iteration) stays. Slot `nxt` was last read in iteration k−1
+before that barrier, so there is no read/overwrite hazard. Same symbol sequence; bytes unchanged;
+same code on CUDA.
+Why (mechanism): the loop runs once per literal/copy pair (thousands of times per 64 KB chunk);
+a workgroup barrier for a 2-wave block is cheap but it serialises the two waves' instruction
+streams at every iteration — halving the barrier count shortens the per-iteration critical path.
+Prediction: ~5–10 % compression throughput; bytes identical (gfx1100) / identical to SNP-C5 (gfx942).
+Measured: (pending) same protocol as SNP-C5.
+Result: (pending)
+Verdict: (pending)
