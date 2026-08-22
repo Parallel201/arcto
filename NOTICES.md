@@ -60,7 +60,6 @@ every file retains its original NVIDIA header.
   * ``src/RunLengthEncodeGPU.hip``
   * ``src/TempSpaceBroker.cpp``
   * ``src/TempSpaceBroker.h``
-  * ``src/arcto_api.cpp``
   * ``src/arcto_common_deps/hlif_shared.hiph``
   * ``src/arcto_common_deps/hlif_shared_types.hpp``
   * ``src/arcto_hipcub.hiph``
