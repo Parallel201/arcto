@@ -38,17 +38,11 @@
 #include "arcto/lz4.h"
 #include "arcto/snappy.h"
 #include "arcto/cascaded.h"
-#include "arcto/gdeflate.h"
-#include "arcto/bitcomp.h"
-#include "arcto/ans.h"
 #else
 #include "nvcomp.h"
 #include "nvcomp/lz4.h"
 #include "nvcomp/snappy.h"
 #include "nvcomp/cascaded.h"
-#include "nvcomp/gdeflate.h"
-#include "nvcomp/bitcomp.h"
-#include "nvcomp/ans.h"
 #endif
 
 #include <algorithm>

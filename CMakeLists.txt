@@ -226,38 +226,6 @@ if (MSVC)
 endif()
 
 
-if(NOT DEFINED ARCTO_EXTS_ROOT AND DEFINED ENV{ARCTO_EXTS_ROOT})
-  set(ARCTO_EXTS_ROOT "$ENV{ARCTO_EXTS_ROOT}")
-endif()
-
-if( DEFINED ARCTO_EXTS_ROOT )
-  unset( ARCTO_FIND_QUIET )
-  set( ENV{ans_ROOT} ${ARCTO_EXTS_ROOT} )
-  set( ENV{gdeflate_ROOT} ${ARCTO_EXTS_ROOT} )
-  set( ENV{bitcomp_ROOT} ${ARCTO_EXTS_ROOT} )
-endif()
-
-find_package(ans ${ARCTO_FIND_QUIET})
-if (ans_FOUND)
-  message (STATUS "Found ans")
-  add_definitions(-DENABLE_ANS)
-endif()
-
-find_package(bitcomp ${ARCTO_FIND_QUIET})
-if (bitcomp_FOUND)
-  message (STATUS "Found bitcomp")
-  add_definitions(-DENABLE_BITCOMP)
-endif()
-
-find_package(gdeflate ${ARCTO_FIND_QUIET})
-if (gdeflate_FOUND)
-  message (STATUS "Found gdeflate")
-  add_definitions(-DENABLE_GDEFLATE)
-
-  # Find ZLIB for CPU compression
-  find_package(ZLIB)
-endif()
-
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

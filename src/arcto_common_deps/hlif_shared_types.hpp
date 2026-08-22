@@ -58,10 +58,10 @@ typedef uint32_t Checksum_t;
 enum FormatType : uint8_t {
   LZ4 = 0,
   Snappy = 1,
-  ANS = 2,
-  GDeflate = 3,
+  ANS = 2,      // reserved: nvCOMP format id, not implemented in ARCTO
+  GDeflate = 3, // reserved: nvCOMP format id, not implemented in ARCTO
   Cascaded = 4,
-  Bitcomp = 5,
+  Bitcomp = 5,  // reserved: nvCOMP format id, not implemented in ARCTO
   NotSupportedError = 6  
 };
 

@@ -47,17 +47,6 @@
 # SOFTWARE.
 file(GLOB EXAMPLE_SOURCES CONFIGURE_DEPENDS *.cpp *.c)
 
-if(NOT gdeflate_FOUND)
-list(FILTER EXAMPLE_SOURCES EXCLUDE REGEX "test_gdeflate_batch_c_api.c")
-list(FILTER EXAMPLE_SOURCES EXCLUDE REGEX "test_gdeflate.cpp")
-endif()
-if(NOT ans_FOUND)
-list(FILTER EXAMPLE_SOURCES EXCLUDE REGEX "test_ans_batch_c_api.c")
-endif()
-
-if(NOT bitcomp_FOUND)
-list(FILTER EXAMPLE_SOURCES EXCLUDE REGEX "test_bitcomp.cpp")
-endif()
 
 function(add_test_file EXAMPLE_SOURCE)
   get_filename_component(BARE_NAME "${EXAMPLE_SOURCE}" NAME_WE)
@@ -67,7 +56,7 @@ function(add_test_file EXAMPLE_SOURCE)
     target_link_libraries(${BARE_NAME} PRIVATE arcto CUDA::cudart)
   else()
     # Including CUDA::cudart on Windows resulted in multiple definition
-    # linker errors for gdeflate and bitcomp tests, since
+    # linker errors for some tests, since
     # cudart_static.lib is already included.
     target_link_libraries(${BARE_NAME} PRIVATE arcto)
   endif()

@@ -38,9 +38,8 @@ git checkout a6e4e64a177e07cd2e5c8c5e07bb66ffefceae84   # the 2.2 ancestor
 | Cascaded | lossless (RLE + Delta + BitPack) | best for structured/numerical data |
 | ZFP | floating-point (3D) | FIXED_RATE / FIXED_PRECISION / FIXED_ACCURACY on GPU via vendored [LLNL zfp](https://github.com/LLNL/zfp); bitstream-compatible with canonical zfp |
 
-ANS, GDeflate and Bitcomp wrappers from nvCOMP 2.2 are present but require
-external proprietary libraries (`ENABLE_ANS` / `ENABLE_GDEFLATE` /
-`ENABLE_BITCOMP`); they are not built by default.
+ANS, GDeflate and Bitcomp (nvCOMP 2.2 wrappers around proprietary NVIDIA libraries) are not
+part of ARCTO; their HLIF format ids are reserved and rejected with `arctoErrorNotSupported`.
 
 ## Host-side staging
 

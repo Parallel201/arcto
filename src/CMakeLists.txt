@@ -138,21 +138,6 @@ if (NOT CUDA_BACKEND)
     $<TARGET_PROPERTY:hip::hipcub,INTERFACE_INCLUDE_DIRECTORIES>)
 endif()
 
-if (bitcomp_FOUND)
-  target_include_directories(arcto INTERFACE ${BITCOMP_INCLUDE_DIRS})
-  target_link_libraries(arcto PRIVATE bitcomp)
-endif()
-
-if (gdeflate_FOUND)
-  target_include_directories(arcto PRIVATE ${GDEFLATE_INCLUDE_DIRS})
-  target_link_libraries(arcto PRIVATE gdeflate)
-endif()
-
-if (ans_FOUND)
-  target_include_directories(arcto PRIVATE ${ANS_INCLUDE_DIRS})
-  target_link_libraries(arcto PRIVATE ans)
-endif()
-
 # Vendored canonical LLNL/zfp (added at the top-level CMakeLists via
 # add_subdirectory(third_party/zfp)). The zfp::zfp target is a static
 # library; linking is PRIVATE because we expose only the arcto/zfp.h C

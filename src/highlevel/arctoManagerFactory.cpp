@@ -51,12 +51,9 @@
 
 #include "arcto.hpp"
 #include "arcto/arctoManager.hpp"
-#include "arcto/ans.hpp"
 #include "arcto/lz4.hpp"
 #include "arcto/snappy.hpp"
-#include "arcto/gdeflate.hpp"
 #include "arcto/cascaded.hpp"
-#include "arcto/bitcomp.hpp"
 #include "arcto_common_deps/hlif_shared_types.hpp"
 #include "HipUtils.h"
 
@@ -92,39 +89,14 @@ std::shared_ptr<arctoManagerBase> create_manager(const uint8_t* comp_buffer, hip
       res = std::make_shared<SnappyManager>(cpu_common_header.uncomp_chunk_size, stream, device_id);
       break;
     }
-    case FormatType::GDeflate: 
+    case FormatType::GDeflate:
+    case FormatType::Bitcomp:
+    case FormatType::ANS:
     {
-      arctoBatchedGdeflateOpts_t format_spec;
-      const arctoBatchedGdeflateOpts_t* gpu_format_header = reinterpret_cast<const arctoBatchedGdeflateOpts_t*>(comp_buffer + sizeof(CommonHeader));
-      HipUtils::check(hipMemcpyAsync(&format_spec, gpu_format_header, sizeof(arctoBatchedGdeflateOpts_t), hipMemcpyDefault, stream));
-      HipUtils::check(hipStreamSynchronize(stream));
-
-      res = std::make_shared<GdeflateManager>(cpu_common_header.uncomp_chunk_size, format_spec.algo, stream, device_id);
-      break;
-    }
-    case FormatType::Bitcomp: 
-    {
-#ifdef ENABLE_BITCOMP
-      BitcompFormatSpecHeader format_spec;
-      const BitcompFormatSpecHeader* gpu_format_header = reinterpret_cast<const BitcompFormatSpecHeader*>(comp_buffer + sizeof(CommonHeader));
-      HipUtils::check(hipMemcpyAsync(&format_spec, gpu_format_header, sizeof(BitcompFormatSpecHeader), hipMemcpyDefault, stream));
-      HipUtils::check(hipStreamSynchronize(stream));
-
-      res = std::make_shared<BitcompManager>(format_spec.data_type, format_spec.algo, stream, device_id);
-#else
-      throw ArctoException(arctoErrorNotSupported, "Bitcomp support not available in this build.");
-#endif
-      break;
-    }
-    case FormatType::ANS: 
-    {
-      ANSFormatSpecHeader format_spec;
-      const ANSFormatSpecHeader* gpu_format_header = reinterpret_cast<const ANSFormatSpecHeader*>(comp_buffer + sizeof(CommonHeader));
-      HipUtils::check(hipMemcpyAsync(&format_spec, gpu_format_header, sizeof(ANSFormatSpecHeader), hipMemcpyDefault, stream));
-      HipUtils::check(hipStreamSynchronize(stream));
-
-      res = std::make_shared<ANSManager>(cpu_common_header.uncomp_chunk_size, stream, device_id);
-      break;
+      // nvCOMP 2.2's ANS, GDeflate and Bitcomp depend on proprietary NVIDIA
+      // libraries; ARCTO never carried them beyond stubs. The format ids stay
+      // reserved so that a foreign stream is rejected with a clear error.
+      throw ArctoException(arctoErrorNotSupported, "This compressed stream uses a format (ANS / GDeflate / Bitcomp) that ARCTO does not implement.");
     }
     case FormatType::Cascaded: 
     {

@@ -81,8 +81,7 @@ typedef enum arctoType_t
 
 /*
  * The codec APIs live in the per-scheme headers: arcto/lz4.h, arcto/snappy.h,
- * arcto/cascaded.h, arcto/zfp.h (and arcto/bitcomp.h, arcto/gdeflate.h,
- * arcto/ans.h when the external libraries are present). The generic
+ * arcto/cascaded.h, arcto/zfp.h. The generic
  * nvCOMP-1.x style arctoDecompress* interface was declared here but never
  * implemented in ARCTO; it has been removed.
  */

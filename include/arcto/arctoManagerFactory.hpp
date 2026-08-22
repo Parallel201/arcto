@@ -52,11 +52,8 @@
 #include <cassert>
 
 #include "arctoManager.hpp"
-#include "ans.hpp"
-#include "gdeflate.hpp"
 #include "lz4.hpp"
 #include "snappy.hpp"
-#include "bitcomp.hpp"
 #include "cascaded.hpp"
 
 namespace arcto {

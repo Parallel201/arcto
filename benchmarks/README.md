@@ -28,8 +28,6 @@ cmake -S . -B build-cuda -D CUDA_BACKEND=ON -D CMAKE_CUDA_ARCHITECTURES="80;90" 
 
 - `benchmark_lz4_chunked`, `benchmark_snappy_chunked`, `benchmark_cascaded_chunked` —
   always built.
-- `benchmark_gdeflate_chunked`, `benchmark_bitcomp_chunked`, `benchmark_ans_chunked` —
-  only useful when the corresponding external library is found (`ARCTO_EXTS_ROOT`).
 - `benchmark_zfp_single` — ZFP modes (fixed rate / precision / accuracy) with fidelity
   metrics; see `-h`.
 
