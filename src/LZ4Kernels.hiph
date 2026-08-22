@@ -622,10 +622,16 @@ private:
 }; // End BufferControl Class
 
 // LZ4-D1: the vectorised cooperative copy and the doubling repeat (E17: kept
-// on wave32, gated off on wave64 where they measured as losses before the
-// kernel had launch bounds). ARCTO_LZ4_VEC_COPY selects them per build:
-// default on for wave32, off for wave64 and CUDA — the curated behaviour —
-// so that -DARCTO_LZ4_VEC_COPY=1 re-tests them on wave64 under LZ4-D7.
+// on wave32, gated off on wave64). Measured on gfx942 with everything on:
+// decompression of literal/long-match data x2.2 (small batch) / +31-48 %
+// (saturation), but short-sequence data (words) -25 % decompression and
+// -44 % compression — so the two sides are selected separately:
+//   ARCTO_LZ4_VEC_COPY_DECOMP  coopCopyNoOverlap + the doubling repeat
+//   ARCTO_LZ4_VEC_COPY_COMP    copyLiterals (the compressor's literal store)
+//   ARCTO_LZ4_VEC_COPY_MIN     byte length below which the plain byte loop runs
+// Defaults: wave32 = the curated configuration (both on, 32); wave64 and CUDA
+// off (curated) until the variants below fix the wave64 defaults.
+// ARCTO_LZ4_VEC_COPY (the earlier master switch) still sets both sides.
 #ifndef ARCTO_LZ4_VEC_COPY
 #  if defined(USE_WARPSIZE_32)
 #    define ARCTO_LZ4_VEC_COPY 1
@@ -633,8 +639,17 @@ private:
 #    define ARCTO_LZ4_VEC_COPY 0
 #  endif
 #endif
+#ifndef ARCTO_LZ4_VEC_COPY_DECOMP
+#  define ARCTO_LZ4_VEC_COPY_DECOMP ARCTO_LZ4_VEC_COPY
+#endif
+#ifndef ARCTO_LZ4_VEC_COPY_COMP
+#  define ARCTO_LZ4_VEC_COPY_COMP ARCTO_LZ4_VEC_COPY
+#endif
+#ifndef ARCTO_LZ4_VEC_COPY_MIN
+#  define ARCTO_LZ4_VEC_COPY_MIN 32
+#endif
 
-#if ARCTO_LZ4_VEC_COPY
+#if ARCTO_LZ4_VEC_COPY_DECOMP || ARCTO_LZ4_VEC_COPY_COMP
 /**
  * Cooperative byte copy, vectorized: align the destination to 4 bytes,
  * stream the body as dword stores fed by unaligned_load32 (two aligned
@@ -647,7 +662,7 @@ inline __device__ void coopCopyVec(
     const position_type length,
     const unsigned int stride)
 {
-  if (length < 32) {
+  if (length < ARCTO_LZ4_VEC_COPY_MIN) {
     for (position_type i = threadIdx.x; i < length; i += stride) {
       dest[i] = source[i];
     }
@@ -674,14 +689,14 @@ inline __device__ void coopCopyVec(
   }
 }
 
-#endif // ARCTO_LZ4_VEC_COPY
+#endif // ARCTO_LZ4_VEC_COPY_DECOMP || ARCTO_LZ4_VEC_COPY_COMP
 
 inline __device__ void coopCopyNoOverlap(
     uint8_t* const dest,
     const uint8_t* const source,
     const position_type length)
 {
-#if ARCTO_LZ4_VEC_COPY
+#if ARCTO_LZ4_VEC_COPY_DECOMP
   coopCopyVec(dest, source, length, blockDim.x);
 #else
   for (position_type i = threadIdx.x; i < length; i += blockDim.x) {
@@ -697,7 +712,7 @@ inline __device__ void coopCopyRepeat(
     const position_type length)
 {
   assert(dist > 0);
-#if ARCTO_LZ4_VEC_COPY
+#if ARCTO_LZ4_VEC_COPY_DECOMP
   if (length > 2 * blockDim.x) {
     // Long overlapped match = long repeating pattern of period `dist`
     // (e.g. zero runs). Seed one period, then double the already-written
@@ -771,7 +786,7 @@ inline __device__ void copyLiterals(
     const position_type length)
 {
   assert(BLOCK_SIZE == blockDim.x);
-#if ARCTO_LZ4_VEC_COPY
+#if ARCTO_LZ4_VEC_COPY_COMP
   coopCopyVec(dest, source, length, BLOCK_SIZE);
 #else
   for (position_type i = threadIdx.x; i < length; i += BLOCK_SIZE) {

@@ -32,8 +32,15 @@ Result (gfx1100): NEGATIVE — the bare `__launch_bounds__(64)` on the wave32 bu
 generated code for the worse on the literal-heavy input (−21 % per-chunk latency). Mechanism to
 confirm with the resource report (VGPR count / scheduling with the 1..64 flat work-group size vs
 the 1..1024 default; RDNA3 wave32 is not the target of this item).
-Verdict (gfx1100): must not apply to wave32 — gate to wave64 (next commit) if gfx942 shows a gain,
-otherwise drop.
+Re-measured (gfx1100, interleaved A/B base/D7/base/D7, 30 reps each): tti x0 7.71 / 7.69 / 7.70 /
+7.70 GB/s, x512 232.9 / 231.8 / 232.9 / 231.9; binary and words ×0.995–1.002 — EXACTLY NEUTRAL; the
+first sweep's baseline (9.73 at x0) was the outlier, not the bounded build. The register report
+confirms identical resources (91 VGPRs, 44 SGPRs, occupancy 16, no spills) with and without bounds.
+gfx942 (lz4a sweep): ×0.996–1.004 binary, ×0.992 x0 / ×1.028 x512 tti (noise band), words ×1.00 —
+neutral; `MIN_WAVES_PER_EU=8` on top of the branch head: binary ×0.87 and tti ×0.92 at saturation
+(x0 ≈) — NEGATIVE (the forced ≤ 64-VGPR budget costs more than the eighth wave buys).
+Verdict: bounds KEPT (neutral, documents the real block; the launcher and the HLIF path agree);
+occupancy target stays 0 — do not pin the VGPR budget on this kernel.
 
 ### LZ4-D2 — incremental source index in the repeat (overlapped-match) copy             Category: C1   Status: PENDING
 Commit: (this commit)  (branch `opt/lz4-decomp-wave64-2026-08`)
@@ -48,9 +55,14 @@ decoded almost entirely through this loop on wave64 (the doubling fast path is w
 curated lineage). Bytes identical.
 Prediction: gfx942 +10–30 % decompression on zeros / repetitive data, ≈ 0 on incompressible; gfx1100
 small gain on short matches; bytes identical.
-Measured: (pending)
-Result: (pending)
-Verdict: (pending)
+Measured: gfx1100 ×0.997–1.002 (wave32 takes the doubling path for long matches; the modulo loop
+only serves ≤ 2·blockDim matches there); gfx942: the 2ea6797 row reads ×0.85 at saturation on
+binary/tti while the next commit (baf0fce, identical wave64 code) reads ×1.01 and x0 is ×0.99–1.01
+— a node-level transient during that commit's window, not the change. The sweep's inputs contain
+no long repeated runs (binary/tti/words), so the loop it optimises is barely exercised; zeros is
+added to the LZ4 inputs for the next round.
+Result: neutral on the measured inputs; to be re-read with zeros in the lz4b round.
+Verdict: KEPT (exact; cheaper per byte where it runs), pending the zeros number.
 
 ### LZ4-D1 — vectorised copies and doubling repeat on wave64 (knob, default = curated)      Category: C3   Status: KNOB — variants pending
 Commit: (this commit)  (branch `opt/lz4-decomp-wave64-2026-08`)
@@ -66,9 +78,31 @@ period-`dist` match of length L into log2(L/dist) straight copies. The earlier w
 was measured without launch bounds; under LZ4-D7 the VGPR budget is explicit.
 Prediction: with bounds, VEC_COPY=1 on wave64 +5–20 % on literal-/run-heavy inputs; if it still
 loses, the cause is the extra registers (check `-Rpass-analysis` VGPRs vs 64) — then keep off.
+Measured (gfx942, 30 reps, vs the branch head with the knob off): `VEC_COPY=1`: decompression
+synth_binary x0 4.45 → 9.92 GB/s (×2.23), x512 589 → 764 (×1.31); tti x0 ×2.15, x512 482 → 709
+(×1.48); words x0 ×0.80, x32 26.2 → 19.4 (×0.75); compression words x32 11.5 → 6.4 (×0.56, x0
+×0.83), binary/tti ×0.98–0.99. `VEC_COPY=1 + MIN_WAVES=8`: same picture, 3–5 % lower at saturation.
+Bytes identical, tests green.
+Result: on wave64 the dword copy path is a very large win for literal-/long-match-dominated data and
+a large loss for short-sequence data, on both sides: the compressor's `copyLiterals` goes through
+the same routine and its per-call setup (alignment head, body, tail loops, `unaligned_load32`)
+is paid on every short literal run; the `length < 32` byte fast path is too low for 64 lanes.
+Verdict: SPLIT (next commit, LZ4-D1s): the decompression side and the compression side become
+separate knobs with a tunable short-length cutoff; wave64 defaults to be fixed by the lz4b variants
+(decomp-only at MIN 32 / 128 / 256, both at 128).
+
+### LZ4-D1s — split the vectorised-copy knob: decompression / compression / short-length cutoff   Category: C3   Status: KNOBS — variants pending on gfx942
+Commit: (this commit)  (branch `opt/lz4-decomp-wave64-2026-08`)
+Files: `src/LZ4Kernels.hiph`
+Change: `ARCTO_LZ4_VEC_COPY_DECOMP` (coopCopyNoOverlap + doubling repeat), `ARCTO_LZ4_VEC_COPY_COMP`
+(`copyLiterals`), `ARCTO_LZ4_VEC_COPY_MIN` (byte length below which the plain byte loop runs; 32 =
+curated). Defaults unchanged on every target (wave32 both on / 32; wave64 and CUDA off).
+Variants (gfx942): DECOMP=1 MIN=32; DECOMP=1 MIN=128; DECOMP=1 MIN=256; DECOMP=1 COMP=1 MIN=128.
+gfx1100: the commit is a no-op (regression check only).
+Prediction: DECOMP-only at MIN 128 keeps the binary/tti gains and removes most of the words loss
+(short copies stay on the byte loop); COMP stays off on wave64 unless MIN=128 turns the words
+compression loss around.
 Measured: (pending)
-Result: (pending)
-Verdict: (pending)
 
 ### LZ4-D5 — wave-uniform decompressor state through `readfirstlane`                    Category: C2   Status: PENDING
 Commit: (this commit)  (branch `opt/lz4-decomp-wave64-2026-08`)
