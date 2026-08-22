@@ -138,3 +138,23 @@ Prediction: medium on text-like / copy-heavy inputs (words: decode is symbol-rat
 Measured: (pending) same protocol as SNP-D1.
 Result: (pending)
 Verdict: (pending)
+
+### SNP-D7b — per-lane symbol window in the two parallel decode strategies          Category: C4   Status: PENDING
+Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
+Files: `src/snappy/decompression_decode_strategies.hiph`
+Change: in both parallel strategies each lane read its tag byte at its symbol position, then —
+after the prefix-sum / range-check chain, inside `if (t < batch_len)` — re-read one or two offset
+bytes from the ring. Each lane now reads its whole symbol (tag + offset bytes) with one
+`read_window5` (two dword LDS loads in one round trip) at the point where the tag was read, and
+decodes the offset from that window. The three ballot tag probes at `cur_t + k·GROUPSIZE` in the
+2-to-3 strategy and the first probe of the 2-to-5 strategy are unchanged (single bytes at
+unrelated positions). Values and bytes unchanged.
+Why (mechanism): removes one dependent LDS round trip (the late offset-byte loads) from the
+per-batch critical path of the decode wave; LDS instruction count per lane is 2 instead of 1–3
+(literal 1 → 2, copy-1 2 → 2, copy-2 3 → 2), i.e. neutral-to-slightly-higher bandwidth but one
+less dependent latency — a latency-for-bandwidth trade that should pay on a latency-bound wave.
+Prediction: small gain on copy-heavy inputs, possibly neutral; bytes identical. Kept separate
+from SNP-D7a so the two can be judged independently.
+Measured: (pending) same protocol as SNP-D1.
+Result: (pending)
+Verdict: (pending)

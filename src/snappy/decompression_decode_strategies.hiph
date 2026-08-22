@@ -142,7 +142,11 @@ namespace snappy {
       // batch. Same values on every lane as before.
       len3_mask      = get_len3_mask<GROUPMASK_T,WARPMASK_T>(v0,v1,v2);
       cur_t          = compute_symbol_position_via_len3_mask<GROUPMASK_T>(t, cur, len3_mask);
-      b0             = s->q.read_byte<GROUPSIZE,WARPSIZE>(t,cur_t);
+      // Fetch the lane's whole symbol (tag + offset bytes) in one LDS round
+      // trip; the offset bytes are decoded from this window below instead of
+      // being re-read from the ring after the prefix-sum chain.
+      const uint64_t w_t = s->q.read_window5<GROUPSIZE,WARPSIZE>(t,cur_t);
+      b0             = static_cast<uint32_t>(w_t & 0xffu);
       is_long_sym    = match_long_literal_or_copy_with_4_offset_bytes(b0);
       short_sym_mask = ballot1<GROUPMASK_T,WARPSIZE>(t,is_long_sym);
       batch_len      = 0;
@@ -158,7 +162,7 @@ namespace snappy {
           if (t < batch_len) {
             //: batch_len < GROUP_SIZE
             blen = LZ77Symbol::decode_short_symbol_len__no_copy_with_4_offset_bytes(b0);
-            ofs  = s->q.decode_short_symbol_offset__no_copy_with_4_offset_bytes(b0,cur_t);
+            ofs  = unsnap_queue_s::decode_short_symbol_offset_from_window__no_copy_with_4_offset_bytes(w_t,cur_t);
             b[t].set(blen,ofs,cur_t," (2-to-3)");
             ofs += blen;  // for correct out-of-range detection below
           }
@@ -291,7 +295,9 @@ namespace snappy {
         // mask; no lane-0 computation + broadcast shuffle.
         len5_mask   = get_len5_mask<GROUPMASK_T,WARPMASK_T>(v0, v1);
         cur_t       = compute_symbol_position_via_len5_mask<GROUPMASK_T>(t, cur, len5_mask);
-        b0          = s->q.read_byte<GROUPSIZE,WARPSIZE>(t,cur_t);
+        // whole symbol (tag + offset bytes) in one LDS round trip, see 2-to-3
+        const uint64_t w_t = s->q.read_window5<GROUPSIZE,WARPSIZE>(t,cur_t);
+        b0          = static_cast<uint32_t>(w_t & 0xffu);
 
         //first_excluded_symbol = ((b0 & 3) ? ((b0 & 3) == 3) : (b0 > 3 * 4)) || (cur_t >= cur + GROUPSIZE) ||
         //                (batch_len + t >= BATCH_SIZE);
@@ -306,7 +312,7 @@ namespace snappy {
           int32_t ofs   = 0;
           if (t < batch_add) { //: differs
             blen = LZ77Symbol::decode_short_symbol_len__no_copy_with_4_offset_bytes(b0);
-            ofs  = s->q.decode_short_symbol_offset__no_copy_with_4_offset_bytes(b0,cur_t);
+            ofs  = unsnap_queue_s::decode_short_symbol_offset_from_window__no_copy_with_4_offset_bytes(w_t,cur_t);
             b[batch_len + t].set(blen,ofs,cur_t," (2-to-5)");
             ofs += blen;  // for correct out-of-range detection below
           }
