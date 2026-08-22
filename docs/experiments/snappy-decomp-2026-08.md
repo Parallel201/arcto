@@ -317,3 +317,27 @@ Change: default of `ARCTO_SNAPPY_DWORD_COPIES` becomes `defined(USE_WARPSIZE_32)
 Why: per-mechanism A/Bs on both architectures (SNP-D8k). Prediction: gfx1100 identical to the D8 head; gfx942 binary ≈ 197 GB/s at saturation / 2.43 at small batch (the COPIES=0 variant), tti and words unchanged or slightly up; bytes identical.
 Measured: (pending final verification sweep on both nodes)
 
+
+### Resource evidence — gfx942 (MI300A), ROCm 7.0.1, `-D ARCTO_DEVICE_REPORTS=ON`, head 94624af (SNP-D12 knob off)
+From `-Rpass-analysis=kernel-resource-usage` (wave64 build; occupancy = compiler estimate in waves/SIMD, max 8 on gfx942):
+
+| kernel | SGPR | VGPR | scratch B/lane | occ | LDS B/block | spills (S/V) |
+|---|---:|---:|---:|---:|---:|---:|
+| `unsnap_kernel` (Snappy decomp) | 75 | 50 | 0 | 8 | 6256 | 0 / 0 |
+| `snap_kernel` (Snappy comp) | 50 | 40 | 0 | 4 | 8248 | 0 / 0 |
+| `get_uncompressed_sizes_kernel` | 20 | 10 | 0 | 8 | 0 | 0 / 0 |
+| HLIF Snappy decompress | 106 | 69 | 0 | 7 | 6264 | 0 / 0 |
+| HLIF Snappy compress | 76 | 54 | 0 | 8 | 8256 | 0 / 0 |
+| `lz4DecompressBatchKernel` | 74 | 65 | 0 | 7 | 1024 | 0 / 0 |
+| `lz4CompressBatchKernel<u8>` | 55 | 66 | 0 | 7 | 256 | 0 / 0 |
+| `cascaded_compression_kernel<int,128>` | 106 | 71 | 0 | 7 | 13456 | 9 / 0 |
+| `cascaded_decompression_kernel<4B,128>` | 106 | 73 | 0 | 6 | 13192 | 12 / 0 |
+| `get_decompress_size_kernel` (Cascaded) | 22 | 10 | 0 | 8 | 0 | 0 / 0 |
+
+Reading: the optimized `unsnap_kernel` is at full occupancy on gfx942 with no spills (50 VGPRs
+< 64, the 8-wave budget), i.e. SNP-D9 (launch bounds / register pressure) has no headroom to buy
+here; LDS per block (6.1 KB) bounds residency at 10 blocks/CU (64 KB LDS), i.e. 10 waves/CU,
+well under the 32-wave CU limit — the decoder is latency-bound per wave, not occupancy-bound.
+`snap_kernel` estimated at 4 waves/SIMD (LDS 8.2 KB/block). The Cascaded kernels are SGPR-
+heavy (106, with 9–12 SGPR spills) and LDS-heavy (13 KB/block → ≤4 blocks/CU): that is the
+Cascaded branch's first target (CAS-S2 launch bounds, CAS-D5 LDS shrink).
