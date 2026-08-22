@@ -13,7 +13,7 @@ Gates: see `docs/experiments/README.md`. Benchmark: `benchmark_snappy_chunked`.
 
 ---
 
-### SNP-D1 — yield the SIMD in the decoder's spin-waits (`s_sleep`)        Category: C1   Status: NEUTRAL on gfx1100 and gfx942 (revert candidate; tunable sweep not run)
+### SNP-D1 — yield the SIMD in the decoder's spin-waits (`s_sleep`)        Category: C1   Status: NEUTRAL on gfx1100 and gfx942 (A/B 60 reps and 0/0/0 variant confirm) — kept as hygiene, no performance claim
 Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
 Files: `src/device_functions.hiph`, `src/snappy/config.h`, `src/snappy/decompression_decode.hiph`,
 `src/snappy/decompression_prefetch.hiph`, `src/snappy/decompression_process.hiph`
@@ -46,6 +46,7 @@ exact-bytes ladder identical on all six fixtures; all Snappy tests green. ctest 
 underlying test branch: 1 pre-existing failure, `BitPackGPU_test` (legacy Cascaded unit test,
 gfx1100 wave32; unrelated to Snappy — to be investigated on the Cascaded branch).
 Result (gfx942): gfx942 (MI300A, wave64, ROCm 7.0.1 container, 30 reps, median, `-p 65536`, sweep 2; note: saturation medians on this node carry an IQR of ±2–4 %, small-batch (x0) medians are tight): decompression binary x512 ×0.974 (180.4 → 175.7, IQRs overlap partially), tti x512 ×1.019, words x32 ×1.025; small batch ×1.005 / ×0.987 / ×1.009; compression ×1.000; bytes identical. Verdict on gfx942: NEUTRAL (±2 %, inside the node's noise), same as gfx1100. The 'polling waves steal the SIMD' hypothesis is not supported on either architecture at the default amounts.
+A/B at branch head (gfx1100, 60 reps): head-without-D1 vs head = ×1.004 / ×0.993 / ×1.000 (binary / tti / words at saturation), ×1.000 / ×1.007 / ×0.999 at small batch; the yield-only variant (sleep amounts 0/0/0) = ×0.992 / ×0.993 / ×0.999. Verdict: NEUTRAL with 60-rep confidence on gfx1100; the amounts do not matter. Kept only because the AMD fallback (`clock()`) was a no-op by accident; it is not a performance contribution.
 Verdict: NEUTRAL on gfx1100 (≤ +1 % decompression, within noise). The prediction "tens of %"
 did not hold on RDNA3 wave32: the polling waves are not stealing a measurable share of the
 SIMD from productive waves there. Side observation: decompression of copy-heavy input (words,
@@ -122,6 +123,7 @@ Prediction: small (LDS is not the bottleneck) but free; fewer `ds_*` instruction
 Measured: (pending) same protocol as SNP-D1.
 Result: gfx1100 (RX 7900 XT, wave32, ROCm 7.0.1 container, 30 reps, median, `-p 65536`, sweep 2 — cumulative on the branch, each vs baseline 0263261): decompression binary x512 92.38 → 93.35 (×1.053 vs baseline, ×1.011 vs SNP-D3), tti x512 92.62 → 94.36 (×1.052, ×1.019), words x32 26.58 → 26.89 (×1.063, ×1.012); small batch ×1.084 / ×1.079 / ×1.072 vs baseline; compression ×1.000; bytes identical; tests green.
 Result (gfx942): gfx942 (MI300A, wave64, ROCm 7.0.1 container, 30 reps, median, `-p 65536`, sweep 2; note: saturation medians on this node carry an IQR of ±2–4 %, small-batch (x0) medians are tight): decompression vs SNP-D3: binary x512 ×0.994, tti x512 272.9 → 257.4 (×0.943), words x32 44.00 → 43.36 (×0.985); small batch binary 2.36 → 2.34 (×0.992), tti 4.44 → 4.60 (×1.036), words 8.47 → 8.10 (×0.956, tight IQRs — a real loss); bytes identical. On wave64 the 64-bit symbol access is not the small free win it is on wave32: the words small-batch case (decoder-bound, many short symbols) loses 4 %. Hypotheses to test with a dedicated A/B (more repetitions, D5 reverted on top of the current branch head): the pack/unpack VALU on the lane-0 serial path, or the changed LDS offsets of `buf` (2124 → 2096) altering ring bank mapping. Verdict deferred.
+A/B at branch head (gfx1100, 60 reps): head-without-D5 vs head = ×1.002 / ×0.988 / ×0.993 at saturation, ×0.998 / ×1.007 / ×0.989 at small batch — i.e. D5 is worth ≈ +1 % on gfx1100 on the decoder-bound inputs, consistent with sweep 2/3. gfx942 A/B (60 reps) pending.
 Verdict: KEPT on gfx1100: a consistent +1.1…+1.9 % on top of SNP-D3 on all inputs, as predicted (small, free). gfx942 pending.
 
 ### SNP-D7a — serial decoder: one dword-window read instead of up to five byte reads   Category: C4   Status: NEUTRAL on gfx1100 and gfx942 — kept as the carrier of `read_window5` (used by D7b/D6/D8); judged with them
@@ -223,7 +225,7 @@ Measured: (pending) correctness via test_snappy_coverage (size query checked per
 Result: gfx1100 (RX 7900 XT, wave32, ROCm 7.0.1 container, 30 reps, median, `-p 65536`, sweep 3; cumulative on the branch): decompression vs SNP-D6: ×1.005 / ×0.999 / ×0.992 at saturation, ×0.998 / ×0.998 / ×0.999 at small batch — noise (the size query is not in the timed paths); test_snappy_coverage checks the query per chunk: green; bytes identical.
 Verdict: KEPT (hygiene; no measurable effect on compress/decompress throughput, as expected).
 
-### SNP-D8 — 4 bytes per lane in the processor's literal and non-overlapping copy paths   Category: C3   Status: PENDING
+### SNP-D8 — 4 bytes per lane in the processor's literal and non-overlapping copy paths   Category: C3   Status: KEPT (gfx1100 +15…+17 % literal-heavy; gfx942 pending)
 Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
 Files: `src/snappy/decompression_process.hiph`
 Change (AMD only, `#if __HIP_PLATFORM_AMD__`; CUDA keeps the byte loops): (a) literals — each lane
@@ -247,8 +249,8 @@ smaller on copy-heavy input (words); bytes identical; ISA shows `global_store_dw
 `align 1` replacing most `global_store_byte`.
 Measured: (pending) same protocol as SNP-D1; test_snappy_coverage exercises odd sizes and
 misaligned output pointers.
-Result: (pending)
-Verdict: (pending)
+Result: gfx1100 (RX 7900 XT, wave32, 30 reps, sweep 5, commit cb7bd08 vs SNP-D10 b19be64): decompression binary x512 95.01 → 108.92 GB/s (×1.146; ×1.221 vs baseline), tti x512 101.32 → 118.57 (×1.170; ×1.315 vs baseline), words x32 27.75 → 27.10 (×0.977; ×1.069 vs baseline); small batch binary ×1.104→×1.221, tti ×1.117→×1.270, words ×1.120→×1.096 vs baseline; compression ×1.000; exact-bytes ladder identical; all Snappy tests green (incl. misaligned outputs). ISA at head (gfx1100): `global_store_b32`/`b64` present, `s_waitcnt` 155 in the TU.
+Verdict: KEPT on gfx1100: the largest single gain of the branch on literal-heavy data (+15–17 % at saturation, +10–14 % at small batch); a 2 % loss on the copy-heavy words input, where short literals pay two LDS dword loads for 1–3 bytes. gfx942 pending (sweep 5).
 
 ### SNP-D12 — experiment knob: 32-lane decode groups inside a wave64 (+ punning hygiene)   Category: C6   Status: KNOB (default off) — variant pending on gfx942
 Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
@@ -270,3 +272,16 @@ Prediction: unknown (either way); bytes identical. To be measured as a flag vari
 Measured: (pending) `94fb297+ -DARCTO_SNAPPY_DECODE_GROUP=32` on gfx942 only.
 Result: (pending)
 Verdict: (pending)
+
+### SNP-D11 — compile-time tunables: prefetch ring, granule, literal step, sleep amounts   Category: C6   Status: MEASURED (gfx1100); gfx942 pending
+Commit: none (flag variants of the branch head 94624af, full rebuild each)
+Change: `-DLOG2_PREFETCH_SIZE=13` (8 KB ring), `-DPREFETCH_SECTORS=4` (256-B granules),
+`-DLITERAL_SECTORS=8` (two dwords per lane per literal step), `-DARCTO_SNAPPY_*_SLEEP=0`.
+Result (gfx1100, 30 reps, vs head 109.06 / 119.11 / 27.12 GB/s decompression at saturation, 4.15 /
+5.31 / 12.19 at small batch): 8 KB ring ×0.720 / ×0.771 / ×0.732 (LDS per block 5.2 → 9.3 KB:
+fewer resident blocks; the ring depth is not the bottleneck) — REJECT; 4-sector granules
+×0.885 / ×0.737 / ×0.990 (x0 ×0.891 / ×0.688) — REJECT; `LITERAL_SECTORS=8` ×1.009 / ×1.039 /
+×0.999 (x0 ×1.002 / ×1.099 / ×1.000) — POSITIVE on literal-heavy data (more bytes in flight per
+literal step with SNP-D8's dword path); sleeps 0/0/0 ×0.992 / ×0.993 / ×0.999 — neutral (see D1).
+Verdict: candidate to make `LITERAL_SECTORS=8` the AMD default once gfx942 confirms; ring and
+granule stay as inherited.
