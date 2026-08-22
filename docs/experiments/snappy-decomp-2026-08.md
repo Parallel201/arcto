@@ -13,7 +13,7 @@ Gates: see `docs/experiments/README.md`. Benchmark: `benchmark_snappy_chunked`.
 
 ---
 
-### SNP-D1 — yield the SIMD in the decoder's spin-waits (`s_sleep`)        Category: C1   Status: NEUTRAL on gfx1100 and gfx942 (A/B 60 reps and 0/0/0 variant confirm) — kept as hygiene, no performance claim
+### SNP-D1 — yield the SIMD in the decoder's spin-waits (`s_sleep`)        Category: C1   Status: KEPT — neutral on gfx1100 (60-rep A/B), small positive on gfx942 at the branch head (60-rep A/B: removing it costs 4 % TTI / 2 % words at saturation)
 Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
 Files: `src/device_functions.hiph`, `src/snappy/config.h`, `src/snappy/decompression_decode.hiph`,
 `src/snappy/decompression_prefetch.hiph`, `src/snappy/decompression_process.hiph`
@@ -47,6 +47,7 @@ underlying test branch: 1 pre-existing failure, `BitPackGPU_test` (legacy Cascad
 gfx1100 wave32; unrelated to Snappy — to be investigated on the Cascaded branch).
 Result (gfx942): gfx942 (MI300A, wave64, ROCm 7.0.1 container, 30 reps, median, `-p 65536`, sweep 2; note: saturation medians on this node carry an IQR of ±2–4 %, small-batch (x0) medians are tight): decompression binary x512 ×0.974 (180.4 → 175.7, IQRs overlap partially), tti x512 ×1.019, words x32 ×1.025; small batch ×1.005 / ×0.987 / ×1.009; compression ×1.000; bytes identical. Verdict on gfx942: NEUTRAL (±2 %, inside the node's noise), same as gfx1100. The 'polling waves steal the SIMD' hypothesis is not supported on either architecture at the default amounts.
 A/B at branch head (gfx1100, 60 reps): head-without-D1 vs head = ×1.004 / ×0.993 / ×1.000 (binary / tti / words at saturation), ×1.000 / ×1.007 / ×0.999 at small batch; the yield-only variant (sleep amounts 0/0/0) = ×0.992 / ×0.993 / ×0.999. Verdict: NEUTRAL with 60-rep confidence on gfx1100; the amounts do not matter. Kept only because the AMD fallback (`clock()`) was a no-op by accident; it is not a performance contribution.
+A/B at branch head (gfx942, 60 reps): head-without-D1 vs head = ×1.001 / ×0.960 / ×0.980 (binary / tti / words at saturation; tti IQRs 280.8–289.1 vs 267.7–277.2 GB/s, disjoint), ×0.995 / ×0.985 / ×1.009 at small batch. On wave64, with the faster decoder of the branch head, the yielding polls are worth ≈ 2–4 % on the decoder-bound inputs — the original hypothesis holds weakly on CDNA3 only.
 Verdict: NEUTRAL on gfx1100 (≤ +1 % decompression, within noise). The prediction "tens of %"
 did not hold on RDNA3 wave32: the polling waves are not stealing a measurable share of the
 SIMD from productive waves there. Side observation: decompression of copy-heavy input (words,
@@ -104,7 +105,7 @@ Result (gfx942): gfx942 (MI300A, wave64, ROCm 7.0.1 container, 30 reps, median, 
 ISA evidence (gfx1100, `--save-temps` at commit 798b0c4 = through SNP-D7b): the SnappyBatchKernels TU contains 15 `v_readfirstlane_b32` and 10 `v_readlane_b32` (the SNP-D3 sites) and 26 remaining `ds_bpermute_b32` (per-lane shuffles + the WarpReduce trees SNP-D2 replaces); 4 `s_sleep` (SNP-D1); no calls (`s_swappc_b64` = 0, everything inlined); `unsnap_kernel`: 53 VGPRs, 0 spills, 16 waves/SIMD (occupancy-unconstrained on wave32), `snap_kernel`: 35 VGPRs, 8 waves/SIMD (LDS-bound), HLIF decompress 69 VGPRs at 16 waves/SIMD — SNP-D9 (launch bounds) therefore has no lever on gfx1100.
 Verdict: KEPT on gfx1100: +3.3…+5.1 % at saturation, +5…+7 % at small batch, across all three inputs — the prediction (5–15 % on decoder-bound input) holds at its lower end. gfx942 pending.
 
-### SNP-D5 — 8-byte-aligned symbol queue, one 64-bit LDS access per symbol        Category: C4   Status: KEPT on gfx1100 (+1–2 %), MIXED on gfx942 — dedicated A/B pending
+### SNP-D5 — 8-byte-aligned symbol queue, one 64-bit LDS access per symbol        Category: C4   Status: KEPT on both (gfx1100 +1–2 %; gfx942 60-rep A/B: removing it costs 2.5–4 % TTI)
 Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
 Files: `src/snappy/symbol.hiph`
 Change: `LZ77Symbol` (len, offset; 8 bytes) is `alignas(8)`, which moves the queue `batch[]` in
@@ -124,6 +125,7 @@ Measured: (pending) same protocol as SNP-D1.
 Result: gfx1100 (RX 7900 XT, wave32, ROCm 7.0.1 container, 30 reps, median, `-p 65536`, sweep 2 — cumulative on the branch, each vs baseline 0263261): decompression binary x512 92.38 → 93.35 (×1.053 vs baseline, ×1.011 vs SNP-D3), tti x512 92.62 → 94.36 (×1.052, ×1.019), words x32 26.58 → 26.89 (×1.063, ×1.012); small batch ×1.084 / ×1.079 / ×1.072 vs baseline; compression ×1.000; bytes identical; tests green.
 Result (gfx942): gfx942 (MI300A, wave64, ROCm 7.0.1 container, 30 reps, median, `-p 65536`, sweep 2; note: saturation medians on this node carry an IQR of ±2–4 %, small-batch (x0) medians are tight): decompression vs SNP-D3: binary x512 ×0.994, tti x512 272.9 → 257.4 (×0.943), words x32 44.00 → 43.36 (×0.985); small batch binary 2.36 → 2.34 (×0.992), tti 4.44 → 4.60 (×1.036), words 8.47 → 8.10 (×0.956, tight IQRs — a real loss); bytes identical. On wave64 the 64-bit symbol access is not the small free win it is on wave32: the words small-batch case (decoder-bound, many short symbols) loses 4 %. Hypotheses to test with a dedicated A/B (more repetitions, D5 reverted on top of the current branch head): the pack/unpack VALU on the lane-0 serial path, or the changed LDS offsets of `buf` (2124 → 2096) altering ring bank mapping. Verdict deferred.
 A/B at branch head (gfx1100, 60 reps): head-without-D5 vs head = ×1.002 / ×0.988 / ×0.993 at saturation, ×0.998 / ×1.007 / ×0.989 at small batch — i.e. D5 is worth ≈ +1 % on gfx1100 on the decoder-bound inputs, consistent with sweep 2/3. gfx942 A/B (60 reps) pending.
+A/B at branch head (gfx942, 60 reps): head-without-D5 vs head = ×0.998 / ×0.961 / ×0.997 at saturation, ×0.995 / ×0.975 / ×1.009 at small batch; bytes identical. The sweep-2 'mixed' reading was run-order drift; at the branch head D5 is a consistent +2.5–4 % on TTI on MI300A. KEPT on both architectures.
 Verdict: KEPT on gfx1100: a consistent +1.1…+1.9 % on top of SNP-D3 on all inputs, as predicted (small, free). gfx942 pending.
 
 ### SNP-D7a — serial decoder: one dword-window read instead of up to five byte reads   Category: C4   Status: NEUTRAL on gfx1100 and gfx942 — kept as the carrier of `read_window5` (used by D7b/D6/D8); judged with them
