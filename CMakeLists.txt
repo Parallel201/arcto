@@ -153,6 +153,23 @@ if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU" OR
     set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g -ggdb")
 endif()
 
+# Device code: state the optimisation level explicitly instead of relying on
+# CMake's HIP/CUDA language defaults (-O3 -DNDEBUG for Release). A toolchain
+# file or a newer CMake can change those defaults silently, and the device-side
+# assert()s (LZ4Kernels.hiph, CascadedKernels.hiph) would then distort every
+# measurement. The flags that reach the device compiler are printed at
+# configure time so they are part of every build log.
+foreach(lang HIP CUDA)
+  if(DEFINED CMAKE_${lang}_FLAGS_RELEASE OR CMAKE_${lang}_COMPILER_LOADED)
+    if(NOT CMAKE_${lang}_FLAGS_RELEASE MATCHES "-O3")
+      set(CMAKE_${lang}_FLAGS_RELEASE "${CMAKE_${lang}_FLAGS_RELEASE} -O3")
+    endif()
+    if(NOT CMAKE_${lang}_FLAGS_RELEASE MATCHES "-DNDEBUG")
+      set(CMAKE_${lang}_FLAGS_RELEASE "${CMAKE_${lang}_FLAGS_RELEASE} -DNDEBUG")
+    endif()
+  endif()
+endforeach()
+
 # Using '-G' can cause the register count to overflow for some kernels
 # and cause launch failures
 # set(CMAKE_CUDA_FLAGS_DEBUG "${CMAKE_CUDA_FLAGS_DEBUG};-G")
@@ -166,6 +183,12 @@ else()
   # this is required, as CMake sends CMAKE_CXX_FLAGS_DEBUG to nvcc
   # if no build type is set (but not to g++ for some reason).
   set(CMAKE_BUILD_TYPE "Release")
+endif()
+string(TOUPPER "${CMAKE_BUILD_TYPE}" ARCTO_BUILD_TYPE_UPPER)
+if(CUDA_BACKEND)
+  message(STATUS "Device flags (CUDA, ${CMAKE_BUILD_TYPE}): ${CMAKE_CUDA_FLAGS} ${CMAKE_CUDA_FLAGS_${ARCTO_BUILD_TYPE_UPPER}}")
+else()
+  message(STATUS "Device flags (HIP, ${CMAKE_BUILD_TYPE}): ${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${ARCTO_BUILD_TYPE_UPPER}}")
 endif()
 
 set(ARCTO_FIND_QUIET "QUIET")
