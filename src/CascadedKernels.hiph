@@ -122,10 +122,10 @@ constexpr int cascaded_decompress_threadblock_size = (arcto::warpsize >= 64) ? 2
 #  endif
 #endif
 
-// CAS-D1: cooperative (load-balanced) expansion of RLE runs in
-// block_rle_decompress when a round contains a run longer than the threshold
-// (see there). On by default on AMD; the CUDA backend keeps nvCOMP's
-// one-thread-per-run fill. Both overridable per build.
+// CAS-D1 / D1w: wave-local load-balanced expansion of RLE runs in
+// block_rle_decompress when a wave's round holds a run longer than FACTOR x
+// the wave's average run (see there). On by default on AMD; the CUDA backend
+// keeps nvCOMP's one-thread-per-run fill. Both overridable per build.
 #ifndef ARCTO_CASCADED_RLE_BALANCED
 #  if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
 #    define ARCTO_CASCADED_RLE_BALANCED 1
@@ -427,45 +427,47 @@ __device__ void block_rle_decompress(
         .ExclusiveSum(current_count, output_offset, aggregate);
 
 #if ARCTO_CASCADED_RLE_BALANCED
-    // CAS-D1: with one thread per run, a long run serialises its whole
+    // CAS-D1 / D1w: with one thread per run, a long run serialises its whole
     // expansion on one lane while the rest of the block idles (a 4096-element
-    // run = 4096 dependent LDS stores by one lane). When any run of the round
-    // is longer than the threshold, every thread instead fills a strided slice
-    // of the round's output and finds the owning run by a binary search over
-    // the (at most threadblock_size) run ends kept in LDS — log2(runs) LDS
-    // reads per element, mostly wave-uniform addresses (broadcast), and fully
-    // parallel. Rounds made only of short runs keep the one-thread-per-run
-    // fill, which is cheaper for them. Same values to the same positions:
-    // output identical.
-    run_end[threadIdx.x] = output_offset + current_count;
-    // CAS-D1f: balance only when some run of the round is much longer than
-    // the round's average run (count * threads > FACTOR * aggregate), i.e.
-    // when one lane's serial fill would dominate the round. Rounds of many
-    // comparable runs — short or long — keep the per-run fill, whose cost is
-    // the longest run, while the balanced fill costs (aggregate / threads)
-    // elements per lane at several LDS reads each. An absolute cutoff (the
-    // first version, 16 / 64 / 256) could not separate the two cases.
-    const int any_long_run = __syncthreads_or(
-        static_cast<uint32_t>(current_count) * threadblock_size
-        > ARCTO_CASCADED_RLE_BALANCE_FACTOR * static_cast<uint32_t>(aggregate));
-    if (any_long_run) {
-      data_type* const round_output = output_buffer + *output_num_elements;
-      const data_type* const round_vals = val_buffer + round * threadblock_size;
-      const int runs_in_round
-          = min(threadblock_size, static_cast<int>(num_runs) - round * threadblock_size);
-      for (int o = threadIdx.x; o < static_cast<int>(aggregate); o += threadblock_size) {
-        // smallest run r with run_end[r] > o (zero-length runs are skipped)
-        int lo = 0, hi = runs_in_round - 1;
-        while (lo < hi) {
-          const int mid = (lo + hi) >> 1;
-          if (run_end[mid] > o)
-            hi = mid;
-          else
-            lo = mid + 1;
+    // run = 4096 dependent LDS stores by one lane). The balancing is WAVE-LOCAL
+    // (D1w): each wave owns the contiguous output range of its own runs; when
+    // one of its runs is much longer than the wave's average (a wave ballot —
+    // no block barrier, no LDS vote, which cost ~8 % on mixed-run data in the
+    // block-wide first version), every lane of the wave fills a strided slice
+    // of the wave's range and finds the owning run by a binary search over the
+    // wave's run ends in LDS (log2(64) = 6 reads, wave-uniform addresses for
+    // neighbouring lanes). Rounds of comparable runs keep the per-run fill.
+    // Same values to the same positions: output identical.
+    {
+      constexpr int W = arcto::warpsize;
+      const int lane = threadIdx.x % W;
+      const int wave = threadIdx.x / W;
+      const run_type wave_start = __shfl(output_offset, 0, W);
+      const run_type wave_end = __shfl(static_cast<run_type>(output_offset + current_count), W - 1, W);
+      const uint32_t wave_total = static_cast<uint32_t>(wave_end - wave_start);
+      const bool dominant = static_cast<uint32_t>(current_count) * W
+                            > ARCTO_CASCADED_RLE_BALANCE_FACTOR * wave_total;
+      if (__ballot(dominant) != 0) {
+        run_end[threadIdx.x] = output_offset + current_count; // wave-private region
+        __threadfence_block();
+        const int runs_in_round = min(threadblock_size, static_cast<int>(num_runs) - round * threadblock_size);
+        const int runs_in_wave = min(W, runs_in_round - wave * W);
+        data_type* const wave_output = output_buffer + *output_num_elements + wave_start;
+        const data_type* const wave_vals = val_buffer + round * threadblock_size + wave * W;
+        const run_type* const wave_ends = run_end + wave * W;
+        for (int o = lane; o < static_cast<int>(wave_total); o += W) {
+          const run_type target = static_cast<run_type>(wave_start + o);
+          int lo = 0, hi = runs_in_wave - 1;
+          while (lo < hi) {
+            const int mid = (lo + hi) >> 1;
+            if (wave_ends[mid] > target)
+              hi = mid;
+            else
+              lo = mid + 1;
+          }
+          wave_output[o] = wave_vals[lo];
         }
-        round_output[o] = round_vals[lo];
-      }
-    } else
+      } else
 #endif
     if (idx < num_runs) {
       const auto current_val = val_buffer[idx];
@@ -474,6 +476,9 @@ __device__ void block_rle_decompress(
             = current_val;
       }
     }
+#if ARCTO_CASCADED_RLE_BALANCED
+    }
+#endif
 
     *output_num_elements += aggregate;
 
@@ -648,6 +653,23 @@ __device__ void get_for_bitwidth(
       bitwidth = sizeof(int) * num_bits_per_byte - __clz(range);
     }
     *bitwidth_ptr = (bitwidth << 16) | static_cast<uint32_t>(num_elements);
+
+    // CAS-H1: the header's alignment gaps — between the frame of reference
+    // (sizeof(data_type) B) and this 4-B word (1-/2-byte types) and between
+    // this word and the data_type-aligned data (8-byte types) — were never
+    // written and carried LDS scratch into the stream. Zero them here, in the
+    // same single-thread section that writes the header (no extra divergent
+    // section: H1b).
+    uint8_t* gap = reinterpret_cast<uint8_t*>(frame_of_reference + 1);
+    while (gap < reinterpret_cast<uint8_t*>(bitwidth_ptr)) {
+      *gap++ = 0;
+    }
+    gap = reinterpret_cast<uint8_t*>(bitwidth_ptr + 1);
+    uint8_t* const data_start = reinterpret_cast<uint8_t*>(
+        roundUpToAlignment<data_type>(bitwidth_ptr + 1));
+    while (gap < data_start) {
+      *gap++ = 0;
+    }
   }
 }
 
@@ -686,27 +708,9 @@ __device__ void block_bitpack(
 
   const data_type frame_of_reference = *for_ptr;
   const uint32_t bitwidth = (*current_ptr & 0xFFFF0000) >> 16;
-  uint32_t* const bitwidth_ptr = current_ptr;
   current_ptr = reinterpret_cast<uint32_t*>(
       roundUpToAlignment<data_type>(current_ptr + 1));
 
-  // CAS-H1: the header has alignment gaps for some types — between the
-  // frame of reference (sizeof(data_type) B) and the 4-B-aligned bitwidth
-  // word (1-/2-byte types), and between that word and the data_type-aligned
-  // data (8-byte types). They were never written, so the compressed stream
-  // carried whatever the LDS scratch held: correct to decode, but not
-  // reproducible. Zero them (same thread that wrote the header, after the
-  // barrier above).
-  if (threadIdx.x == 0) {
-    uint8_t* gap = reinterpret_cast<uint8_t*>(for_ptr + 1);
-    while (gap < reinterpret_cast<uint8_t*>(bitwidth_ptr)) {
-      *gap++ = 0;
-    }
-    gap = reinterpret_cast<uint8_t*>(bitwidth_ptr + 1);
-    while (gap < reinterpret_cast<uint8_t*>(current_ptr)) {
-      *gap++ = 0;
-    }
-  }
 
   const int num_output_elements = roundUpDiv(
       num_elements * bitwidth, sizeof(uint32_t) * num_bits_per_byte);

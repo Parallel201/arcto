@@ -176,7 +176,34 @@ FACTOR × the round's average run), so a round dominated by one run (zeros: one 
 balances and a round of comparable runs stays serial; FACTOR default 8, knob
 `ARCTO_CASCADED_RLE_BALANCE_FACTOR` (the absolute-threshold knob is gone).
 Prediction: ints back to the pre-D1 level (≈ +7 %), zeros unchanged (×7.9 / ×3–4.5 kept), TTI ≈.
-Measured: (pending: cas5 on gfx1100, factors 4 / 8 / 16; then gfx942)
+Measured (gfx1100, cas5, H3 head): factor 8 / 4 / 16 — ints_mixed decompression 89.0 / 85.4 / 88.8
+GB/s at x32 (pre-D1 97.3; D1 abs-16 90.9), x0 72.5 / 69.1 / 72.9 (pre-D1 73.4); zeros x512 360 / 348
+/ 355 (D1 abs-16 341); TTI ≈. Bytes identical; the full coverage matrix passes (72 684 assertions).
+Result: the heuristic cannot recover ints either — the ~8 % at saturation is the per-round block
+vote itself (`__syncthreads_or` = LDS vote + barrier on every round, taken or not), not the path
+choice. Factor 8 keeps zeros at its best (+5.6 % over the absolute cutoff).
+Verdict: superseded by CAS-D1w (next commit): wave-local balancing with a wave ballot — no block
+vote, no extra barrier.
+
+### CAS-D1w — wave-local balanced RLE expansion (ballot, no block vote)                   Category: C1   Status: COMMITTED (final sweep pending)
+Commit: (this commit)  (branch `opt/cascaded-2026-08`)
+Files: `src/CascadedKernels.hiph` (`block_rle_decompress`)
+Change: each wave owns the contiguous output range of its own `warpsize` runs of the round
+(`wave_start`/`wave_end` from two shuffles of the scan's offsets); if `__ballot(count * warpsize >
+FACTOR * wave_total)` is non-zero — wave-uniform, free — the wave's lanes fill its range cooperatively
+(run ends in a wave-private LDS region, `__threadfence_block`, binary search over ≤ 64 entries);
+otherwise the per-run fill. No block-wide vote or barrier is added to any round; the round's
+existing `__syncthreads()` remains. Same values to the same positions: bytes identical.
+Prediction: ints back to the pre-D1 level (≈ 97 GB/s at x32 on gfx1100), zeros keeps the D1 gain
+(64-lane instead of 256-lane balancing of a single run: still ×6+), TTI ≈.
+Measured: (final sweep)
+
+### CAS-H1b — header-gap zeroing folded into the header-writing thread-0 section          Category: C8   Status: COMMITTED
+Commit: (this commit)  (branch `opt/cascaded-2026-08`)
+Change: the CAS-H1 gap stores move from a separate post-barrier thread-0 section in `block_bitpack`
+into `get_for_bitwidth`'s existing thread-0 header write (one divergent section per bit-pack call
+instead of two). H1 measured −2…−3 % (gfx1100) / −4…−7 % (gfx942, drift band) compression.
+Measured: (final sweep)
 
 ### CAS-C4 — incremental input-window arithmetic in `block_bitpack`                    Category: C1   Status: PENDING
 Commit: (this commit)  (branch `opt/cascaded-2026-08`)
