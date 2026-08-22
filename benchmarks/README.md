@@ -1,193 +1,101 @@
 # ARCTO Benchmarks
 
-This directory contains performance benchmarks for ARCTO compression algorithms.
+Throughput benchmarks for the batched (low-level) APIs: one `benchmark_<codec>_chunked`
+executable per codec plus `benchmark_zfp_single` for ZFP. All of them time only the
+`arctoBatched*Async` calls (HIP events around the asynchronous call), verify the round trip
+on the last iteration, and report uncompressed-bytes throughput.
 
-## Building Benchmarks
+## Building
 
-To build benchmarks, enable the `BUILD_BENCHMARKS` option when configuring with CMake:
-
-### For AMD GPUs (HIP backend):
-```bash
-mkdir build && cd build
-CMAKE_PREFIX_PATH=/opt/rocm/lib/cmake cmake .. \
-  -D BUILD_BENCHMARKS=ON \
-  -D CMAKE_HIP_ARCHITECTURES="gfx90a;gfx942"  # MI300X uses gfx942
-make -j$(nproc)
-```
-
-### For NVIDIA GPUs (CUDA backend):
-```bash
-mkdir build && cd build
-cmake .. \
-  -D BUILD_BENCHMARKS=ON \
-  -D CUDA_BACKEND=ON \
-  -D CMAKE_CUDA_ARCHITECTURES="80;90"
-make -j$(nproc)
-```
-
-Benchmark executables will be created in `build/benchmarks/` or installed to `bin/benchmarks/`.
-
-## Available Benchmarks
-
-- `benchmark_lz4_chunked` - LZ4 compression algorithm
-- `benchmark_snappy_chunked` - Snappy compression algorithm
-- `benchmark_cascaded_chunked` - Cascaded compression algorithm
-- `benchmark_gdeflate_chunked` - GDeflate compression algorithm
-- `benchmark_bitcomp_chunked` - Bitcomp compression algorithm
-- `benchmark_ans_chunked` - ANS compression algorithm
-
-## Running Benchmarks
-
-### Individual Benchmark
-
-Run a single benchmark on a specific file:
+Benchmarks are built when `BUILD_BENCHMARKS=ON` is passed to CMake (see the top-level
+README for the full configure line). Binaries land in **`build/bin/`**, next to the test
+executables, and install to `bin/benchmarks/`.
 
 ```bash
-./build/benchmarks/benchmark_lz4_chunked \
-  -g 0 \
-  -f /path/to/test/file.bin \
-  -i 10 \
-  -w 2 \
-  -c true
+# AMD (wave64 parts: gfx90a / gfx942; add -D USE_WARPSIZE_32=ON for gfx1100)
+cmake -S . -B build -D CMAKE_PREFIX_PATH=/opt/rocm/lib/cmake \
+  -D CMAKE_HIP_ARCHITECTURES="gfx90a;gfx942" -D CMAKE_BUILD_TYPE=Release \
+  -D BUILD_BENCHMARKS=ON
+cmake --build build -j
+
+# NVIDIA (experimental CUDA backend; the chunked benchmarks then measure nvCOMP,
+# which is the cross-vendor baseline)
+cmake -S . -B build-cuda -D CUDA_BACKEND=ON -D CMAKE_CUDA_ARCHITECTURES="80;90" \
+  -D BUILD_BENCHMARKS=ON
 ```
 
-**Options:**
-- `-g, --gpu <N>` - GPU device number (default: 0)
-- `-f, --input_file <path>` - Input file(s) to benchmark (required)
-- `-i, --iteration_count <N>` - Number of iterations to average (default: 1)
-- `-w, --warmup_count <N>` - Number of warmup iterations (default: 1)
-- `-c, --csv_output <true|false>` - Output in CSV format (default: false)
-- `-t, --tab_separator <true|false>` - Use tabs instead of commas (default: false)
-- `-p, --chunk_size <N>` - Chunk size for splitting data (default: 65536)
-- `-x, --duplicate_data <N>` - Duplicate chunks N times (default: 0)
+## Executables
 
-### Using the Benchmark Script
+- `benchmark_lz4_chunked`, `benchmark_snappy_chunked`, `benchmark_cascaded_chunked` —
+  always built.
+- `benchmark_gdeflate_chunked`, `benchmark_bitcomp_chunked`, `benchmark_ans_chunked` —
+  only useful when the corresponding external library is found (`ARCTO_EXTS_ROOT`).
+- `benchmark_zfp_single` — ZFP modes (fixed rate / precision / accuracy) with fidelity
+  metrics; see `-h`.
 
-The `benchmark.sh` script automates running benchmarks on multiple files:
+## Running a chunked benchmark
 
 ```bash
-./scripts/benchmark.sh <algorithm> <data_directory> [gpu_id]
+HIP_VISIBLE_DEVICES=0 ./build/bin/benchmark_lz4_chunked -f data.bin -p 65536 -w 2 -i 10 -c true
 ```
 
-**Example:**
+| Flag | Long form | Meaning | Default |
+|---|---|---|---|
+| `-g N` | `--gpu` | GPU device number | 0 |
+| `-f FILE...` | `--input_file` | input file(s) (required) | — |
+| `-p N` | `--chunk_size` | chunk size in bytes when splitting the input | 65536 |
+| `-x N` | `--duplicate_data` | clone the chunk list N times (fills large GPUs) | 0 |
+| `-w N` | `--warmup_count` | warm-up iterations (not timed) | 1 |
+| `-i N` | `--iteration_count` | timed iterations to average | 1 |
+| `-c true` | `--csv_output` | CSV instead of text | false |
+| `-t true` | `--tab_separator` | tabs instead of commas in CSV | false |
+| `-F true` | `--file_with_page_sizes` | input files are pages, each prefixed by an int64 size | false |
+| `-P true` | `--pinned_input` | one pinned, coalesced host buffer + single bulk H2D (`arctoHostBatch`) | false |
+| `-A true` | `--adaptive_tiled` | adaptive tiled staging (`arctoHostBatchAdaptive`); exclusive with `-P` | false |
+| `-R true` | `--report_phases` | extra CSV columns with host-side phase costs (`t_alloc_ms`, `t_memcpy_h2h_ms`, `peak_pinned_bytes`, …) | false |
+
+Environment variables: `ARCTO_PER_REP_CSV=<path>` appends one row per timed repetition
+(throughput and time for compression and decompression) to `<path>`, with
+`ARCTO_PER_REP_TAG=<label>` identifying the configuration — use them for sweeps that need
+the raw per-repetition values rather than mean ± stddev.
+
+Tip: with one wave or block per chunk, a 100 MB input at 64 KB chunks is only 1600 chunks;
+use `-x` (e.g. `-x 8`…`-x 512`) so the batch is large enough to saturate the GPU before
+comparing kernel changes.
+
+## Output
+
+Text mode prints the number of files, uncompressed/compressed bytes, ratio and the two
+throughputs. CSV mode (`-c true`) prints one header row and one data row:
+
+```
+Files,Duplicate data,Size in MB,Pages,Avg page size in KB,Max page size in KB,Ucompressed size in bytes,Compressed size in bytes,Compression ratio,Compression throughput (uncompressed) in GB/s,Decompression throughput (uncompressed) in GB/s,Compression time (ms),Decompression time (ms),Transfer H2D (ms),Transfer D2H (ms),Total time (ms),Avg chunk time (ms),Comp throughput stddev (GB/s),Decomp throughput stddev (GB/s),Comp time stddev (ms),Decomp time stddev (ms)
+```
+
+(`-R` appends `t_alloc_ms, t_memcpy_h2h_ms, peak_pinned_bytes, adaptive_window_bytes, adaptive_num_windows`.)
+
+## Test data
+
+`tests/data/*.bin` ships six 1 MB fixtures (synthetic zeros / binary / random and three
+64³ float TTI fields) that double as a compressibility ladder. Larger inputs:
+
 ```bash
-# Run LZ4 benchmark on all files in /data/testset on GPU 0
-./scripts/benchmark.sh lz4 /data/testset 0
+dd if=/dev/urandom of=test_100mb.bin bs=1M count=100          # incompressible
+base64 /dev/urandom | head -c 100M > test_text_100mb.txt       # compressible
 ```
 
-**Supported algorithms:** `lz4`, `snappy`, `cascaded`, `gdeflate`, `bitcomp`, `ans`
+## Profiling
 
-## GPU-Specific Notes
-
-### AMD MI300X (gfx942)
-- 304 Compute Units
-- 192 GB HBM3 memory
-- 8 TB/s memory bandwidth
-- Wave size: 64 threads
-
-To select specific GPU:
 ```bash
-export HIP_VISIBLE_DEVICES=0
-./benchmark_lz4_chunked -f test.bin
-```
-
-### AMD MI50 (gfx906)
-- 60 Compute Units
-- 16 GB or 32 GB HBM2
-
-### AMD RX 7900 XT (gfx1100)
-- 84 Compute Units
-- 20 GB GDDR6
-- Note: May require `-D USE_WARPSIZE_32=ON` when building
-
-### NVIDIA GPUs
-Use `CUDA_VISIBLE_DEVICES` to select GPU:
-```bash
-export CUDA_VISIBLE_DEVICES=0
-./benchmark_lz4_chunked -f test.bin
-```
-
-## Output Format
-
-### Standard Output
-```
-----------
-files: 1
-uncompressed (B): 104857600
-comp_size: 52428800, compressed ratio: 2.00
-compression throughput (GB/s): 15.23
-decompression throughput (GB/s): 42.18
-```
-
-### CSV Output (`-c true`)
-```
-Files,Duplicate data,Size in MB,Pages,Avg page size in KB,Max page size in KB,Ucompressed size in bytes,Compressed size in bytes,Compression ratio,Compression throughput (uncompressed) in GB/s,Decompression throughput (uncompressed) in GB/s
-1,0,100.00,1600,64.00,64.00,104857600,52428800,2.00,15.23,42.18
-```
-
-## Creating Test Data
-
-Generate random test data:
-```bash
-# 100 MB random file
-dd if=/dev/urandom of=test_100mb.bin bs=1M count=100
-
-# Text-based data (more compressible)
-base64 /dev/urandom | head -c 100M > test_text_100mb.txt
-```
-
-## Performance Profiling
-
-### ROCm Profiler (rocprof)
-```bash
-rocprof --stats ./benchmark_lz4_chunked -f test.bin
-```
-
-### NVIDIA Nsight Systems
-```bash
-nsys profile ./benchmark_lz4_chunked -f test.bin
-```
-
-## Optimization Features Tracking
-
-This benchmark infrastructure supports tracking optimization improvements across features:
-
-- **Feature 1**: Baseline benchmark infrastructure
-- **Feature 4+**: AMD-specific optimizations (see main README for details)
-
-Compare performance between branches:
-```bash
-# Baseline
-git checkout feature/add-benchmark-infrastructure
-./scripts/benchmark.sh lz4 /data/testset > baseline.csv
-
-# Optimized
-git checkout optimize/amd-wavefront-aware
-./scripts/benchmark.sh lz4 /data/testset > optimized.csv
-
-# Compare
-diff baseline.csv optimized.csv
+rocprofv3 --kernel-trace --stats -- ./build/bin/benchmark_lz4_chunked -f test.bin   # AMD
+nsys profile ./build/bin/benchmark_lz4_chunked -f test.bin                           # NVIDIA backend
 ```
 
 ## Troubleshooting
 
-### Benchmark binary not found
-Make sure you built with `-D BUILD_BENCHMARKS=ON`
-
-### GPU not detected
-```bash
-# AMD
-rocminfo | grep "Name:"
-
-# NVIDIA
-nvidia-smi
-```
-
-### Out of memory errors
-Reduce chunk size or file size:
-```bash
-./benchmark_lz4_chunked -f test.bin -p 32768  # 32KB chunks instead of 64KB
-```
-
-### ROCm version compatibility
-This project has been tested with ROCm 7.x; the minimum supported version is ROCm 6.1.
+- *Binary not found*: configure with `-D BUILD_BENCHMARKS=ON`; binaries are in `build/bin/`.
+- *GPU not detected*: `rocminfo | grep gfx` (AMD) / `nvidia-smi` (NVIDIA); select with
+  `HIP_VISIBLE_DEVICES` / `CUDA_VISIBLE_DEVICES` or `-g`.
+- *Out of memory*: reduce `-p` (chunk size) or `-x`.
+- *ROCm version*: minimum ROCm 6.1; the reference measurements use ROCm 7.0.1 in the
+  project's toolchain container.

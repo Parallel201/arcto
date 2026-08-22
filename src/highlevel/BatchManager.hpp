@@ -214,8 +214,11 @@ private: // helper API overrides
   {
     const size_t comp_buffer_size = max_comp_chunk_size * comp_config.num_chunks;
 
+    // Both tables are laid out as size_t arrays by do_compress()
+    // (comp_chunk_offsets / comp_chunk_sizes in CompressArgs); size the
+    // estimate from the same type so it cannot fall short of the layout.
     const size_t chunk_offsets_size = sizeof(ChunkStartOffset_t) * comp_config.num_chunks;
-    const size_t chunk_sizes_size = sizeof(uint32_t) * comp_config.num_chunks;
+    const size_t chunk_sizes_size = sizeof(size_t) * comp_config.num_chunks;
     // *2 for decomp and comp checksums
     const size_t checksum_size = sizeof(Checksum_t) * comp_config.num_chunks * 2;
 

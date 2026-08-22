@@ -79,111 +79,13 @@ typedef enum arctoType_t
   ARCTO_TYPE_BITS = 0xff    // 1b
 } arctoType_t;
 
-/******************************************************************************
- * FUNCTION PROTOTYPES ********************************************************
- *****************************************************************************/
-
-/**
- * NOTE: These interfaces will be removed in future releases, please switch to
- * the compression schemes specific interfaces in arcto/cascaded.h,
- * arcto/lz4.h, arcto/snappy, arcto/bitcomp.h, and arcto/gdeflate.h.
+/*
+ * The codec APIs live in the per-scheme headers: arcto/lz4.h, arcto/snappy.h,
+ * arcto/cascaded.h, arcto/zfp.h (and arcto/bitcomp.h, arcto/gdeflate.h,
+ * arcto/ans.h when the external libraries are present). The generic
+ * nvCOMP-1.x style arctoDecompress* interface was declared here but never
+ * implemented in ARCTO; it has been removed.
  */
-
-/**
- * DEPRECATED: Will be removed in future releases.
- *
- * @brief Extracts the metadata from the input in_ptr on the device and copies
- *it to the host.
- *
- * @param in_ptr The compressed memory on the device.
- * @param in_bytes The size of the compressed memory on the device.
- * @param metadata_ptr The metadata on the host to create from the compresesd
- * data.
- * @param stream The stream to use for reading memory from the device.
- *
- * @return arctoSuccess if successful, and an error code otherwise.
- */
-arctoStatus_t arctoDecompressGetMetadata(
-    const void* in_ptr,
-    size_t in_bytes,
-    void** metadata_ptr,
-    hipStream_t stream);
-
-/**
- * DEPRECATED: Will be removed in future releases.
- *
- * @brief Destroys the metadata object and frees the associated memory.
- *
- * @param metadata_ptr The pointer to destroy.
- */
-void arctoDecompressDestroyMetadata(void* metadata_ptr);
-
-/**
- * DEPRECATED: Will be removed in future releases.
- *
- * @brief Computes the required temporary workspace required to perform
- * decompression.
- *
- * @para metadata_ptr The metadata.
- * @param temp_bytes The size of the required temporary workspace in bytes
- * (output).
- *
- * @return arctoSuccess if successful, and an error code otherwise.
- */
-arctoStatus_t
-arctoDecompressGetTempSize(const void* metadata_ptr, size_t* temp_bytes);
-
-/**
- * DEPRECATED: Will be removed in future releases.
- *
- * @brief Computes the size of the uncompressed data in bytes.
- *
- * @para metadata_ptr The metadata.
- * @param output_bytes The size of the uncompressed data (output).
- *
- * @return arctoSuccess if successful, and an error code otherwise.
- */
-arctoStatus_t
-arctoDecompressGetOutputSize(const void* metadata_ptr, size_t* output_bytes);
-
-/**
- * DEPRECATED: Will be removed in future releases.
- *
- * @brief Get the type of the compressed data.
- *
- * @param metadata_ptr The metadata.
- * @param type The data type (output).
- *
- * @return arctoSuccess if successful, and an error code otherwise.
- */
-arctoStatus_t
-arctoDecompressGetType(const void* metadata_ptr, arctoType_t* type);
-
-/**
- * DEPRECATED: Will be removed in future releases.
- *
- * @brief Perform the asynchronous decompression.
- *
- * @param in_ptr The compressed data on the device to decompress.
- * @param in_bytes The size of the compressed data.
- * @param temp_ptr The temporary workspace on the device.
- * @param temp_bytes The size of the temporary workspace.
- * @param metadata_ptr The metadata.
- * @param out_ptr The output location on the device.
- * @param out_bytes The size of the output location.
- * @param stream The hip stream to operate on.
- *
- * @return arctoSuccess if successful, and an error code otherwise.
- */
-arctoStatus_t arctoDecompressAsync(
-    const void* in_ptr,
-    size_t in_bytes,
-    void* temp_ptr,
-    size_t temp_bytes,
-    void* metadata_ptr,
-    void* out_ptr,
-    size_t out_bytes,
-    hipStream_t stream);
 
 #ifdef __cplusplus
 }

@@ -105,12 +105,38 @@ if (CUDA_BACKEND)
   set_cuda_compilation_options()
 endif (CUDA_BACKEND)
 
+if (ARCTO_DEVICE_REPORTS AND NOT CUDA_BACKEND)
+  # -Rpass-analysis=kernel-resource-usage makes the AMDGPU backend print, per
+  # kernel and per offload arch, the SGPR/VGPR/AGPR counts, LDS and scratch
+  # bytes and the resulting occupancy (waves/SIMD) -- the numbers every
+  # launch-bounds / register-pressure decision in docs/AMD_OPTIMIZATION_MAP.md
+  # depends on. --save-temps keeps the device assembly (.s per arch) in the
+  # build tree so ISA-level checks (global_load_dwordx4, ds_bpermute, s_barrier,
+  # nt/slc bits) can be grepped without a profiler.
+  target_compile_options(arcto PRIVATE
+    $<$<COMPILE_LANGUAGE:HIP>:-Rpass-analysis=kernel-resource-usage>
+    $<$<COMPILE_LANGUAGE:HIP>:--save-temps>)
+endif()
+
 if(UNIX)
 target_include_directories(arcto PUBLIC
   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 endif()
 
 include_directories("${arcto_SOURCE_DIR}/src")
+
+# hipCUB/rocPRIM block and warp primitives are used by the Cascaded and RLE
+# kernels (arcto_hipcub.hiph). Take the include directories from the imported
+# target so the dependency is explicit instead of resolving by accident through
+# HIP_INCLUDE_DIRS. Deliberately NOT target_link_libraries(): hip::hipcub pulls
+# hip::device, whose interface adds --offload-arch=<gfx> to every source of the
+# target -- including the host-only .cpp files compiled by the C++ compiler,
+# which then fail with "unrecognized command-line option". The CUDA backend
+# uses CUB from the toolkit.
+if (NOT CUDA_BACKEND)
+  target_include_directories(arcto PRIVATE
+    $<TARGET_PROPERTY:hip::hipcub,INTERFACE_INCLUDE_DIRECTORIES>)
+endif()
 
 if (bitcomp_FOUND)
   target_include_directories(arcto INTERFACE ${BITCOMP_INCLUDE_DIRS})
