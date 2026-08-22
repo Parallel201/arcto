@@ -111,7 +111,11 @@ decompression ×0.97 / ×1.43, zeros decompression ×0.71. gfx1100 (wave32): MIN
 +3 %, words −1.6 %); the split commit is a verified no-op there.
 Result: on wave64 the words loss (−17…−24 %) is the same at every cutoff, so it is not the short-copy
 overhead (at MIN=256 every copy of words takes the byte loop): it is the cost of having the vector
-paths compiled in — register/scheduling (report pending). The gains are equally cutoff-independent.
+paths compiled in. Resource report (gfx942, `-Rpass-analysis`): `lz4DecompressBatchKernel` goes
+from 66 VGPRs / 7 waves per SIMD (vec off) to 84 VGPRs / 5 waves per SIMD (vec on), no spills — the
+short-sequence input is latency-bound and loses two waves of latency hiding; the long-copy inputs
+gain from the 4× wider stores despite the lower occupancy. Occupancy-target variants
+(`MIN_WAVES_PER_EU` 7 / 6 → ≤ 72 / ≤ 80 VGPRs) are in the final sweep. The gains are equally cutoff-independent.
 The compression-side vectorisation is a clear loss on wave64 (COMP stays off); MIN stays 32.
 Verdict: wave64 default = DECOMP on, COMP off (next commit, LZ4-D1w), with the words/zeros costs
 recorded; the knobs stay for workloads dominated by short sequences.
