@@ -73,3 +73,18 @@ binary, TTI), ≈ 0 on highly compressible data; bytes identical.
 Measured: (pending) same protocol as SNP-C5.
 Result: (pending)
 Verdict: (pending)
+
+### SNP-C3 — dword literal emission in `StoreLiterals` (AMD)                            Category: C3   Status: PENDING
+Commit: (this commit)  (branch `opt/snappy-comp-2026-08`)
+Files: `src/snappy/compression.hiph`
+Change (AMD only; CUDA keeps the byte loop): the emitting wave copied a literal run byte by byte
+(`dst[i] = src[i]`, stride GROUPSIZE). It now moves 4 bytes per lane per step with unaligned dword
+loads/stores (whole dwords only where the dword's last byte is inside the output buffer, otherwise
+byte-wise — same end-of-buffer semantics), then a byte tail. Output bytes identical.
+Why (mechanism): 4× fewer VMEM instructions for literal bodies (up to 256 B per run); the
+emitting wave is rarely the bottleneck (the match-finding wave is), so the gain is bounded by how
+often WARP0 is on the critical path — mostly on incompressible data with long literal runs.
+Prediction: small; visible only on random/binary/TTI inputs; bytes identical.
+Measured: (pending) same protocol as SNP-C5.
+Result: (pending)
+Verdict: (pending)

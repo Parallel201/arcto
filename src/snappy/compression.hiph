@@ -109,9 +109,32 @@ static inline __device__ uint8_t *StoreLiterals(
     dst += 5;
   }
   if ( GROUPSIZE == WARPSIZE || t < GROUPSIZE ) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+    // AMD: 4 bytes per lane per step with unaligned dword loads/stores
+    // (supported on AMD; the CUDA backend keeps the byte loop below), then a
+    // byte tail. The bounds check is kept per dword: a dword is written only if
+    // its last byte is inside the output buffer, otherwise byte-wise. Output
+    // bytes identical.
+    const uint32_t n   = len_minus1 + 1;
+    const uint32_t ndw = n >> 2;
+    for (uint32_t d = t; d < ndw; d += GROUPSIZE) {
+      uint32_t v;
+      __builtin_memcpy(&v, src + 4 * d, 4);
+      if (dst + 4 * d + 3 < end) {
+        __builtin_memcpy(dst + 4 * d, &v, 4);
+      } else {
+        for (uint32_t j = 0; j < 4; ++j) if (dst + 4 * d + j < end) dst[4 * d + j] = src[4 * d + j];
+      }
+    }
+    if (t < n - 4 * ndw) {
+      const uint32_t i = 4 * ndw + t;
+      if (dst + i < end) dst[i] = src[i];
+    }
+#else
     for (uint32_t i = t; i <= len_minus1; i += GROUPSIZE) {
       if (dst + i < end) dst[i] = src[i];
     }
+#endif
   }
   return dst + len_minus1 + 1;
 }
