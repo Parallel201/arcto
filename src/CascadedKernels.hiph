@@ -1085,7 +1085,16 @@ __device__ constexpr int compute_smem_size()
   constexpr int tot_elt_storage = 2 * (storage_num_elts * storage_width);
   constexpr int run_width = 2;
   constexpr int chunk_num_elements = chunk_size / width;
-  constexpr int tot_count_bytes = 2 * (chunk_num_elements * run_width);
+  constexpr int count_bytes = chunk_num_elements * run_width;
+  // CAS-D5: the bit-unpack scratch of the RLE count arrays aliases the dead
+  // element buffer whenever it fits there (every data type of 2+ bytes), so
+  // only the count array itself is allocated; 1-byte types keep a dedicated
+  // scratch (their 2-byte counts outgrow the element buffer). Must agree with
+  // `cascaded_decompression_fcn`.
+  constexpr bool count_scratch_aliases_output
+      = count_bytes <= storage_num_elts * storage_width;
+  constexpr int tot_count_bytes
+      = count_scratch_aliases_output ? count_bytes : 2 * count_bytes;
 
   return 64 + tot_elt_storage + tot_count_bytes + (4 * 8);
 }
@@ -1182,9 +1191,26 @@ __device__ void cascaded_decompression_fcn(
   shmem = static_cast<void*>(
       static_cast<uint8_t*>(shmem) + (chunk_num_elements * sizeof(run_type)));
 
-  uint32_t* temp_count_array = static_cast<uint32_t*>(shmem);
-  shmem = static_cast<void*>(
-      static_cast<uint8_t*>(shmem) + (chunk_num_elements * sizeof(run_type)));
+  // CAS-D5: while a count array is being read, `shared_output_buffer` (the
+  // previous layer's input, already consumed) is dead — the final-array read
+  // below already uses it as its unpack scratch — so the count-array scratch
+  // lives there whenever it fits: for every data type of 2+ bytes the count
+  // array (2 B per element) is no larger than the element buffer
+  // (chunk_size + 4 + sizeof(data_type) B). For 1-byte types it is twice the
+  // element buffer, so a dedicated region stays. LDS per block (4 KB chunk):
+  // u16 16.4 → 12.3 KB, u32 12.4 → 10.3 KB, u64 10.4 → 9.3 KB before the scan
+  // scratch, i.e. one to two more resident blocks per 64 KB CU. Must agree
+  // with `compute_smem_size`.
+  constexpr bool count_scratch_aliases_output
+      = chunk_num_elements * sizeof(run_type)
+        <= storage_num_elements * sizeof(shared_storage_type);
+  uint32_t* temp_count_array = nullptr;
+  if (!count_scratch_aliases_output) {
+    temp_count_array = static_cast<uint32_t*>(shmem);
+    shmem = static_cast<void*>(
+        static_cast<uint8_t*>(shmem)
+        + (chunk_num_elements * sizeof(run_type)));
+  }
 
   // RLE offsets
   uint32_t* rle_offsets = static_cast<uint32_t*>(shmem);
@@ -1370,7 +1396,9 @@ __device__ void cascaded_decompression_fcn(
                   partition_end_ptr,
                   reinterpret_cast<run_type*>(count_array),
                   nullptr,
-                  temp_count_array,
+                  count_scratch_aliases_output
+                      ? reinterpret_cast<uint32_t*>(shared_output_buffer)
+                      : temp_count_array,
                   bitpacking)
               != BlockIOStatus::success) {
             is_decompression_successful = false;

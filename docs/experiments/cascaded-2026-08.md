@@ -88,5 +88,29 @@ Measured: (pending) `benchmark_cascaded_chunked`, exact-bytes ladder, `test_casc
 Result: (pending)
 Verdict: (pending)
 
+### CAS-D5 — decompression LDS shrink: RLE count scratch aliases the dead element buffer   Category: C4   Status: PENDING
+Commit: (this commit)  (branch `opt/cascaded-2026-08`)
+Files: `src/CascadedKernels.hiph` (`compute_smem_size`, `cascaded_decompression_fcn`)
+Change: the bit-unpack scratch used while an RLE count array is read from global memory
+(`temp_count_array`, `chunk_num_elements * 2` B) is no longer a separate LDS region for data
+types of 2+ bytes: it aliases `shared_output_buffer`, which is dead at that point (the previous
+layer's input, already consumed; the final-array read already used it as scratch). 1-byte types
+keep the dedicated region (their count array is twice the element buffer). `compute_smem_size`
+shrinks accordingly, so the batched `cascaded_decompression_kernel_type_check` and the HLIF
+decompressor (both size their static `__shared__` from it) get the smaller footprint.
+Static LDS per block, 4 KB chunk, before scan scratch: u8 24 688 (unchanged), u16 16 496 → 12 400,
+u32 12 400 → 10 352, u64 10 368 → 9 344 B.
+Why (mechanism): on CDNA (64 KB LDS per CU) resident blocks per CU for the default `int` type go
+from 4 (13.2 KB incl. scan scratch) to 6 (≈11.1 KB); with 256-thread blocks that is 16 → 24
+resident waves per CU (4 → 6 per SIMD), more latency hiding for the global loads and the
+barrier-heavy layer pipeline. On gfx1100 (64 KB per CU in CU mode / 128 KB per WGP) the same
+ratio applies. Output bytes identical (scratch contents are consumed before the buffer is reused).
+Prediction: +5–15 % decompression at saturation on gfx942 for int inputs, ≈ 0 at small batch;
+compression unchanged; bytes identical.
+Measured: (pending) `benchmark_cascaded_chunked`, exact-bytes ladder, `test_cascaded_coverage`
+(which round-trips every type through every RLE/delta/bp configuration).
+Result: (pending)
+Verdict: (pending)
+
 ### Resource evidence — gfx942 (MI300A), ROCm 7.0.1, baseline kernels (before CAS-S2/S1/C1)
 `-Rpass-analysis=kernel-resource-usage`, wave64, 128-thread blocks (inherited): `cascaded_compression_kernel<int,128,4096>` SGPR 106 / VGPR 71 / LDS 13456 B per block / 9 SGPR spills / est. 7 waves per SIMD; `cascaded_decompression_kernel<4B,128,4096>` SGPR 106 / VGPR 73 / LDS 13192 B / 12 SGPR spills / est. 6 waves per SIMD; `get_decompress_size_kernel` 22 / 10 / 0 LDS / 8. The SGPR spills (scalar state of the nested RLE/delta/bit-pack passes) and the 13 KB of LDS per 128-thread block (≤4 blocks per CU by LDS) are the two structural costs to attack (CAS-S2 launch bounds already committed; CAS-D5 LDS shrink queued).
