@@ -209,5 +209,24 @@ Measured: (pending)
 Result: (pending)
 Verdict: (pending)
 
+### CAS-S5 — 16-byte cooperative copies for the chunk/layer streams                  Category: C3   Status: PENDING
+Commit: (this commit)  (branch `opt/cascaded-2026-08`)
+Files: `src/CascadedKernels.hiph` (`block_copy_words`, `block_copy_elements`, `block_write`,
+`block_read`, chunk load, final store), `src/lowlevel/CascadedBatch.hip`,
+`src/highlevel/CascadedHlifKernels.hip` (`alignas(16)` on the LDS arenas)
+Change: the four block-cooperative copies — chunk load (global → LDS), layer-output write
+(LDS → global, `block_write`), layer-input read (global → LDS, `block_read`) and the final
+store (LDS → global) — go through one helper that, on AMD, moves 16 B per lane
+(`uint4`) when both pointers are 16-B aligned (runtime check) and words/elements otherwise; the
+LDS arenas get `alignas(16)` so the LDS side always qualifies. CUDA keeps the word loops.
+Why (mechanism): `global_load_dwordx4` / `ds_read_b128` move the same bytes with 4× fewer
+instructions and `s_waitcnt` round trips; for the default `int` type the chunk load and the final
+store are 4 KB each per chunk, the layer arrays 1–4 KB. Same bytes in the same order.
+Prediction: +1–4 % on both directions for the default type (the layers dominate), more for
+1-byte types whose element loops were byte-wide; bytes identical.
+Measured: (pending)
+Result: (pending)
+Verdict: (pending)
+
 ### Resource evidence — gfx942 (MI300A), ROCm 7.0.1, baseline kernels (before CAS-S2/S1/C1)
 `-Rpass-analysis=kernel-resource-usage`, wave64, 128-thread blocks (inherited): `cascaded_compression_kernel<int,128,4096>` SGPR 106 / VGPR 71 / LDS 13456 B per block / 9 SGPR spills / est. 7 waves per SIMD; `cascaded_decompression_kernel<4B,128,4096>` SGPR 106 / VGPR 73 / LDS 13192 B / 12 SGPR spills / est. 6 waves per SIMD; `get_decompress_size_kernel` 22 / 10 / 0 LDS / 8. The SGPR spills (scalar state of the nested RLE/delta/bit-pack passes) and the 13 KB of LDS per 128-thread block (≤4 blocks per CU by LDS) are the two structural costs to attack (CAS-S2 launch bounds already committed; CAS-D5 LDS shrink queued).

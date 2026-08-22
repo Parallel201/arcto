@@ -140,7 +140,7 @@ public:
         chunk_size,
         sizeof(data_type),
         ((sizeof(data_type) <= 4) ? 4 : 8)>();
-    __shared__ uint8_t shmem[shmem_size];
+    __shared__ uint8_t shmem[shmem_size] __attribute__((aligned(16)));
 
     cascaded_decompression_fcn<
         data_type,

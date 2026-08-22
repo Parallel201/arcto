@@ -827,6 +827,65 @@ enum class BlockIOStatus
   out_of_bound
 };
 
+// CAS-S5: cooperative copy of `num_words` 32-bit words. When both pointers are
+// 16-byte aligned the body moves 16 bytes per lane per instruction
+// (global_load/store_dwordx4, ds_read/write_b128) and only the last < 4 words
+// go one word per lane; otherwise (or on the CUDA backend, which keeps
+// nvCOMP's word loop) one word per lane as before. Same bytes, same order.
+template <int threadblock_size>
+__device__ inline void block_copy_words(
+    uint32_t* dst, const uint32_t* src, const int num_words)
+{
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+  if (((reinterpret_cast<uintptr_t>(dst) | reinterpret_cast<uintptr_t>(src))
+       & 15u)
+      == 0) {
+    const int num_vec = num_words / 4;
+    uint4* const dst4 = reinterpret_cast<uint4*>(dst);
+    const uint4* const src4 = reinterpret_cast<const uint4*>(src);
+    for (int i = threadIdx.x; i < num_vec; i += threadblock_size) {
+      dst4[i] = src4[i];
+    }
+    for (int i = num_vec * 4 + threadIdx.x; i < num_words;
+         i += threadblock_size) {
+      dst[i] = src[i];
+    }
+    return;
+  }
+#endif
+  for (int i = threadIdx.x; i < num_words; i += threadblock_size) {
+    dst[i] = src[i];
+  }
+}
+
+// CAS-S5: cooperative copy of `num_elements` elements of `data_type`; the
+// 4-byte-aligned prefix goes through block_copy_words, the remaining < 4 bytes
+// (1-/2-byte types in a partial chunk) element by element.
+template <typename data_type, int threadblock_size>
+__device__ inline void block_copy_elements(
+    data_type* dst, const data_type* src, const int num_elements)
+{
+  const size_t num_bytes = static_cast<size_t>(num_elements) * sizeof(data_type);
+  if (((reinterpret_cast<uintptr_t>(dst) | reinterpret_cast<uintptr_t>(src))
+       & 3u)
+      == 0) {
+    const int num_words = static_cast<int>(num_bytes / 4);
+    block_copy_words<threadblock_size>(
+        reinterpret_cast<uint32_t*>(dst),
+        reinterpret_cast<const uint32_t*>(src),
+        num_words);
+    for (int i = static_cast<int>((static_cast<size_t>(num_words) * 4) / sizeof(data_type))
+                 + threadIdx.x;
+         i < num_elements; i += threadblock_size) {
+      dst[i] = src[i];
+    }
+  } else {
+    for (int i = threadIdx.x; i < num_elements; i += threadblock_size) {
+      dst[i] = src[i];
+    }
+  }
+}
+
 /**
  * Write a buffer with a single threadblock, optionally with bitpacking.
  *
@@ -874,11 +933,8 @@ __device__ BlockIOStatus block_write(
     return BlockIOStatus::out_of_bound;
   }
 
-  for (int element_idx = threadIdx.x;
-       element_idx < padded_out_bytes / sizeof(uint32_t);
-       element_idx += blockDim.x) {
-    output[element_idx] = source[element_idx];
-  }
+  block_copy_words<threadblock_size>(
+      output, source, static_cast<int>(padded_out_bytes / sizeof(uint32_t)));
 
   return BlockIOStatus::success;
 }
@@ -923,10 +979,8 @@ __device__ BlockIOStatus block_read(
     dest_ptr = reinterpret_cast<uint32_t*>(output);
   }
 
-  for (int element_idx = threadIdx.x; element_idx < roundUpDiv(in_byte, 4);
-       element_idx += threadblock_size) {
-    dest_ptr[element_idx] = input[element_idx];
-  }
+  block_copy_words<threadblock_size>(
+      dest_ptr, input, static_cast<int>(roundUpDiv(in_byte, 4)));
   __syncthreads();
 
   if (use_bp) {
@@ -999,11 +1053,11 @@ __device__ void do_cascaded_compression_kernel(
   constexpr size_t storage_num_elements = roundUpDiv(
       chunk_size + 4 + sizeof(data_type), sizeof(shared_storage_type));
 
-  __shared__ shared_storage_type shared_element_storage_0[storage_num_elements];
+  __shared__ shared_storage_type shared_element_storage_0[storage_num_elements] __attribute__((aligned(16)));
   data_type* shared_element_buffer_0
       = reinterpret_cast<data_type*>(shared_element_storage_0);
 
-  __shared__ shared_storage_type shared_element_storage_1[storage_num_elements];
+  __shared__ shared_storage_type shared_element_storage_1[storage_num_elements] __attribute__((aligned(16)));
   data_type* shared_element_buffer_1
       = reinterpret_cast<data_type*>(shared_element_storage_1);
 
@@ -1096,13 +1150,11 @@ __device__ void do_cascaded_compression_kernel(
           static_cast<size_type>(chunk_num_elements));
 
       // Threadblock collectively loads current chunk from input uncompressed
-      // buffer to shared memory buffer
-      for (int element_idx = threadIdx.x;
-           element_idx < num_elements_current_chunk;
-           element_idx += blockDim.x) {
-        shared_element_buffer_0[element_idx]
-            = input_buffer_current_chunk[element_idx];
-      }
+      // buffer to shared memory buffer (CAS-S5: 16 B per lane when aligned)
+      block_copy_elements<data_type, threadblock_size>(
+          shared_element_buffer_0,
+          input_buffer_current_chunk,
+          static_cast<int>(num_elements_current_chunk));
       __syncthreads();
 
       int rle_remaining = comp_opts.num_RLEs;
@@ -1633,10 +1685,9 @@ __device__ void cascaded_decompression_fcn(
         break;
       }
 
-      for (int element_idx = threadIdx.x; element_idx < num_elements;
-           element_idx += threadblock_size) {
-        decompressed_ptr[element_idx] = shared_input_buffer[element_idx];
-      }
+      // CAS-S5: 16 B per lane when aligned
+      block_copy_elements<data_type, threadblock_size>(
+          decompressed_ptr, shared_input_buffer, static_cast<int>(num_elements));
       decompressed_ptr += num_elements;
       decompressed_num_elements += num_elements;
 
