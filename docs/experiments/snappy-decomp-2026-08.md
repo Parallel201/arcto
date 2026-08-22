@@ -297,6 +297,6 @@ select the dword literal path and the dword non-overlapping-copy path independen
 build identical to SNP-D8. Variants to run on gfx942 and gfx1100: `…_COPIES=0` and `…_LITERALS=0`.
 Prediction (from the gfx942 sweep-5 pattern): copies=0 recovers the synth_binary loss on gfx942
 and keeps the TTI gain; literals=0 loses the TTI gain.
-Measured: (pending)
-Result: (pending)
-Verdict: (pending)
+Measured: gfx1100 (30 reps; default = literals+copies 109.3 / 117.8 / 27.08 GB/s decompression at saturation, 4.15 / 5.32 / 12.19 at small batch).
+Result (gfx1100): COPIES=0 → binary ×0.920 (x0 ×0.920), tti ×1.005, words ×1.014 (x0 ×1.020); LITERALS=0 → binary ×0.973, tti ×0.858 (x0 ×0.878), words ×1.005. I.e. on gfx1100 the dword literal path is worth +14 % on the literal-heavy TTI and the dword copy path +8 % on the copy-heavy synth_binary at a 1.5–2 % cost on words; bytes identical. gfx942 knob run pending (the sweep-5 pattern there — TTI gain, synth_binary −20 % — points at the copy path).
+Verdict: (pending gfx942) expected split: literals on everywhere, copies gated to wave32 (`USE_WARPSIZE_32`).
