@@ -205,17 +205,9 @@ static __device__ inline uint32_t FindFourByteMatch(
   uint32_t literal_cnt;
   GROUPMASK_T match_mask;
   if (t == 0) { s->copy_length[slot] = 0; }
-  // One-round-ahead software prefetch of the lane's data word: the loop only
-  // continues when literal_cnt == GROUPSIZE, so the next round's position is
-  // exactly pos + GROUPSIZE and its load can be issued at the start of this
-  // round, hidden behind the hash / ballot / LDS chain instead of heading the
-  // next round's dependent chain. The last round's prefetch is unused (one
-  // cheap, cache-resident 4-byte load per call).
-  uint32_t data32 = (pos + t + 4 <= len) ? unaligned_load32(src + pos + t) : 0;
   do {
     bool valid4               = (pos + t + 4 <= len);
-    const uint32_t pos_next   = pos + GROUPSIZE;
-    const uint32_t data32_next = (pos_next + t + 4 <= len) ? unaligned_load32(src + pos_next + t) : 0;
+    uint32_t data32           = (valid4) ? unaligned_load32(src + pos + t) : 0;
     uint32_t hash             = (valid4) ? snap_hash(data32) : 0;
     GROUPMASK_T local_match   = HashMatchAny<GROUPMASK_T,SIGNED_GROUPMASK_T,WARPSIZE>(hash, t);
     uint32_t local_match_lane = (GROUPSIZE-1) - num_leading_zero_bits(local_match & ((GROUP_MASK_ONE << t) - 1));
@@ -250,7 +242,6 @@ static __device__ inline uint32_t FindFourByteMatch(
     local_match &= (GROUPMASK_TWO << literal_cnt) - 1;
     if (t <= literal_cnt && t == (GROUPSIZE-1) - num_leading_zero_bits(local_match)) { s->hash_map[hash] = pos + t; }
     pos += literal_cnt;
-    data32 = data32_next;  // valid exactly when the loop continues (literal_cnt == GROUPSIZE)
   } while (literal_cnt == GROUPSIZE && pos < maxpos);
   return min(pos, len) - pos0;
 }
