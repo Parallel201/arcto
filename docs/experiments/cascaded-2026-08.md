@@ -162,6 +162,22 @@ Result (gfx1100, threshold 16): decompression zeros ×7.90 at x512 (53.8 → 368
 Result (gfx942, threshold 16): decompression zeros ×3.0 at x512 (186 → 534 GB/s) and ×4.45 at x0 (3.34 → 14.4); TTI ≈; ints ×0.91 at x32 (299 → 272) / ×0.954 at x0 — the same ints regression as on gfx1100. Bytes identical. Verdict pending the threshold variants (gfx1100 cas4: 4 / 64 / 256).
 Verdict: (pending)
 
+### CAS-D1f — balance on "one run dominates the round" instead of an absolute run length        Category: C1   Status: PENDING (factor variants 4 / 8 / 16)
+Commit: (this commit)  (branch `opt/cascaded-2026-08`)
+Files: `src/CascadedKernels.hiph` (`block_rle_decompress`)
+Measured first (gfx1100, D1 absolute threshold 16 / 4 / 64 / 256 on the H2 head): ints_mixed
+decompression ×1.00 / ×0.90 / ×1.00 / ×0.95–0.97 (x32 / x0), zeros ×1.00 / ×1.03 / ×1.03 / ×1.01, TTI ≈
+— no cutoff recovers the −7 % on ints (97.3 GB/s before D1, 90.9 after, at every cutoff), because
+ints_mixed rounds mix one or two 200–400-element runs with hundreds of 1–3-element runs: any
+absolute cutoff sends those rounds down the balanced path, whose cost is `aggregate / threads`
+elements per lane at ~10 LDS operations each, while the serial fill costs only the longest run.
+Change: the vote becomes `count * threadblock_size > FACTOR * aggregate` (a run longer than
+FACTOR × the round's average run), so a round dominated by one run (zeros: one 4096-run per round)
+balances and a round of comparable runs stays serial; FACTOR default 8, knob
+`ARCTO_CASCADED_RLE_BALANCE_FACTOR` (the absolute-threshold knob is gone).
+Prediction: ints back to the pre-D1 level (≈ +7 %), zeros unchanged (×7.9 / ×3–4.5 kept), TTI ≈.
+Measured: (pending: cas5 on gfx1100, factors 4 / 8 / 16; then gfx942)
+
 ### CAS-C4 — incremental input-window arithmetic in `block_bitpack`                    Category: C1   Status: PENDING
 Commit: (this commit)  (branch `opt/cascaded-2026-08`)
 Files: `src/CascadedKernels.hiph` (`block_bitpack`)

@@ -133,8 +133,8 @@ constexpr int cascaded_decompress_threadblock_size = (arcto::warpsize >= 64) ? 2
 #    define ARCTO_CASCADED_RLE_BALANCED 0
 #  endif
 #endif
-#ifndef ARCTO_CASCADED_RLE_BALANCE_THRESHOLD
-#  define ARCTO_CASCADED_RLE_BALANCE_THRESHOLD 16
+#ifndef ARCTO_CASCADED_RLE_BALANCE_FACTOR
+#  define ARCTO_CASCADED_RLE_BALANCE_FACTOR 8
 #endif
 
 // CAS-C2: RLE compression reads each thread's slab of consecutive elements
@@ -438,8 +438,16 @@ __device__ void block_rle_decompress(
     // fill, which is cheaper for them. Same values to the same positions:
     // output identical.
     run_end[threadIdx.x] = output_offset + current_count;
+    // CAS-D1f: balance only when some run of the round is much longer than
+    // the round's average run (count * threads > FACTOR * aggregate), i.e.
+    // when one lane's serial fill would dominate the round. Rounds of many
+    // comparable runs — short or long — keep the per-run fill, whose cost is
+    // the longest run, while the balanced fill costs (aggregate / threads)
+    // elements per lane at several LDS reads each. An absolute cutoff (the
+    // first version, 16 / 64 / 256) could not separate the two cases.
     const int any_long_run = __syncthreads_or(
-        current_count > ARCTO_CASCADED_RLE_BALANCE_THRESHOLD);
+        static_cast<uint32_t>(current_count) * threadblock_size
+        > ARCTO_CASCADED_RLE_BALANCE_FACTOR * static_cast<uint32_t>(aggregate));
     if (any_long_run) {
       data_type* const round_output = output_buffer + *output_num_elements;
       const data_type* const round_vals = val_buffer + round * threadblock_size;
