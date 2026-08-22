@@ -299,4 +299,13 @@ Prediction (from the gfx942 sweep-5 pattern): copies=0 recovers the synth_binary
 and keeps the TTI gain; literals=0 loses the TTI gain.
 Measured: gfx1100 (30 reps; default = literals+copies 109.3 / 117.8 / 27.08 GB/s decompression at saturation, 4.15 / 5.32 / 12.19 at small batch).
 Result (gfx1100): COPIES=0 → binary ×0.920 (x0 ×0.920), tti ×1.005, words ×1.014 (x0 ×1.020); LITERALS=0 → binary ×0.973, tti ×0.858 (x0 ×0.878), words ×1.005. I.e. on gfx1100 the dword literal path is worth +14 % on the literal-heavy TTI and the dword copy path +8 % on the copy-heavy synth_binary at a 1.5–2 % cost on words; bytes identical. gfx942 knob run pending (the sweep-5 pattern there — TTI gain, synth_binary −20 % — points at the copy path).
-Verdict: (pending gfx942) expected split: literals on everywhere, copies gated to wave32 (`USE_WARPSIZE_32`).
+Measured (gfx942, MI300A, 30 reps; default = literals+copies 152.0 / 277.6 / 44.6 GB/s decompression at saturation, 1.85 / 5.35 / 8.55 at small batch): COPIES=0 → binary ×1.299 (x0 ×1.315), tti ×1.124 (x0 ×0.992), words ×1.046 (x0 ×1.037); LITERALS=0 → binary ×1.014 (x0 ×0.990), tti ×1.054 (x0 ×0.912), words ×1.009 (x0 ×1.011). Bytes identical. So on wave64 the dword copy path alone costs −23 % on copy-heavy data (the 64-lane forward copy with a 4-B stride per lane turns one 64-B-per-clause store into a strided pattern the MI300A store path dislikes, and the per-copy setup is paid on every short copy), while the dword literal path is worth +9 % on literal-heavy data at small batch.
+Verdict: SPLIT (commit below, SNP-D8s): `ARCTO_SNAPPY_DWORD_LITERALS` defaults to 1 on every AMD target; `ARCTO_SNAPPY_DWORD_COPIES` defaults to 1 only when `USE_WARPSIZE_32` is defined (gfx10/11) and to 0 on wave64 (gfx90a/gfx942). Expected after the split: gfx1100 unchanged (both on), gfx942 ≈ the COPIES=0 variant (+30 % binary, +4 % words vs the D8 head, TTI kept). Both knobs stay overridable per build.
+
+### SNP-D8s — D8 split: dword literals everywhere on AMD, dword copies on wave32 only      Category: C3   Status: COMMITTED (verification sweep pending)
+Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
+Files: `src/snappy/decompression_process.hiph`
+Change: default of `ARCTO_SNAPPY_DWORD_COPIES` becomes `defined(USE_WARPSIZE_32) ? 1 : 0`; `ARCTO_SNAPPY_DWORD_LITERALS` stays 1 on AMD. No code-path change, defaults only; CUDA builds untouched (neither path exists there).
+Why: per-mechanism A/Bs on both architectures (SNP-D8k). Prediction: gfx1100 identical to the D8 head; gfx942 binary ≈ 197 GB/s at saturation / 2.43 at small batch (the COPIES=0 variant), tti and words unchanged or slightly up; bytes identical.
+Measured: (pending final verification sweep on both nodes)
+
