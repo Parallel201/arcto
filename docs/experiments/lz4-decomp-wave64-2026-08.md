@@ -102,9 +102,21 @@ gfx1100: the commit is a no-op (regression check only).
 Prediction: DECOMP-only at MIN 128 keeps the binary/tti gains and removes most of the words loss
 (short copies stay on the byte loop); COMP stays off on wave64 unless MIN=128 turns the words
 compression loss around.
-Measured: (pending)
+Measured (gfx942, lz4b, 30 reps, vs the same commit with the knobs off; bytes identical, tests green):
+DECOMP=1 at MIN 32 / 128 / 256 — decompression binary x0 ×2.16 / ×2.17 / ×2.18, x512 ×1.30 / ×1.32
+/ ×1.32; tti x0 ×2.18 / ×2.14 / ×2.18, x512 ×1.44 / ×1.44 / ×1.47; zeros x0 ×1.03 / ×1.02 / ×1.02,
+x512 ×0.93 / ×0.93 / ×0.95; words x0 ×0.83 / ×0.83 / ×0.83, x32 ×0.765 / ×0.76 / ×0.76; compression
+≈ (×0.99–1.00). DECOMP=1 + COMP=1 at MIN 128: words compression ×0.46 (as in lz4a), binary/tti
+decompression ×0.97 / ×1.43, zeros decompression ×0.71. gfx1100 (wave32): MIN=128 vs 32 ≈ (zeros
++3 %, words −1.6 %); the split commit is a verified no-op there.
+Result: on wave64 the words loss (−17…−24 %) is the same at every cutoff, so it is not the short-copy
+overhead (at MIN=256 every copy of words takes the byte loop): it is the cost of having the vector
+paths compiled in — register/scheduling (report pending). The gains are equally cutoff-independent.
+The compression-side vectorisation is a clear loss on wave64 (COMP stays off); MIN stays 32.
+Verdict: wave64 default = DECOMP on, COMP off (next commit, LZ4-D1w), with the words/zeros costs
+recorded; the knobs stay for workloads dominated by short sequences.
 
-### LZ4-D5 — wave-uniform decompressor state through `readfirstlane`                    Category: C2   Status: PENDING
+### LZ4-D5 — wave-uniform decompressor state through `readfirstlane`                    Category: C2   Status: REVERTED (−5…−8 % words on wave64, ≈ elsewhere)
 Commit: (this commit)  (branch `opt/lz4-decomp-wave64-2026-08`)
 Files: `src/LZ4Kernels.hiph` (`decompressStream`, `BufferControl::readLSIC`)
 Change: the token byte, every LSIC byte and the 16-bit match offset — loaded by all lanes from the
@@ -118,6 +130,10 @@ state in every lane; with the state in SGPRs the parsing is SALU work (`s_add`, 
 Same bytes: the values are identical on every lane.
 Prediction: +3–10 % decompression on inputs with many short sequences (words, binary), small on TTI;
 both wave sizes; bytes identical. Check `-Rpass-analysis`: VGPRs should drop.
-Measured: (pending)
-Result: (pending)
-Verdict: (pending)
+Measured (lz4b, 30 reps): gfx1100 binary ×1.007, tti ×1.004, zeros ×1.016 (sat), words x0 ×0.954 /
+x32 ×1.027; gfx942 (vs the previous commit's lz4a rows) binary ×0.995, tti ×0.99, words x0 ×0.92 /
+x32 ×0.935. Bytes identical, tests green.
+Result: the one input made of short sequences — where the scalar parser should have helped — is the
+one that loses (−5…−8 % on wave64): the `v_readfirstlane` + SALU→VALU hand-offs per token add latency
+to a chain that is already latency-bound, and the other inputs do not care.
+Verdict: REVERTED (next commit); the log keeps the attempt.
