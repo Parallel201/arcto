@@ -118,3 +118,23 @@ Prediction: small (LDS is not the bottleneck) but free; fewer `ds_*` instruction
 Measured: (pending) same protocol as SNP-D1.
 Result: (pending)
 Verdict: (pending)
+
+### SNP-D7a — serial decoder: one dword-window read instead of up to five byte reads   Category: C4   Status: PENDING
+Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
+Files: `src/snappy/decompression_state.hiph`, `src/snappy/decompression_decode.hiph`
+Change: `unsnap_queue_s::read_window5(pos)` reads two aligned dwords of the prefetch ring (one
+round trip, wrap-safe because the ring size is a multiple of 4) and funnel-shifts them so bytes
+`pos..pos+4` (at least) sit in the low bytes of a 64-bit value; the single-thread decoder
+(`decode_and_fill_batch_using_single_thread`, lane 0 while 63 lanes idle) takes the tag byte and
+the up to four following bytes (1-/2-/4-byte copy offsets, 1–4 long-literal length bytes) from
+that window instead of issuing one `volatile` byte load per byte as it discovers it needs it. The
+ring is `alignas(16)`. Parsing logic unchanged; bytes unchanged.
+Why (mechanism): the serial path runs on every batch that contains a literal > 4 chars or a
+copy-4 (text-like and well-compressed data) with one lane active; each symbol cost 1–5 *dependent*
+`ds_read_u8` + `s_waitcnt` (the branch on the tag decides which bytes to read next). Two
+independent `ds_read_b32` issued back to back cut that to one LDS round trip per symbol.
+Prediction: medium on text-like / copy-heavy inputs (words: decode is symbol-rate bound,
+25 GB/s vs 89 GB/s for all-literal data), nil on literal-only inputs; bytes identical.
+Measured: (pending) same protocol as SNP-D1.
+Result: (pending)
+Verdict: (pending)

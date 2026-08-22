@@ -81,10 +81,18 @@ private:
     uint32_t current_prefetch_wrpos = s->q.prefetch_wrpos;
     while (bytes_left > 0 && batch_len < BATCH_SIZE && min(cur + 5, end) <= current_prefetch_wrpos) {
       uint32_t blen, offset;
-      uint8_t b0 = s->q.read_byte(0,cur);
+      // The symbol spans at most 5 bytes (tag + 4): fetch them with two dword
+      // LDS loads in one round trip instead of up to five dependent byte loads.
+      // (The loop condition guarantees bytes cur..cur+4 are prefetched when the
+      // stream has them; bytes past the symbol's end are simply not consumed.)
+      const uint64_t w = s->q.read_window5(cur);
+      const uint8_t b0 = static_cast<uint8_t>(w & 0xffu);
+      const uint8_t b1 = static_cast<uint8_t>((w >> 8) & 0xffu);
+      const uint8_t b2 = static_cast<uint8_t>((w >> 16) & 0xffu);
+      const uint8_t b3 = static_cast<uint8_t>((w >> 24) & 0xffu);
+      const uint8_t b4 = static_cast<uint8_t>((w >> 32) & 0xffu);
       uint32_t cur_orig = cur;
       if (LZ77Symbol::match_copy(b0)) {
-        uint8_t b1 = s->q.read_byte(0,cur + 1);
         if (!LZ77Symbol::match_copy_with_2_or_4_offset_bytes(b0)) {
           // xxxxxx01.oooooooo: copy with 3-bit length, 11-bit offset
           offset = LZ77Symbol::decode_offset_for_copy_with_1_offset_byte(b0,b1);
@@ -95,11 +103,10 @@ private:
         } else {
           // xxxxxx1x: copy with 6-bit length, 2-byte or 4-byte offset
           //: offset = b1 | (s->q.read_byte(cur + 2) << 8);
-          uint8_t b2 = s->q.read_byte(0,cur + 2);
           if (b0 & 1)  // 4-byte offset
           {
             //: offset |= (s->q.read_byte(cur + 3) << 16) | (s->q.read_byte(cur + 4) << 24);
-            offset = LZ77Symbol::decode_offset_for_copy_with_4_offset_bytes(b1, b2,s->q.read_byte(0,cur + 3), s->q.read_byte(0,cur + 4));
+            offset = LZ77Symbol::decode_offset_for_copy_with_4_offset_bytes(b1, b2, b3, b4);
             cur += 5;
           } else {
             offset = LZ77Symbol::decode_offset_for_copy_with_2_offset_bytes(b1, b2);
@@ -124,12 +131,12 @@ private:
         blen = b0 >> 2;
         if (blen >= 60) {
           uint32_t num_bytes = blen - 59;
-          blen               = s->q.read_byte(0,cur + 1);
+          blen               = b1;
           if (num_bytes > 1) {
-            blen |= s->q.read_byte(0,cur + 2) << 8;
+            blen |= static_cast<uint32_t>(b2) << 8;
             if (num_bytes > 2) {
-              blen |= s->q.read_byte(0,cur + 3) << 16;
-              if (num_bytes > 3) { blen |= s->q.read_byte(0,cur + 4) << 24; }
+              blen |= static_cast<uint32_t>(b3) << 16;
+              if (num_bytes > 3) { blen |= static_cast<uint32_t>(b4) << 24; }
             }
           }
           cur += num_bytes;

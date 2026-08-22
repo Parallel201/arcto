@@ -60,18 +60,47 @@ struct unsnap_queue_s {
   int32_t batch_len[BATCH_COUNT];  ///< Length of each batch - <0:end, 0:not ready, >0:symbol count
   uint32_t batch_prefetch_rdpos[BATCH_COUNT];
   LZ77Symbol batch[BATCH_COUNT * BATCH_SIZE];  ///< LZ77 batch data
-  uint8_t buf[PREFETCH_SIZE];                      ///< Prefetch buffer
+  alignas(16) uint8_t buf[PREFETCH_SIZE];          ///< Prefetch buffer (ring; dword/dwordx4-addressable)
 
 public:
-  
-  /** 
+
+  /**
    * \brief Read from shared memory buffer if lane t is part of the group.
    */
   template <unsigned GROUPSIZE=uwarpsize, unsigned WARPSIZE=uwarpsize>
   __device__ inline uint8_t read_byte(uint32_t t,uint32_t pos) volatile {
     return ( GROUPSIZE != WARPSIZE && t >= GROUPSIZE)
-           ? 0 
+           ? 0
            : this->buf[(pos) & (PREFETCH_SIZE - 1)];
+  }
+
+  /**
+   * \brief Read a little-endian window of ring bytes starting at `pos`:
+   *        byte k of the result (bits 8k..8k+7) is ring byte pos+k, valid for
+   *        k < 8 - (pos & 3), i.e. at least the 5 bytes a Snappy symbol can
+   *        span (tag + 4 offset/length bytes).
+   *
+   * Two aligned dword LDS loads (issued back to back, one round trip) and one
+   * funnel shift replace up to five dependent byte loads. The ring size is a
+   * multiple of 4, so the two dwords wrap correctly; bytes beyond what the
+   * prefetcher has published are unspecified and must not be consumed -- the
+   * callers already guarantee that (they only decode what wrpos covers).
+   */
+  __device__ inline uint64_t read_window5(uint32_t pos) volatile {
+    const uint32_t base = pos & ~3u;
+    const volatile uint32_t* words = reinterpret_cast<const volatile uint32_t*>(this->buf);
+    const uint32_t lo = words[( base      & (PREFETCH_SIZE - 1)) >> 2];
+    const uint32_t hi = words[((base + 4) & (PREFETCH_SIZE - 1)) >> 2];
+    return ((static_cast<uint64_t>(hi) << 32) | lo) >> (8 * (pos & 3));
+  }
+
+  /**
+   * \brief Group-guarded variant of read_window5 for per-lane use (lanes
+   *        outside the group read 0, as read_byte does).
+   */
+  template <unsigned GROUPSIZE=uwarpsize, unsigned WARPSIZE=uwarpsize>
+  __device__ inline uint64_t read_window5(uint32_t t, uint32_t pos) volatile {
+    return ( GROUPSIZE != WARPSIZE && t >= GROUPSIZE) ? 0ull : this->read_window5(pos);
   }
   
   /**
@@ -95,6 +124,22 @@ public:
               ? LZ77Symbol::decode_offset_for_copy_with_1_offset_byte(tag_byte,this->read_byte(0,cur_t + 1))
               : LZ77Symbol::match_copy_with_2_or_4_offset_bytes(tag_byte)
                 ? LZ77Symbol::decode_offset_for_copy_with_2_offset_bytes(this->read_byte(0,cur_t + 1),this->read_byte(0,cur_t + 2))
+                : -(int32_t)(cur_t + 1); //: offset for literal
+  }
+
+  /**
+   * \brief Same as decode_short_symbol_offset__no_copy_with_4_offset_bytes, but
+   *        taking the symbol bytes from a read_window5() result (tag byte in
+   *        bits 0..7, following bytes above) instead of re-reading the ring.
+   */
+  static __device__ inline int32_t decode_short_symbol_offset_from_window__no_copy_with_4_offset_bytes(uint64_t w,uint32_t cur_t) {
+      const uint32_t tag_byte = static_cast<uint32_t>(w & 0xffu);
+      const uint32_t b1 = static_cast<uint32_t>((w >> 8) & 0xffu);
+      const uint32_t b2 = static_cast<uint32_t>((w >> 16) & 0xffu);
+      return LZ77Symbol::match_copy_with_1_or_4_offset_bytes(tag_byte)
+              ? LZ77Symbol::decode_offset_for_copy_with_1_offset_byte(tag_byte,b1)
+              : LZ77Symbol::match_copy_with_2_or_4_offset_bytes(tag_byte)
+                ? LZ77Symbol::decode_offset_for_copy_with_2_offset_bytes(b1,b2)
                 : -(int32_t)(cur_t + 1); //: offset for literal
   }
 };
