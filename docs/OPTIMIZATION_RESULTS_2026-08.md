@@ -35,10 +35,10 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
 | Snappy decomp | SNP-D4 | wave-uniform decoder state computed on all lanes (no lane-0 + broadcast) | neutral (enabler for D3) | neutral | kept |
 | Snappy comp | SNP-C2 | one barrier per literal/copy pair via double-buffered match state | −1…−4 % | −2…−6 % | reverted |
 | Snappy comp | SNP-C1 | one-round-ahead prefetch of the match-search word | −4…−7 % | −4…−7 % | reverted |
-| Cascaded decomp | CAS-D2 | multi-item (4/thread) block scan in delta decompression: 4× fewer scans+barriers per chunk | ints +8.6 % (sat), +5 % (x0); zeros −1.6 %; TTI ≈ | *pending* | kept |
-| Cascaded decomp | CAS-D1 | load-balanced expansion of long RLE runs (run ends in LDS + binary search; block vote on a length threshold) | zeros ×7.9 (sat) / ×6.7 (x0); ints −6.5 % (sat) at threshold 16; TTI ≈ | *pending* | kept; threshold 4/64/256 *pending* |
-| Cascaded comp | CAS-C1 | single-pass min/max in `get_for_bitwidth` (2 block reduces instead of 2 per 128 elements) | ints ×1.54, TTI ×1.70, zeros ×1.05 | *pending* | kept (largest Cascaded win) |
-| Cascaded comp | CAS-C4 | incremental input-window indices in `block_bitpack` (no per-word integer division) | ≈ 0 (±1 %) | *pending* | neutral-kept |
+| Cascaded decomp | CAS-D2 | multi-item (4/thread) block scan in delta decompression: 4× fewer scans+barriers per chunk | ints +8.6 % (sat), +5 % (x0); zeros −1.6 %; TTI ≈ | ints +9 % (sat), +8 % (x0); TTI +2 % | kept |
+| Cascaded decomp | CAS-D1 | load-balanced expansion of long RLE runs (run ends in LDS + binary search; block vote on a length threshold) | zeros ×7.9 (sat) / ×6.7 (x0); ints −6.5 % (sat) at threshold 16; TTI ≈ | zeros ×3.0 (sat) / ×4.45 (x0); ints −9 % (sat) / −4.6 % (x0); TTI ≈ | kept; threshold 4/64/256 *pending* |
+| Cascaded comp | CAS-C1 | single-pass min/max in `get_for_bitwidth` (2 block reduces instead of 2 per 128 elements) | ints ×1.54, TTI ×1.70, zeros ×1.05 | ints ×1.44, TTI ×1.57, zeros ×1.14 | kept (largest Cascaded compression win) |
+| Cascaded comp | CAS-C4 | incremental input-window indices in `block_bitpack` (no per-word integer division) | ≈ 0 (±1 %) | ≈ 0 (−1 %, in drift) | neutral-kept |
 | LZ4 decomp | LZ4-D2 | incremental `i % dist` in the overlapped-match repeat copy | ≈ 0 (wave32 uses the doubling path) | ≈ 0 on non-repetitive inputs; zeros *pending* | kept (exact, cheaper per byte) |
 
 ### C2 — wave-level primitives
@@ -48,8 +48,8 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
 | Snappy decomp | SNP-D3 | `readfirstlane`/`readlane` for wave-uniform broadcasts (instead of `__shfl`) | +3–5 % | +2–11 % | kept |
 | Snappy decomp | SNP-D2 | rocPRIM DPP warp scan / all-lanes reduce for the symbol-batch prefix sums | +1–5 % | +1–5 % | kept |
 | Snappy decomp | SNP-D12 | 32-lane decode groups inside a wave64 (knob) | n/a | TTI +8 % (x0), words −9 % | input-dependent, knob off by default |
-| Cascaded | CAS-S4 | `BLOCK_SCAN_WARP_SCANS` (rocPRIM `using_warp_scan`) for the three block scans | decomp ints +3 %, others ≈ | *pending* | kept |
-| Cascaded comp | CAS-S6 | 32-bit scan type for in-chunk run counts (was `size_t`) | +1–1.6 % | *pending* | kept |
+| Cascaded | CAS-S4 | `BLOCK_SCAN_WARP_SCANS` (rocPRIM `using_warp_scan`) for the three block scans | decomp ints +3 %, others ≈ | comp +16–19 %, decomp +10–15 % | kept (big on CDNA) |
+| Cascaded comp | CAS-S6 | 32-bit scan type for in-chunk run counts (was `size_t`) | +1–1.6 % | +2–4 % | kept |
 | LZ4 decomp | LZ4-D5 | token / LSIC / offset through `readfirstlane` (scalar sequence parsing) | *pending (lz4b)* | *pending (lz4b)* | — |
 
 ### C3 — memory-access width and cache policy
@@ -70,8 +70,8 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
 |---|---|---|---|---|---|
 | Snappy decomp | SNP-D5 | 8-byte-aligned symbol queue, one 64-bit LDS access per symbol (was two 32-bit volatile) | +1–2 % | +2.5–4 % TTI | kept |
 | Snappy comp | SNP-C5 | clear the whole hash map with 16-B LDS stores (fixes a wave64 half-clear bug) | neutral | +1–3 % | kept (correctness) |
-| Cascaded decomp | CAS-D5 | RLE count bit-unpack scratch aliases the dead element buffer: LDS/block int 12.4 → 10.3 KB, u16 16.5 → 12.4 KB | ints +13 % (sat), zeros +17 % (sat), TTI −2 % | *pending* | kept |
-| Cascaded comp | CAS-C2 | RLE compression reads each thread's slab into registers once (was three bank-conflicted LDS passes) | ints +15–19 %, TTI +15 %, zeros +10 % | *pending* | kept |
+| Cascaded decomp | CAS-D5 | RLE count bit-unpack scratch aliases the dead element buffer: LDS/block int 12.4 → 10.3 KB, u16 16.5 → 12.4 KB | ints +13 % (sat), zeros +17 % (sat), TTI −2 % | zeros +12 % (sat); ints/TTI ≈ | kept |
+| Cascaded comp | CAS-C2 | RLE compression reads each thread's slab into registers once (was three bank-conflicted LDS passes) | ints +15–19 %, TTI +15 %, zeros +10 % | ints +17 %, TTI +16–22 %, zeros +8–10 % | kept |
 
 ### C5 — occupancy, registers, launch bounds
 
@@ -79,7 +79,7 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
 |---|---|---|---|---|---|
 | (all) | BLD | `ARCTO_LAUNCH_BOUNDS(threads, min_waves_per_eu, min_blocks_per_sm)` macro with explicit per-platform semantics; `ARCTO_DEVICE_REPORTS` option (`-Rpass-analysis=kernel-resource-usage`, `--save-temps`) | — | — | infrastructure |
 | Snappy decomp | (report) | `unsnap_kernel` 50 VGPRs, 8 waves/SIMD, no spills on gfx942; 44 VGPRs @16 waves on gfx1100 — no headroom for a launch-bounds item (SNP-D9 not pursued) | — | — | evidence |
-| Cascaded | CAS-S2 | `__launch_bounds__(threadblock_size)` on the batched kernels | neutral | *pending* | kept (enabler) |
+| Cascaded | CAS-S2 | `__launch_bounds__(threadblock_size)` on the batched kernels | neutral | ±5 % (drift) | kept (enabler) |
 | LZ4 decomp | LZ4-D7 | `__launch_bounds__(threads×chunks)`; optional waves-per-EU target | exactly neutral (interleaved A/B; identical resources: 91 VGPRs) | bounds neutral; `MIN_WAVES_PER_EU=8` −8…−13 % at saturation | bounds kept, no occupancy target |
 
 ### C6 — launch geometry and compile-time tunables
@@ -90,7 +90,7 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
 | Snappy decomp | SNP-D11 | 8 KB prefetch ring | −23…−28 % | −21 % (sat), +17 % TTI (x0) | rejected (residency) |
 | Snappy decomp | SNP-D11 | 4-sector prefetch granule | −25 % | ≈ 0 | rejected |
 | Snappy decomp | SNP-D10 | one chunk per thread in the decompressed-size query kernel | neutral | neutral | neutral-kept |
-| Cascaded | CAS-S1 | 256-thread blocks on wave64 targets (128 on wave32 and CUDA) | no-op | *pending* | — |
+| Cascaded | CAS-S1 | 256-thread blocks on wave64 targets (128 on wave32 and CUDA) | no-op | comp ×1.47–1.68, decomp ×1.25–1.70 | kept (largest Cascaded decompression win on CDNA) |
 
 ### C7 — compiler flags
 
@@ -104,6 +104,7 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
 |---|---|---|
 | Benchmark `-x` duplication bug: `multi_file()` inserted a range of the vector into itself; with libstdc++ every reallocating round appended *empty* chunks — 160 of 8208 chunks at `-x 512` (503 MB instead of 513 MB). Snappy/LZ4 tolerate empty chunks (all relative comparisons stay valid, 2 % short of nominal); Cascaded reported `arctoErrorCannotDecompress` and the benchmark aborted on every `-x` run. | fixed (`reserve` + element-wise copy) | test/coverage branch |
 | Cascaded compressor non-determinism (CAS-H1): bit-pack header gaps (1-/2-/8-byte types), tail word of odd unpacked arrays and a chunk-metadata gap word were never written — LDS scratch went into the stream (format-correct, not reproducible; inherited from nvCOMP 2.2) | zero-filled; output now byte-deterministic | cascaded branch |
+| Cascaded compressor **hang** (CAS-H2): with `num_deltas ≥ 2`, a chunk that runs out of elements before its last delta layer (1-element partition; all-equal chunk collapsed by an RLE layer) made `block_delta_compress` loop to `size_t(0) − 1` — an infinite GPU loop, inherited from nvCOMP 2.2 and invisible with the default `{2 RLEs, 1 delta}`; found by the coverage test once CAS-H1 let it run its full matrix | degenerate partitions take the raw-copy fallback | cascaded branch |
 | Per-repetition CSV in the chunked benchmarks (`ARCTO_PER_REP_CSV`, `ARCTO_PER_REP_TAG`); `-F` short flag; README | enables medians/IQR per commit | chore branch |
 | Coverage tests `test_snappy_coverage`, `test_cascaded_coverage` (every layer configuration × type × size profile, misalignment, determinism), `test_zfp_payload_exact` (ZFP-T1: HIP payload and decoded field byte-exact vs canonical serial) | gates for the optimization loops | test/coverage + zfp branches |
 | `CONFIGURE_DEPENDS` on the test source glob | a new test file is picked up by an existing build dir | test/coverage branch |
@@ -117,9 +118,10 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
   ×1.08 / ≈1.00 / ×1.15 at saturation. Compression: neutral on gfx1100, +1–2.5 % on gfx942 (SNP-C5,
   which also fixes the wave64 half-cleared hash map). Three compression attempts (C1, C2, C3) were
   measured negative on both parts and reverted; the log keeps them.
-* **Cascaded** (`opt/cascaded-2026-08`), gfx1100 so far (base → S6): compression ints ×1.80, TTI
-  ×1.98, zeros ×1.17; decompression ints ×1.21, zeros ×7.8, TTI ×0.985; gfx942 and the rebuilt
-  S5/H1 *pending*.
+* **Cascaded** (`opt/cascaded-2026-08`), base → S6 (S5/H1/H2 *pending*): gfx1100 compression ints
+  ×1.80, TTI ×1.98, zeros ×1.17, decompression ints ×1.21, zeros ×7.8, TTI ×0.985; gfx942
+  compression ints ×2.55–2.98, TTI ×3.4–3.6, zeros ×1.6–1.8, decompression ints ×1.33–1.48, zeros
+  ×3.0–4.45, TTI ×1.34–1.67. Bytes identical throughout.
 * **LZ4 decompression on wave64** (`opt/lz4-decomp-wave64-2026-08`): bounds neutral, modulo
   removal exact, the vectorised copies are the lever (×2.2 / +31–48 % on literal/long-match data)
   once gated away from short-sequence data — defaults *pending* the lz4b variants.
