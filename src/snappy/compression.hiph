@@ -192,8 +192,7 @@ static __device__ inline uint32_t FindFourByteMatch(
     snap_state_s *s,
     const uint8_t *src,
     uint32_t pos0,
-    uint32_t t,
-    uint32_t slot)   // which of the two result slots (iteration parity) to write
+    uint32_t t)
 {
   constexpr unsigned GROUPSIZE = sizeof(GROUPMASK_T)*8;
   constexpr GROUPMASK_T GROUP_MASK_ONE = 1;
@@ -204,7 +203,7 @@ static __device__ inline uint32_t FindFourByteMatch(
   uint32_t maxpos = pos0 + MAX_LITERAL_LENGTH - (GROUPSIZE - 1);
   uint32_t literal_cnt;
   GROUPMASK_T match_mask;
-  if (t == 0) { s->copy_length[slot] = 0; }
+  if (t == 0) { s->copy_length = 0; }
   do {
     bool valid4               = (pos + t + 4 <= len);
     uint32_t data32           = (valid4) ? unaligned_load32(src + pos + t) : 0;
@@ -232,8 +231,8 @@ static __device__ inline uint32_t FindFourByteMatch(
     if (match_mask != 0) {
       literal_cnt = find_first_set_bit(match_mask) - 1;
       if (t == literal_cnt) {
-        s->copy_distance[slot] = pos + t - offset;
-        s->copy_length[slot]   = 4;
+        s->copy_distance = pos + t - offset;
+        s->copy_length   = 4;
       }
     } else {
       literal_cnt = GROUPSIZE;
@@ -321,9 +320,9 @@ do_snap(
     }
     if (dst < end) { dst[0] = src_len; }
     s->dst            = dst + 1;
-    s->literal_length[0] = 0; s->literal_length[1] = 0;
-    s->copy_length[0]    = 0; s->copy_length[1]    = 0;
-    s->copy_distance[0]  = 0; s->copy_distance[1]  = 0;
+    s->literal_length = 0;
+    s->copy_length    = 0;
+    s->copy_distance  = 0;
   }
   // Clear the whole hash map (8 KB) with 16-byte LDS stores: sizeof/16 uint4
   // words spread over the group's lanes, i.e. 8 stores per lane on wave64.
@@ -343,15 +342,11 @@ do_snap(
   __syncthreads();
   src = s->src;
   pos = 0;
-  uint32_t it = 0;  // iteration counter: selects the result slot (see snap_state_s)
   while (pos < s->src_len) {
-    const uint32_t cur = it & 1u;   // slot written by WARP1 in the previous iteration
-    const uint32_t nxt = cur ^ 1u;  // slot WARP1 writes in this iteration
-    uint32_t literal_len = s->literal_length[cur];
-    uint32_t copy_len    = s->copy_length[cur];
-    uint32_t distance    = s->copy_distance[cur];
-    // No barrier here: the slot WARP1 writes below (nxt) was last read in the
-    // previous iteration, before the barrier that ended it.
+    uint32_t literal_len = s->literal_length;
+    uint32_t copy_len    = s->copy_length;
+    uint32_t distance    = s->copy_distance;
+    __syncthreads();
     if (t < WARPSIZE) {
       // WARP0: Encode literals and copies
       uint8_t *dst = s->dst;
@@ -373,21 +368,20 @@ do_snap(
         //: two-step strategy: first find 4-byte match, 
         //: then try to find longer match starting from that match's position
         uint32_t t5 = t & (WARPSIZE-1);
-        literal_len = FindFourByteMatch<GROUPMASK_T,SIGNED_GROUPMASK_T,WARPSIZE>(s, src, pos, t5, nxt); //: side effect: writes to s->copy_length[nxt]
-        if (t5 == 0) { s->literal_length[nxt] = literal_len; }
-        copy_len = s->copy_length[nxt];
+        literal_len = FindFourByteMatch<GROUPMASK_T,SIGNED_GROUPMASK_T,WARPSIZE>(s, src, pos, t5); //: side effect: writes to s->copy_length
+        if (t5 == 0) { s->literal_length = literal_len; }
+        copy_len = s->copy_length;
         if (copy_len != 0) {
           uint32_t match_pos = pos + literal_len + copy_len;  // NOTE: copy_len is always 4 here
           copy_len += Match60<GROUPMASK_T,WARPMASK_T>(src + match_pos,
-                              src + match_pos - s->copy_distance[nxt],
+                              src + match_pos - s->copy_distance,
                               min(s->src_len - match_pos, 64 - copy_len), //: copy_len is 4 here
                               t5);
-          if (t5 == 0) { s->copy_length[nxt] = copy_len; }
+          if (t5 == 0) { s->copy_length = copy_len; }
         }
       }
     }
     __syncthreads();
-    ++it;
   }
   __syncthreads();
   if (!t) {
