@@ -73,6 +73,14 @@ public:
    */
   static void check(const hipError_t err, const std::string& msg = "");
 
+  /**
+   * @brief Verify (once per process) that the active device's wavefront
+   * size matches the size this library was compiled for (USE_WARPSIZE_32
+   * vs wave64). A mismatch makes ballot/shuffle masks silently wrong, so
+   * fail loudly instead. Throws std::runtime_error on mismatch.
+   */
+  static void check_wave_size();
+
   static void sync(hipStream_t stream);
 
   static void check_last_error(const std::string& msg = "");

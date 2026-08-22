@@ -70,13 +70,25 @@ namespace arcto {
 
 namespace lowlevel {
 
+// CDNA (wave64) sits exactly on the 64-VGPR occupancy step (<=64 VGPRs ->
+// 8 waves/SIMD; 65-96 -> 5). Without bounds the compiler allocates ~90
+// VGPRs for the compress kernel and occupancy drops 8->5 waves (measured
+// on gfx942). Pin the budget back with a waves-per-EU hint. On wave32
+// (RDNA3, 3x larger register file) the hint would only restrict the
+// scheduler, so cap the block size alone.
+#if defined(USE_WARPSIZE_32)
+#define LZ4_COMP_LAUNCH_BOUNDS __launch_bounds__(LZ4_COMP_THREADS_PER_CHUNK)
+#else
+#define LZ4_COMP_LAUNCH_BOUNDS __launch_bounds__(LZ4_COMP_THREADS_PER_CHUNK, 8)
+#endif
+
 template<typename T>
-__global__ void lz4CompressBatchKernel(
-    const uint8_t* const* device_in_ptr,
-    const size_t* const device_in_bytes,
-    uint8_t* const* const device_out_ptr,
-    size_t* const device_out_bytes,
-    offset_type* const temp_space,
+__global__ LZ4_COMP_LAUNCH_BOUNDS void lz4CompressBatchKernel(
+    const uint8_t* const* ARCTO_KRESTRICT device_in_ptr,
+    const size_t* const ARCTO_KRESTRICT device_in_bytes,
+    uint8_t* const* const ARCTO_KRESTRICT device_out_ptr,
+    size_t* const ARCTO_KRESTRICT device_out_bytes,
+    offset_type* const ARCTO_KRESTRICT temp_space,
     const position_type hash_table_size)
 {
   const int bidx = blockIdx.x * blockDim.y + threadIdx.y;
@@ -88,12 +100,49 @@ __global__ void lz4CompressBatchKernel(
   uint8_t* const comp_ptr = device_out_ptr[bidx];
   size_t* const comp_length = device_out_bytes + bidx;
 
+// E11 (campaign campaign-o-2026-08-20): the match-finding table lives in the
+// Local Data Share on AMD -- measured KEPT on all three architectures with
+// byte-identical output (gfx90a +25%, gfx1100 +9%, gfx906 +300% over the
+// packed global table, and it also wins in the undersubscribed regime). At
+// the shipped table sizes this is 128-256 B of LDS per wave, so the old
+// occupancy objection does not apply. The CUDA backend keeps the global-
+// memory path until measured there. Opt out with -DARCTO_LZ4_LDS_TABLE=0.
+#ifndef ARCTO_LZ4_LDS_TABLE
+#if defined(__HIP_PLATFORM_AMD__)
+#define ARCTO_LZ4_LDS_TABLE 1
+#else
+#define ARCTO_LZ4_LDS_TABLE 0
+#endif
+#endif
+#if ARCTO_LZ4_LDS_TABLE
+  __shared__ offset_type lds_hash_table[MAX_HASH_TABLE_SIZE];
+  offset_type* const hash_table = lds_hash_table;
+  (void)temp_space;
+#else
   offset_type* const hash_table = temp_space + bidx * hash_table_size;
+#endif
 
   compressStream(comp_ptr, reinterpret_cast<const T*>(decomp_ptr), hash_table, hash_table_size, decomp_length, comp_length);
 }
 
-__global__ void lz4DecompressBatchKernel(
+// LZ4-D7: bound the decompression kernel to its real block (threads per
+// chunk x chunks per block) so hip-clang budgets registers for 64/128 threads
+// instead of the 1024-thread default, and optionally ask for a minimum
+// occupancy (HIP: waves per EU; CUDA: min blocks per SM) to pin the VGPR
+// budget — e.g. -DARCTO_LZ4_DECOMP_MIN_WAVES_PER_EU=8 keeps <= 64 VGPRs on
+// CDNA. 0 (default) = no occupancy target.
+#ifndef ARCTO_LZ4_DECOMP_MIN_WAVES_PER_EU
+#  define ARCTO_LZ4_DECOMP_MIN_WAVES_PER_EU 0
+#endif
+#if ARCTO_LZ4_DECOMP_MIN_WAVES_PER_EU > 0
+#  define ARCTO_LZ4_DECOMP_BOUNDS \
+    __launch_bounds__(LZ4_DECOMP_THREADS_PER_CHUNK * LZ4_DECOMP_CHUNKS_PER_BLOCK, ARCTO_LZ4_DECOMP_MIN_WAVES_PER_EU)
+#else
+#  define ARCTO_LZ4_DECOMP_BOUNDS \
+    __launch_bounds__(LZ4_DECOMP_THREADS_PER_CHUNK * LZ4_DECOMP_CHUNKS_PER_BLOCK)
+#endif
+
+__global__ void ARCTO_LZ4_DECOMP_BOUNDS lz4DecompressBatchKernel(
     const uint8_t* const* const device_in_ptrs,
     const size_t* const device_in_bytes,
     const size_t* const device_out_bytes,

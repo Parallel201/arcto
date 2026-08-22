@@ -173,7 +173,7 @@ __device__ T cooperativeSum(T const initVal, T* const buffer)
  * @param[out] blockSizes The location to write the block sizes (output).
  */
 template <typename VALUE, typename RUN, int BLOCK_SIZE, int TILE_SIZE>
-__global__ AMD_LAUNCH_BOUNDS_BALANCED void rleInitKernel(
+__global__ __launch_bounds__(BLOCK_SIZE) void rleInitKernel(
     const VALUE* const in,
     const size_t* const numInDevice,
     RUN* const  blockSizes)
@@ -228,7 +228,7 @@ __global__ AMD_LAUNCH_BOUNDS_BALANCED void rleInitKernel(
 }
 
 template <typename VALUE, typename RUN, int BLOCK_SIZE, int TILE_SIZE>
-__global__ AMD_LAUNCH_BOUNDS_MEMORY void rleReduceKernel(
+__global__ __launch_bounds__(BLOCK_SIZE) void rleReduceKernel(
     const VALUE* const in,
     const size_t* const numInDevice,
     const RUN* const blockPrefix,
@@ -360,7 +360,7 @@ __global__ AMD_LAUNCH_BOUNDS_MEMORY void rleReduceKernel(
  * @param[in] num The number of entries.
  */
 template <typename RUN, int BLOCK_SIZE, int TILE_SIZE>
-__global__ AMD_LAUNCH_BOUNDS_COMPUTE void rleFinalizeKernel(
+__global__ __launch_bounds__(BLOCK_SIZE) void rleFinalizeKernel(
     RUN** const runsPtr,
     const RUN* const blockStart,
     const RUN* const blockPrefix,
