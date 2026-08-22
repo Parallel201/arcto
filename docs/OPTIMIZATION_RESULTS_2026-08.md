@@ -114,6 +114,9 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
 
 ## 2. Outcome per codec (vs `main`, bytes identical, tests green)
 
+(The per-optimization Δ tables, branch totals, accumulated end-to-end ratios and the comparison with
+the earlier LZ4 branch `opt/curated` are in `OPTIMIZATION_GAINS_2026-08.md`.)
+
 * **Snappy** (`opt/snappy-2026-08`): decompression gfx1100 ×1.24 (binary) / ×1.39 (TTI) / ×1.075
   (words) at saturation and the same at small batch; gfx942 ×1.12 / ×1.23 / ×1.21 at small batch,
   ×1.08 / ≈1.00 / ×1.15 at saturation. Compression: neutral on gfx1100, +1–2.5 % on gfx942 (SNP-C5,
