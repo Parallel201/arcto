@@ -122,6 +122,21 @@ constexpr int cascaded_decompress_threadblock_size = (arcto::warpsize >= 64) ? 2
 #  endif
 #endif
 
+// CAS-D1: cooperative (load-balanced) expansion of RLE runs in
+// block_rle_decompress when a round contains a run longer than the threshold
+// (see there). On by default on AMD; the CUDA backend keeps nvCOMP's
+// one-thread-per-run fill. Both overridable per build.
+#ifndef ARCTO_CASCADED_RLE_BALANCED
+#  if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+#    define ARCTO_CASCADED_RLE_BALANCED 1
+#  else
+#    define ARCTO_CASCADED_RLE_BALANCED 0
+#  endif
+#endif
+#ifndef ARCTO_CASCADED_RLE_BALANCE_THRESHOLD
+#  define ARCTO_CASCADED_RLE_BALANCE_THRESHOLD 16
+#endif
+
 #ifndef ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM
 #  if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
 #    define ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM hipcub::BLOCK_SCAN_WARP_SCANS
@@ -308,6 +323,11 @@ __device__ void block_rle_decompress(
 
   typedef hipcub::BlockScan<run_type, threadblock_size, ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM> BlockScan;
   __shared__ typename BlockScan::TempStorage temp_storage;
+#if ARCTO_CASCADED_RLE_BALANCED
+  // CAS-D1: end offset (within the round) of every run of the round, so that
+  // all threads can expand the round's output cooperatively.
+  __shared__ run_type run_end[threadblock_size];
+#endif
 
   *output_num_elements = 0;
 
@@ -323,6 +343,39 @@ __device__ void block_rle_decompress(
     BlockScan(temp_storage)
         .ExclusiveSum(current_count, output_offset, aggregate);
 
+#if ARCTO_CASCADED_RLE_BALANCED
+    // CAS-D1: with one thread per run, a long run serialises its whole
+    // expansion on one lane while the rest of the block idles (a 4096-element
+    // run = 4096 dependent LDS stores by one lane). When any run of the round
+    // is longer than the threshold, every thread instead fills a strided slice
+    // of the round's output and finds the owning run by a binary search over
+    // the (at most threadblock_size) run ends kept in LDS — log2(runs) LDS
+    // reads per element, mostly wave-uniform addresses (broadcast), and fully
+    // parallel. Rounds made only of short runs keep the one-thread-per-run
+    // fill, which is cheaper for them. Same values to the same positions:
+    // output identical.
+    run_end[threadIdx.x] = output_offset + current_count;
+    const int any_long_run = __syncthreads_or(
+        current_count > ARCTO_CASCADED_RLE_BALANCE_THRESHOLD);
+    if (any_long_run) {
+      data_type* const round_output = output_buffer + *output_num_elements;
+      const data_type* const round_vals = val_buffer + round * threadblock_size;
+      const int runs_in_round
+          = min(threadblock_size, static_cast<int>(num_runs) - round * threadblock_size);
+      for (int o = threadIdx.x; o < static_cast<int>(aggregate); o += threadblock_size) {
+        // smallest run r with run_end[r] > o (zero-length runs are skipped)
+        int lo = 0, hi = runs_in_round - 1;
+        while (lo < hi) {
+          const int mid = (lo + hi) >> 1;
+          if (run_end[mid] > o)
+            hi = mid;
+          else
+            lo = mid + 1;
+        }
+        round_output[o] = round_vals[lo];
+      }
+    } else
+#endif
     if (idx < num_runs) {
       const auto current_val = val_buffer[idx];
       for (int element_idx = 0; element_idx < current_count; element_idx++) {

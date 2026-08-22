@@ -131,5 +131,29 @@ Measured: (pending) `benchmark_cascaded_chunked`, exact-bytes ladder, `test_casc
 Result: (pending)
 Verdict: (pending)
 
+### CAS-D1 — load-balanced RLE expansion in `block_rle_decompress`                        Category: C1   Status: PENDING
+Commit: (this commit)  (branch `opt/cascaded-2026-08`)
+Files: `src/CascadedKernels.hiph` (`block_rle_decompress`)
+Change: after the per-round exclusive scan of the run counts, each thread publishes its run's
+end offset in LDS (`run_end[threadblock_size]`, 512 B) and the block votes with
+`__syncthreads_or(count > ARCTO_CASCADED_RLE_BALANCE_THRESHOLD)` (16). If any run of the round
+is longer, every thread fills a strided slice of the round's output (`o = tid, tid + TB, …`),
+locating the owning run by a binary search over the round's ≤ TB run ends (log2(runs) ≤ 8 LDS
+reads, wave-uniform addresses for neighbouring lanes → broadcast); otherwise the inherited
+one-thread-per-run fill runs. Default on for AMD (`ARCTO_CASCADED_RLE_BALANCED`), off on the CUDA
+backend (nvCOMP's schedule); threshold overridable.
+Why (mechanism): with one thread per run, a run of length L costs L dependent LDS stores on one
+lane while the other 255 idle — for the data Cascaded exists for (long runs) the RLE layer is a
+serial loop: a 4096-element all-equal chunk is 4096 iterations on one lane per layer. The
+balanced fill costs ≈ (aggregate / TB) × (≤ 8 reads + 1 read + 1 store) per lane, fully
+parallel; the vote keeps short-run rounds (avg. ≤ 16) on the cheap path. Values and positions
+unchanged → bytes identical.
+Prediction: zeros / long-run inputs +20–50 % decompression (RLE layers dominate them), ints_mixed
++5–15 % (35 % of it is runs), TTI ≈ 0 (no runs → serial path), compression unchanged; bytes
+identical. Try threshold 4 / 64 as flag variants.
+Measured: (pending)
+Result: (pending)
+Verdict: (pending)
+
 ### Resource evidence — gfx942 (MI300A), ROCm 7.0.1, baseline kernels (before CAS-S2/S1/C1)
 `-Rpass-analysis=kernel-resource-usage`, wave64, 128-thread blocks (inherited): `cascaded_compression_kernel<int,128,4096>` SGPR 106 / VGPR 71 / LDS 13456 B per block / 9 SGPR spills / est. 7 waves per SIMD; `cascaded_decompression_kernel<4B,128,4096>` SGPR 106 / VGPR 73 / LDS 13192 B / 12 SGPR spills / est. 6 waves per SIMD; `get_decompress_size_kernel` 22 / 10 / 0 LDS / 8. The SGPR spills (scalar state of the nested RLE/delta/bit-pack passes) and the 13 KB of LDS per 128-thread block (≤4 blocks per CU by LDS) are the two structural costs to attack (CAS-S2 launch bounds already committed; CAS-D5 LDS shrink queued).
