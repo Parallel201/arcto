@@ -289,12 +289,13 @@ literal step with SNP-D8's dword path); sleeps 0/0/0 ×0.992 / ×0.993 / ×0.999
 Result (gfx942, MI300A, 30 reps; head reference from sweep 5 / A/B: 152 / 282 / 44.7 GB/s at saturation, 1.84 / 5.39 / 8.50 at small batch; saturation medians on this node drift ±5 %): 8 KB ring 120.3 / 266 / 34.9 at saturation (×0.79 / ×0.94 / ×0.78) but tti x0 6.32 (×1.17) — deeper prefetch helps a lone chunk, fewer resident blocks hurt at saturation — REJECT; 4-sector granules ≈ head at saturation, x0 ×0.98–1.00 — neutral here, −25 % on gfx1100 — REJECT; `LITERAL_SECTORS=8` ≈ head at saturation, x0 tti ×0.96, binary ×0.99 — neutral to slightly negative on wave64 (vs +4 % / +10 % on gfx1100); sleeps 0/0/0 ≈ head — neutral (D1 kept on the 60-rep A/B).
 Verdict: `LITERAL_SECTORS` defaults to 8 on wave32 AMD builds only (`USE_WARPSIZE_32`), commit below (SNP-D11s); ring, granule and sleeps stay as inherited.
 
-### SNP-D11s — LITERAL_SECTORS=8 default on wave32 AMD builds                            Category: C6   Status: COMMITTED (verification sweep pending)
+### SNP-D11s — LITERAL_SECTORS=8 default on wave32 AMD builds                            Category: C6   Status: KEPT (confirmed gfx1100)
 Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
 Files: `src/snappy/config.h`
 Change: `LITERAL_SECTORS` default `defined(USE_WARPSIZE_32) ? 8 : 4`; still overridable with `-DLITERAL_SECTORS=N`. Each literal step then moves 2 dwords per lane (256 B per 32-lane step) through the SNP-D8 dword path.
 Prediction: gfx1100 tti +4 % at saturation / +10 % at small batch (the measured flag variant), binary/words unchanged; gfx942 and CUDA untouched (4); bytes identical.
-Measured: (pending final verification sweep)
+Measured (final sweep, 30 reps): gfx1100 tti x512 117.8 → 124.2 GB/s (×1.054) and x0 5.32 → 5.83 (×1.096) vs the D8k head, binary/words ≈ (×1.00–1.01); gfx942 unchanged by construction (wave64 keeps 4). Bytes identical.
+Verdict: CONFIRMED — matches the flag variant (+4 % / +10 %).
 
 
 ### SNP-D8k — knobs to measure D8's two mechanisms separately                          Category: C3   Status: KNOBS (defaults = D8 as measured)
@@ -310,13 +311,41 @@ Result (gfx1100): COPIES=0 → binary ×0.920 (x0 ×0.920), tti ×1.005, words �
 Measured (gfx942, MI300A, 30 reps; default = literals+copies 152.0 / 277.6 / 44.6 GB/s decompression at saturation, 1.85 / 5.35 / 8.55 at small batch): COPIES=0 → binary ×1.299 (x0 ×1.315), tti ×1.124 (x0 ×0.992), words ×1.046 (x0 ×1.037); LITERALS=0 → binary ×1.014 (x0 ×0.990), tti ×1.054 (x0 ×0.912), words ×1.009 (x0 ×1.011). Bytes identical. So on wave64 the dword copy path alone costs −23 % on copy-heavy data (the 64-lane forward copy with a 4-B stride per lane turns one 64-B-per-clause store into a strided pattern the MI300A store path dislikes, and the per-copy setup is paid on every short copy), while the dword literal path is worth +9 % on literal-heavy data at small batch.
 Verdict: SPLIT (commit below, SNP-D8s): `ARCTO_SNAPPY_DWORD_LITERALS` defaults to 1 on every AMD target; `ARCTO_SNAPPY_DWORD_COPIES` defaults to 1 only when `USE_WARPSIZE_32` is defined (gfx10/11) and to 0 on wave64 (gfx90a/gfx942). Expected after the split: gfx1100 unchanged (both on), gfx942 ≈ the COPIES=0 variant (+30 % binary, +4 % words vs the D8 head, TTI kept). Both knobs stay overridable per build.
 
-### SNP-D8s — D8 split: dword literals everywhere on AMD, dword copies on wave32 only      Category: C3   Status: COMMITTED (verification sweep pending)
+### SNP-D8s — D8 split: dword literals everywhere on AMD, dword copies on wave32 only      Category: C3   Status: KEPT (confirmed on both nodes)
 Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
 Files: `src/snappy/decompression_process.hiph`
 Change: default of `ARCTO_SNAPPY_DWORD_COPIES` becomes `defined(USE_WARPSIZE_32) ? 1 : 0`; `ARCTO_SNAPPY_DWORD_LITERALS` stays 1 on AMD. No code-path change, defaults only; CUDA builds untouched (neither path exists there).
 Why: per-mechanism A/Bs on both architectures (SNP-D8k). Prediction: gfx1100 identical to the D8 head; gfx942 binary ≈ 197 GB/s at saturation / 2.43 at small batch (the COPIES=0 variant), tti and words unchanged or slightly up; bytes identical.
-Measured: (pending final verification sweep on both nodes)
+Measured (final sweep, 30 reps, integration head eb4024f vs the D8k head): gfx942 binary x0 1.85 → 2.43 GB/s (×1.31, exactly the COPIES=0 variant), x512 152 → 195 (×1.28); tti x0 5.35 → 5.30 (≈), words x32 44.6 → 46.7 (×1.05); gfx1100 binary 109.3 → 110.4 (≈, copies still on). Bytes identical, tests green.
+Verdict: CONFIRMED — the split recovers the wave64 copy-heavy loss in full and keeps the wave32 gain.
 
+
+### Final verification — `opt/snappy-2026-08` (decomp head e4b068f + SNP-C5) vs `main`        Status: DONE (2026-08-22)
+Protocol: `codec-sweep.sh --codec snappy`, 30 reps, `-p 65536`, same inputs as every sweep; commits
+`ced8428` (= main + the per-rep CSV in the benchmark), `0263261` (chore + test base), `e4b068f`
+(decompression head), `eb4024f` (integration head, + C5). Exact-bytes ladder identical across all
+four on both nodes; every test binary green (`test_snappy_coverage` from 0263261 on).
+
+| node | input | main → final decompression GB/s (sat) | × | small batch (x0) × | compression × |
+|---|---|---:|---:|---:|---:|
+| gfx1100 (RX 7900 XT, wave32) | synth_binary | 89.0 → 110.4 | 1.24 | 1.23 | 1.00 |
+| | tti_rsf t050 | 89.6 → 124.2 | 1.39 | 1.39 | 1.00 |
+| | words (x32) | 25.3 → 27.2 | 1.075 | 1.10 | 1.00 |
+| gfx942 (MI300A, wave64) | synth_binary | 181 → 195 | 1.08 | 1.12 | 1.01–1.02 |
+| | tti_rsf t050 | 277 → 275 | ≈ 1.00 (IQRs overlap) | 1.23 | 1.00 |
+| | words (x32) | 40.5 → 46.7 | 1.15 | 1.21 | 1.02 |
+
+Reading: the chore/test base is exactly neutral (0263261 ≡ main within 0.2 %: the explicit
+`-O3 -DNDEBUG` changed nothing — the toolchain already applied it). On the wave32 RDNA3 part the
+whole decompression lineage compounds to +24 % / +39 % / +8 % at saturation and the same at small
+batch, i.e. the kernel got faster per chunk and the CU stays the bottleneck. On the MI300A the
+per-chunk latency gains are as large (+12–23 % at small batch) but only partly reach the
+saturation regime (+8 % / ≈ 0 / +15 %): with 8192 resident-or-queued chunks the throughput there
+is bounded by something the 16-symbol-per-batch decoder does not own alone (TTI at saturation on
+this node also swings ±8 % between runs of the same binary, see SNP-D11). Next step for MI300A is a
+counter-level profile (rocprof: LDS bank conflicts, VALU busy, MemUnit stalls) rather than more
+source-level changes — recorded as the open question of this branch. Compression: C5 gives
++1–2.5 % on wave64 and fixes the half-cleared hash map; neutral on wave32.
 
 ### Resource evidence — gfx942 (MI300A), ROCm 7.0.1, `-D ARCTO_DEVICE_REPORTS=ON`, head 94624af (SNP-D12 knob off)
 From `-Rpass-analysis=kernel-resource-usage` (wave64 build; occupancy = compiler estimate in waves/SIMD, max 8 on gfx942):
