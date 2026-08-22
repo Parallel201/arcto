@@ -30,6 +30,7 @@ allows and schedule accordingly. Enabler for CAS-S1; no algorithm/bytes change.
 Prediction: 0–5 %; bytes identical.
 Measured: (pending) `benchmark_cascaded_chunked`, exact-bytes ladder, `test_cascaded_coverage`.
 Result (gfx1100, RX 7900 XT, wave32, 30 reps; ints_mixed / zeros / TTI; comp GB/s sat 75.0 / 175.7 / 57.8, decomp 76.6 / 46.6 / 287.3; x0 comp 50.6 / 8.97 / 3.26, decomp 67.8 / 2.55 / 21.7): ×1.000 / ×1.000 / ×1.001 comp, ×1.002 / ×1.005 / ×1.002 decomp — neutral, as predicted (bounds only). Bytes identical.
+Result (gfx942, MI300A, wave64, 30 reps; ints_mixed / zeros / TTI; base comp GB/s sat 109.5 / 305.7 / 95.4, decomp 181.3 / 167.4 / 539.5; x0 comp 33.5 / 6.89 / 1.97, decomp 51.9 / 3.24 / 20.1): comp ×1.007 / ×0.947 / ×0.949 at saturation, ×1.000 / ×1.011 / ×1.003 at x0; decomp ×0.998 / ×0.933 / ×0.985 sat, ×0.937 / ×1.036 / ×1.112 x0 — mixed ±5 %, within this node's drift; bounds at the inherited 128 threads give the compiler nothing to use. Kept as the enabler for S1.
 Verdict: (pending)
 
 ### CAS-S1 — 256-thread blocks on wave64 targets                                        Category: C6   Status: PENDING
@@ -51,6 +52,7 @@ Prediction: compression 15–30 %, decompression 10–25 % on gfx942; nil on gfx
 bytes identical on both.
 Measured: (pending) gfx942 = the target; gfx1100 as a no-change check.
 Result (gfx1100): wave32 keeps 128 threads — by construction a no-op here (×0.999–1.001). gfx942 pending.
+Result (gfx942): compression ×1.474 ints (x32) / ×1.207 zeros / ×1.561 TTI at saturation, ×1.50 / ×1.19 / ×1.68 at x0; decompression ×1.246 / ×1.004 / ×1.248 at saturation, ×1.34 / ×1.04 / ×1.70 at x0 — the largest single decompression win on CDNA and second-largest for compression: same LDS per block, twice the resident waves, half the per-threadblock_size rounds per stage. Bytes identical.
 Verdict: (pending)
 
 ### CAS-C1 — single-pass min/max in `get_for_bitwidth` (2 collectives instead of 2 per 128 elements)   Category: C1   Status: PENDING (not yet measured)
@@ -65,6 +67,7 @@ Prediction: 20–40 % of compression time with `use_bp` on CDNA (barrier-bound a
 less on gfx1100; bytes identical.
 Measured: (pending — next sweep: baseline, S2, S1, C1 on gfx942 and gfx1100)
 Result (gfx1100): compression ×1.551 ints_mixed (75.0 → 116.3 GB/s at x32; x0 ×1.542), ×1.698 TTI (57.8 → 98.1 at x512; x0 ×1.707), ×1.050 zeros (bitwidth 0: one reduce pair either way); decompression unchanged; bytes identical. The largest single win of the branch: the per-128-element collective pair was the compressor's hot spot on bit-packed data.
+Result (gfx942): compression ×1.44 ints (x32: 161 → 232 GB/s), ×1.57 TTI (149 → 234), ×1.14 zeros; x0 ×1.44 / ×1.69 / ×1.17; decompression unchanged. Same mechanism as on gfx1100.
 Verdict: (pending)
 
 ### CAS-S4 — `BLOCK_SCAN_WARP_SCANS` for the three Cascaded block scans                 Category: C2   Status: PENDING
@@ -86,6 +89,7 @@ Prediction: +2–6 % decompression on delta/RLE-heavy inputs (ints_mixed), ≈ 0
 run per chunk) and TTI; compression ±1 % (one scan per RLE layer); bytes identical.
 Measured: (pending) `benchmark_cascaded_chunked`, exact-bytes ladder, `test_cascaded_coverage`.
 Result (gfx1100): decompression ints_mixed ×1.031 (x32) / ×1.030 (x0), zeros ×1.000, TTI ×1.004; compression ×1.005 / ×1.004 / ×1.002 — small positive on the scan-heavy input, as predicted. Bytes identical.
+Result (gfx942): compression ×1.19 ints (232 → 277), ×1.16 TTI (234 → 271), ×1.18 zeros (420 → 494) at saturation; decompression ×1.15 ints (242 → 278), ×1.10 TTI (656 → 722), zeros ≈; x0 ±3 %. Much larger than on RDNA3: hipCUB's default (rocPRIM `reduce_then_scan`) is expensive on wave64 CDNA and `using_warp_scan` (DPP) is the right block scan there.
 Verdict: (pending)
 
 ### CAS-D5 — decompression LDS shrink: RLE count scratch aliases the dead element buffer   Category: C4   Status: PENDING
@@ -110,6 +114,7 @@ compression unchanged; bytes identical.
 Measured: (pending) `benchmark_cascaded_chunked`, exact-bytes ladder, `test_cascaded_coverage`
 (which round-trips every type through every RLE/delta/bp configuration).
 Result (gfx1100): decompression ints_mixed ×1.134 at x32 (79.0 → 89.6 GB/s; x0 ≈, latency-bound), zeros ×1.173 at x512 (46.6 → 54.7), TTI ×0.976 at x512 (288.5 → 281.6: TTI is mostly the raw fall-back copy and gains nothing from residency, the −2 % is within its run-to-run band); compression unchanged; bytes identical. Occupancy lever confirmed on the int type even on RDNA3 (64 KB LDS per CU in CU mode).
+Result (gfx942): decompression zeros ×1.12 at saturation (164 → 184 GB/s), ints ≈ (274 vs 278, within drift), TTI ≈; x0 ints ×0.90 (75.5 → 68.1 — the x0 ints rows on this node vary ±5 % between neighbouring commits; the layout change is the only code change); compression unchanged; bytes identical. Kept: the residency gain shows on the RLE-heavy input.
 Verdict: (pending)
 
 ### CAS-D2 — multi-item block scan in delta decompression                               Category: C1   Status: PENDING
@@ -129,6 +134,7 @@ Prediction: +3–10 % decompression on delta-using inputs (default opts have one
 ≈ 0 on zeros; bytes identical. Try ITEMS = 2 / 8 as flag variants.
 Measured: (pending) `benchmark_cascaded_chunked`, exact-bytes ladder, `test_cascaded_coverage`.
 Result (gfx1100): decompression ints_mixed ×1.086 at x32 (89.6 → 97.3 GB/s), ×1.052 at x0; zeros ×0.984 (no delta layer work: the extra per-round register traffic), TTI ×1.005; compression unchanged; bytes identical.
+Result (gfx942): decompression ints ×1.089 at x32 (274 → 299 GB/s), ×1.078 at x0; TTI ×1.02; zeros ≈; compression unchanged; bytes identical.
 Verdict: (pending)
 
 ### CAS-D1 — load-balanced RLE expansion in `block_rle_decompress`                        Category: C1   Status: PENDING
@@ -153,6 +159,7 @@ Prediction: zeros / long-run inputs +20–50 % decompression (RLE layers dominat
 identical. Try threshold 4 / 64 as flag variants.
 Measured: (pending)
 Result (gfx1100, threshold 16): decompression zeros ×7.90 at x512 (53.8 → 368 GB/s) and ×6.7 at x0 (2.55 → 17.0) — the serial one-lane expansion was the whole kernel on run data; TTI ≈ (no runs, serial path); ints_mixed ×0.935 at x32 (97.3 → 90.9) / ×1.003 at x0 — the balanced fill's log2 LDS reads per element cost more than the serial fill saves on rounds whose longest run is only moderately above 16. Bytes identical. Threshold variants (4 / 64 / 256) queued on gfx1100 (`-DARCTO_CASCADED_RLE_BALANCE_THRESHOLD=N`) to place the switch-over where the ints regression disappears while the zeros gain stays. Compression numbers at x0 on zeros become bimodal from this commit on (IQR 5–10 GB/s): the decompression phase got ~7× shorter and the 1 MB single-chunk compression timing now sees GPU clock ramping — use x512 for zeros comparisons.
+Result (gfx942, threshold 16): decompression zeros ×3.0 at x512 (186 → 534 GB/s) and ×4.45 at x0 (3.34 → 14.4); TTI ≈; ints ×0.91 at x32 (299 → 272) / ×0.954 at x0 — the same ints regression as on gfx1100. Bytes identical. Verdict pending the threshold variants (gfx1100 cas4: 4 / 64 / 256).
 Verdict: (pending)
 
 ### CAS-C4 — incremental input-window arithmetic in `block_bitpack`                    Category: C1   Status: PENDING
@@ -171,6 +178,7 @@ Prediction: +5–15 % compression on bit-packed inputs (TTI/ints), ≈ 0 on zero
 no words); bytes identical.
 Measured: (pending)
 Result (gfx1100): compression ×0.999 / ×0.999 / ×1.010 at saturation (ints / zeros / TTI), x0 ×0.993 / ×1.00 / ×1.008 — neutral: the per-word divisions were not on the critical path (the inner packing loop and LDS reads dominate). Bytes identical. Kept as neutral (no measurable cost, less VALU work per word).
+Result (gfx942): compression ×0.988 ints / ×1.001 zeros / ×1.007 TTI at saturation, x0 ×0.988 / ×1.003 / ×1.007 — neutral (−1 % on ints within drift); bytes identical. Neutral-kept.
 Verdict: (pending)
 
 ### CAS-C2 — RLE compression: per-thread slab in registers                              Category: C4   Status: PENDING
@@ -193,6 +201,7 @@ small types; ≈ 0 on decompression; bytes identical. Register cost: the u8 inst
 threads holds 32 slab registers — watch `-Rpass-analysis` for spills.
 Measured: (pending)
 Result (gfx1100): compression ints_mixed ×1.187 at x0 (78.2 → 92.8 GB/s) / ×1.145 at x32 (116.7 → 133.6), TTI ×1.147 at x512 (99.3 → 113.9), zeros ×1.097 at x512 (185 → 203); decompression unchanged; bytes identical. The three LDS passes over the chunk were the second hot spot after C1's collectives.
+Result (gfx942): compression ints ×1.166 at x32 (273 → 318 GB/s) / ×1.17 at x0, TTI ×1.162 at x512 (274 → 318) / ×1.225 at x0, zeros ×1.08 at x512 / ×1.10 at x0; decompression unchanged; bytes identical.
 Verdict: (pending)
 
 ### CAS-S6 — 32-bit block scan in RLE compression                                      Category: C2   Status: PENDING
@@ -207,6 +216,7 @@ LDS exchange moves 8 B instead of 4 B per lane; a pure-width change — same sum
 Prediction: +1–3 % compression (one scan per RLE layer); bytes identical.
 Measured: (pending)
 Result (gfx1100): compression ints_mixed ×1.012 (x32), zeros ×1.016 (x512), TTI ×1.006; decompression unchanged; bytes identical — as predicted (+1–2 %).
+Result (gfx942): compression ×1.026 ints, ×1.042 zeros, ×1.018 TTI at saturation (x0 ×1.019 / ×1.044 / ×1.017); decompression code untouched (the ints x32 decomp row moved −7 % between C2 and S6 — drift on this node; x0 rows ≈); bytes identical.
 Verdict: (pending)
 
 ### CAS-S5 — 16-byte cooperative copies for the chunk/layer streams                  Category: C3   Status: PENDING
@@ -248,6 +258,8 @@ Cost: a few scalar stores per layer; compressed sizes unchanged; decompressors (
 ignore the bytes. Effect: Cascaded output is now byte-deterministic, so the sweeps' gates and the
 coverage test can compare bytes across commits and architectures.
 Measured: (part of the sweep; expected ≈ 0)
+### Cumulative on gfx942 (MI300A, wave64), base 777135f → S6 c375cab (S5/H1 rebuilt, measured separately): compression ints ×2.55 (x0) / ×2.98 (x32), TTI ×3.58 (x0) / ×3.39 (x512), zeros ×1.62 (x0) / ×1.82 (x512); decompression ints ×1.33 (x0) / ×1.38–1.48 (x32, drift band), zeros ×4.45 (x0) / ×3.0 (x512), TTI ×1.67 (x0) / ×1.34 (x512). Bytes identical on the ladder throughout. Order of contribution: S1 (256-thread blocks) > C1 > S4 > C2 > D2/D5 > S6; D1 is the zeros lever with an ints cost to tune.
+
 ### Cumulative on gfx1100 (wave32), base 777135f → S6 c375cab (S5/H1 rebuilt, measured separately): compression ints_mixed ×1.80 (x32), TTI ×1.98 (x512), zeros ×1.17 (x512); decompression ints_mixed ×1.21 (x32), zeros ×7.8 (x512), TTI ×0.985 (x512). Bytes identical on the ladder throughout; gfx942 pending.
 
 ### Resource evidence — gfx942 (MI300A), ROCm 7.0.1, baseline kernels (before CAS-S2/S1/C1)
