@@ -138,8 +138,8 @@ namespace arcto
                   const uint8_t *src = (dist > 0) ? (out + t - dist) : (literal_base + tr - dist);
                   out[t] = *src;
                 }
-                out += SHFL1(bofs, n - 1);
-                blen_t = SHFL1(blen_t, (n + t) & (GROUPSIZE - 1));
+                out += SHFL1_UNIFORM(bofs, n - 1); // n is wave-uniform (ballot / butterfly sum)
+                blen_t = SHFL1(blen_t, (n + t) & (GROUPSIZE - 1)); // per-lane index: stays a shuffle
                 dist_t = SHFL1(dist_t, (n + t) & (GROUPSIZE - 1));
                 batch_len -= n;
               }
@@ -148,13 +148,14 @@ namespace arcto
           uint32_t current_prefetch_wrpos = s->q.prefetch_wrpos;
           for (int i = 0; i < batch_len; i++)
           { //: batch_len is bounded by GROUPSIZE of decoder
-            int32_t blen = SHFL1(blen_t, i);
-            int32_t dist = SHFL1(dist_t, i);
-            int32_t blen2 = (i + 1 < batch_len) ? SHFL1(blen_t, i + 1) : GROUPSIZE;
+            // i is a wave-uniform loop counter: lane reads, not shuffles
+            int32_t blen = SHFL1_UNIFORM(blen_t, i);
+            int32_t dist = SHFL1_UNIFORM(dist_t, i);
+            int32_t blen2 = (i + 1 < batch_len) ? SHFL1_UNIFORM(blen_t, i + 1) : GROUPSIZE;
             // Try to combine consecutive small entries if they are independent
             if ((uint32_t)dist >= (uint32_t)blen && blen + blen2 <= GROUPSIZE)
             {
-              int32_t dist2 = SHFL1(dist_t, i + 1);
+              int32_t dist2 = SHFL1_UNIFORM(dist_t, i + 1);
               if ((uint32_t)dist2 >= (uint32_t)(blen + blen2))
               {
                 int32_t d;

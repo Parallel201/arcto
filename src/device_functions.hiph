@@ -128,11 +128,17 @@ template <typename T>
 __device__ inline T SHFL10(T v) {
   return __shfl_sync(~0, v, 0);
 }
-template <typename T> 
+template <typename T>
 __device__ inline T SHFL1(T v, uint32_t t) {
   return __shfl_sync(~0, v, t);
 }
-template <typename T> 
+// Same as SHFL1, for call sites whose lane index is wave-uniform (the AMD path
+// maps it to v_readlane; CUDA keeps the shuffle).
+template <typename T>
+__device__ inline T SHFL1_UNIFORM(T v, uint32_t t) {
+  return __shfl_sync(~0, v, t);
+}
+template <typename T>
 __device__ inline T SHFL1_XOR(T v, const warp_mask_t m) {
   return __shfl_xor_sync(~0, v, m);
 }
@@ -148,15 +154,75 @@ __device__ inline warp_mask_t BALLOT1(int predicate) {
 //#  define SYNCWARP()       __syncwarp()
 //#  define BALLOT1(v)       __ballot_sync(~0, (v))
 #else
-template <typename T> 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+// AMD: a broadcast of lane 0 (SHFL10) or of a wave-uniform lane index
+// (SHFL1_UNIFORM) does not need the LDS crossbar. __shfl lowers to
+// ds_bpermute_b32 (an LDS-path instruction with lgkmcnt latency, two of them
+// for 64-bit values); v_readfirstlane_b32 / v_readlane_b32 read the register
+// of one lane straight into an SGPR in a few cycles, and the result being an
+// SGPR also relieves VGPR pressure. readfirstlane returns the value of the
+// lowest ACTIVE lane, so SHFL10 keeps its meaning wherever lane 0 is active --
+// every call site in the Snappy kernels is reached by all lanes of the wave.
+// SHFL1_UNIFORM must only be used where the lane index is wave-uniform
+// (loop counters, values derived from ballots or from SHFL10); a per-lane
+// index must keep using SHFL1 (ds_bpermute).
+namespace arcto_detail {
+template <typename T>
+__device__ inline T readfirstlane_any(T v) {
+  if constexpr (sizeof(T) == 4) {
+    uint32_t u; __builtin_memcpy(&u, &v, 4);
+    u = static_cast<uint32_t>(__builtin_amdgcn_readfirstlane(static_cast<int>(u)));
+    T r; __builtin_memcpy(&r, &u, 4); return r;
+  } else if constexpr (sizeof(T) == 8) {
+    uint64_t u; __builtin_memcpy(&u, &v, 8);
+    const uint32_t lo = static_cast<uint32_t>(__builtin_amdgcn_readfirstlane(static_cast<int>(u & 0xffffffffu)));
+    const uint32_t hi = static_cast<uint32_t>(__builtin_amdgcn_readfirstlane(static_cast<int>(u >> 32)));
+    u = (static_cast<uint64_t>(hi) << 32) | lo;
+    T r; __builtin_memcpy(&r, &u, 8); return r;
+  } else {
+    return __shfl(v, 0);
+  }
+}
+template <typename T>
+__device__ inline T readlane_any(T v, uint32_t lane) {
+  if constexpr (sizeof(T) == 4) {
+    uint32_t u; __builtin_memcpy(&u, &v, 4);
+    u = static_cast<uint32_t>(__builtin_amdgcn_readlane(static_cast<int>(u), static_cast<int>(lane)));
+    T r; __builtin_memcpy(&r, &u, 4); return r;
+  } else if constexpr (sizeof(T) == 8) {
+    uint64_t u; __builtin_memcpy(&u, &v, 8);
+    const uint32_t lo = static_cast<uint32_t>(__builtin_amdgcn_readlane(static_cast<int>(u & 0xffffffffu), static_cast<int>(lane)));
+    const uint32_t hi = static_cast<uint32_t>(__builtin_amdgcn_readlane(static_cast<int>(u >> 32), static_cast<int>(lane)));
+    u = (static_cast<uint64_t>(hi) << 32) | lo;
+    T r; __builtin_memcpy(&r, &u, 8); return r;
+  } else {
+    return __shfl(v, lane);
+  }
+}
+} // namespace arcto_detail
+template <typename T>
+__device__ inline T SHFL10(T v) {
+  return arcto_detail::readfirstlane_any(v);
+}
+template <typename T>
+__device__ inline T SHFL1_UNIFORM(T v, uint32_t t) {
+  return arcto_detail::readlane_any(v, t);
+}
+#else
+template <typename T>
 __device__ inline T SHFL10(T v) {
   return __shfl(v, 0);
 }
-template <typename T> 
+template <typename T>
+__device__ inline T SHFL1_UNIFORM(T v, uint32_t t) {
+  return __shfl(v, t);
+}
+#endif
+template <typename T>
 __device__ inline T SHFL1(T v, uint32_t t) {
   return __shfl(v, t);
 }
-template <typename T> 
+template <typename T>
 __device__ inline T SHFL1_XOR(T v, const warp_mask_t m) {
   return __shfl_xor(v, m);
 }

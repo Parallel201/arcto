@@ -61,3 +61,29 @@ data (more batches); bytes identical; ISA shows `s_load_dword`/`s_lshr_b64` in t
 Measured: (pending) same protocol as SNP-D1.
 Result: (pending)
 Verdict: (pending)
+
+### SNP-D3 — `readfirstlane` / `readlane` instead of shuffles for wave-uniform broadcasts   Category: C2   Status: PENDING
+Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
+Files: `src/device_functions.hiph`, `src/snappy/decompression_decode_strategies.hiph`,
+`src/snappy/decompression_process.hiph`
+Change: on AMD, `SHFL10(v)` (broadcast of lane 0) is now `v_readfirstlane_b32` (two for 64-bit
+values) instead of `__shfl(v, 0)` (= `ds_bpermute_b32` through the LDS crossbar). A new
+`SHFL1_UNIFORM(v, lane)` maps to `v_readlane_b32` and replaces `SHFL1` only where the lane index
+is provably wave-uniform: `batch_len-1` / `batch_len` / `batch_add-1` in the two decode strategies
+(derived from ballots, computed on all lanes since SNP-D4), `n-1` and the loop counter `i`, `i+1`
+in the symbol processor (`n` comes from a ballot and a butterfly sum). Per-lane-indexed shuffles
+(`it`, `(n+t)&63`, the compressor's `min(local_match_lane,t)`) stay `ds_bpermute`. CUDA path
+unchanged (`SHFL1_UNIFORM` = `__shfl_sync`). `readfirstlane` reads the lowest *active* lane; every
+`SHFL10` site is reached by all lanes with lane 0 active (verified site by site), so the value is
+lane 0's as before. Algorithm and bytes unchanged.
+Why (mechanism): `ds_bpermute` is an LDS-path instruction (issue through the LDS pipeline,
+`s_waitcnt lgkmcnt`, ~tens of cycles, two for 64-bit) executed on the decoder/processor critical
+path ~10–15 times per batch; `v_readfirstlane`/`v_readlane` read one lane's VGPR into an SGPR in a
+few cycles, and the broadcast value living in an SGPR removes VGPRs and lets dependent control
+flow be scalar.
+Prediction: 5–15 % decompression throughput on the decoder/processor-bound inputs (text-like,
+tiny symbols), less on literal-heavy input; ISA `ds_bpermute_b32` count in `unsnap_kernel` drops;
+bytes identical.
+Measured: (pending) same protocol as SNP-D1.
+Result: (pending)
+Verdict: (pending)

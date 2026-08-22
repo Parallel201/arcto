@@ -173,8 +173,9 @@ namespace snappy {
           }
 
           if (batch_len != 0) {
-            blen = SHFL1(blen, batch_len - 1);
-            cur  = SHFL1(cur_t, batch_len - 1) + 2 + ((len3_mask >> (batch_len - 1)) & 1);
+            // batch_len is wave-uniform (derived from ballots): lane reads, not shuffles
+            blen = SHFL1_UNIFORM(blen, batch_len - 1);
+            cur  = SHFL1_UNIFORM(cur_t, batch_len - 1) + 2 + ((len3_mask >> (batch_len - 1)) & 1);
             //: opt?: Should be the same as cur <- SHFL1(cur_t,batch_len) if batch_len < GROUP_SIZE ??
             if (t == 0) {
               #ifdef ARCTO_PRINT_DEBUG_INFO
@@ -186,7 +187,7 @@ namespace snappy {
           }
         }
       }
-      return SHFL1(b0, batch_len);
+      return SHFL1_UNIFORM(b0, batch_len); // batch_len is wave-uniform
     }
   };
 
@@ -316,8 +317,9 @@ namespace snappy {
           short_sym_mask = find_first_set_bit(ballot1<GROUPMASK_T,WARPSIZE>(t,blen > bytes_left || ofs > (int32_t)(dst_pos + blen)));
           if (short_sym_mask != 0) { batch_add = min(batch_add, short_sym_mask - 1); } //: differs
           if (batch_add != 0) { //: differs
-            blen = SHFL1(blen, batch_add - 1); //: differs
-            cur  = SHFL1(cur_t, batch_add - 1) + 2 + ((len5_mask >> ((batch_add - 1) * 2)) & 3); //: differs
+            // batch_add is wave-uniform (derived from a ballot): lane reads, not shuffles
+            blen = SHFL1_UNIFORM(blen, batch_add - 1); //: differs
+            cur  = SHFL1_UNIFORM(cur_t, batch_add - 1) + 2 + ((len5_mask >> ((batch_add - 1) * 2)) & 3); //: differs
             if (t == 0) {
               dst_pos += blen;
               bytes_left -= blen;
