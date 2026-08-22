@@ -25,9 +25,15 @@ so the re-test of the wave32-only vectorisation (LZ4-D1/D2) on wave64 is not con
 VGPR step (the earlier wave64 losses were suspected to be exactly that).
 Prediction: bounds only 0–3 %; `MIN_WAVES_PER_EU=8` 0–8 % if the 65th VGPR was the limiter, a
 loss if the compiler spills to reach it (check `-Rpass-analysis`); bytes identical.
-Measured: (pending) gfx942 (+ gfx1100 regression check).
-Result: (pending)
-Verdict: (pending)
+Measured: gfx1100 (RX 7900 XT, wave32, 30 reps, lz4a sweep): decompression tti x0 9.73 → 7.69 GB/s
+(×0.79), x512 240.1 → 231.8 (×0.965); binary and words ×0.997–1.002; compression ≈ (tti x512
+×1.02, within noise). Bytes identical, tests green. gfx942: pending (lz4a_gfx942 sweep).
+Result (gfx1100): NEGATIVE — the bare `__launch_bounds__(64)` on the wave32 build changes the
+generated code for the worse on the literal-heavy input (−21 % per-chunk latency). Mechanism to
+confirm with the resource report (VGPR count / scheduling with the 1..64 flat work-group size vs
+the 1..1024 default; RDNA3 wave32 is not the target of this item).
+Verdict (gfx1100): must not apply to wave32 — gate to wave64 (next commit) if gfx942 shows a gain,
+otherwise drop.
 
 ### LZ4-D2 — incremental source index in the repeat (overlapped-match) copy             Category: C1   Status: PENDING
 Commit: (this commit)  (branch `opt/lz4-decomp-wave64-2026-08`)
@@ -60,6 +66,24 @@ period-`dist` match of length L into log2(L/dist) straight copies. The earlier w
 was measured without launch bounds; under LZ4-D7 the VGPR budget is explicit.
 Prediction: with bounds, VEC_COPY=1 on wave64 +5–20 % on literal-/run-heavy inputs; if it still
 loses, the cause is the extra registers (check `-Rpass-analysis` VGPRs vs 64) — then keep off.
+Measured: (pending)
+Result: (pending)
+Verdict: (pending)
+
+### LZ4-D5 — wave-uniform decompressor state through `readfirstlane`                    Category: C2   Status: PENDING
+Commit: (this commit)  (branch `opt/lz4-decomp-wave64-2026-08`)
+Files: `src/LZ4Kernels.hiph` (`decompressStream`, `BufferControl::readLSIC`)
+Change: the token byte, every LSIC byte and the 16-bit match offset — loaded by all lanes from the
+same LDS/global address — pass through `__builtin_amdgcn_readfirstlane` (`ARCTO_LZ4_UNIFORM`,
+identity on CUDA). Everything derived from them (`num_literals`, `match`, `comp_idx`, `decomp_idx`,
+the bounds checks and the branch conditions) becomes scalar.
+Why (mechanism): an LDS/global load always lands in VGPRs even when the address is uniform, so the
+serial sequence parser ran on the vector unit with exec-mask branches and replicated its loop
+state in every lane; with the state in SGPRs the parsing is SALU work (`s_add`, `s_cmp`,
+`s_cbranch`) that overlaps with the lanes' copy loops, and fewer VGPRs are live across the copies.
+Same bytes: the values are identical on every lane.
+Prediction: +3–10 % decompression on inputs with many short sequences (words, binary), small on TTI;
+both wave sizes; bytes identical. Check `-Rpass-analysis`: VGPRs should drop.
 Measured: (pending)
 Result: (pending)
 Verdict: (pending)

@@ -112,6 +112,17 @@ constexpr uint32_t uwarpsize = 32U;
 #define CLZ(x) __clz(x)
 #endif
 
+// LZ4-D5: the decompressor's control state (token byte, LSIC bytes, match
+// offset) is read by every lane from the same address, so it is wave-uniform;
+// on AMD v_readfirstlane_b32 moves it into an SGPR so the sequence parsing
+// (lengths, indices, bounds checks, branches) runs on the scalar unit and the
+// loop-carried state is not replicated across lanes. Identity on CUDA.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+#  define ARCTO_LZ4_UNIFORM(x) (__builtin_amdgcn_readfirstlane(static_cast<int>(x)))
+#else
+#  define ARCTO_LZ4_UNIFORM(x) (x)
+#endif
+
 constexpr lane_mask_t LANE_MASK_ZERO = 0;
 constexpr lane_mask_t LANE_MASK_ONE = 1;
 constexpr lane_mask_t LANE_MASK_TWO = 2;
@@ -516,13 +527,13 @@ public:
     uint8_t next = 0xff;
     // read from the buffer
     while (next == 0xff && idx < end()) {
-      next = rawAt(idx)[0];
+      next = static_cast<uint8_t>(ARCTO_LZ4_UNIFORM(rawAt(idx)[0]));
       ++idx;
       num += next;
     }
     // read from global memory
     while (next == 0xff) {
-      next = m_compData[idx];
+      next = static_cast<uint8_t>(ARCTO_LZ4_UNIFORM(m_compData[idx]));
       ++idx;
       num += next;
     }
@@ -1197,7 +1208,7 @@ inline __device__ void decompressStream(
     }
 
     // read header byte
-    token_type tok = decodePair(*ctrl.rawAt(comp_idx));
+    token_type tok = decodePair(static_cast<uint8_t>(ARCTO_LZ4_UNIFORM(*ctrl.rawAt(comp_idx))));
     ++comp_idx;
 
     // read the length of the literals
@@ -1243,9 +1254,9 @@ inline __device__ void decompressStream(
       // read the offset
       offset_type offset;
       if (comp_idx + sizeof(offset_type) > ctrl.end()) {
-        offset = readWord<offset_type>(compData + comp_idx);
+        offset = static_cast<offset_type>(ARCTO_LZ4_UNIFORM(readWord<offset_type>(compData + comp_idx)));
       } else {
-        offset = readWord<offset_type>(ctrl.rawAt(comp_idx));
+        offset = static_cast<offset_type>(ARCTO_LZ4_UNIFORM(readWord<offset_type>(ctrl.rawAt(comp_idx))));
       }
 
       comp_idx += sizeof(offset_type);
