@@ -87,3 +87,23 @@ bytes identical.
 Measured: (pending) same protocol as SNP-D1.
 Result: (pending)
 Verdict: (pending)
+
+### SNP-D5 — 8-byte-aligned symbol queue, one 64-bit LDS access per symbol        Category: C4   Status: PENDING
+Commit: (this commit)  (branch `opt/snappy-decomp-2026-08`)
+Files: `src/snappy/symbol.hiph`
+Change: `LZ77Symbol` (len, offset; 8 bytes) is `alignas(8)`, which moves the queue `batch[]` in
+`unsnap_queue_s` from byte offset 76 to 80 of the LDS state (and the ring `buf` to 2096), and
+`set()`/`get()` move the symbol with one 64-bit `volatile` store/load (len in the low dword,
+offset in the high dword — the same layout as before) instead of two 32-bit `volatile` accesses.
+Debug builds (`ARCTO_PRINT_DEBUG_INFO`, three fields) keep the field-wise path. Values, order and
+bytes unchanged.
+Why (mechanism): the decoder lanes write `b[t]` and the processor lanes read `b[t]` at an 8-byte
+lane stride; two 32-bit accesses at that stride hit the same bank pair twice (2-way conflict per
+32-lane half) and cost two LDS instructions per lane; one aligned `ds_write_b64`/`ds_read_b64` per
+lane is conflict-free at full rate and halves the volatile LDS instruction count in `set()` (two
+decode strategies, single-thread decoder) and `get()` (processor).
+Prediction: small (LDS is not the bottleneck) but free; fewer `ds_*` instructions in the ISA;
+`SQ_LDS_BANK_CONFLICT` down; bytes identical.
+Measured: (pending) same protocol as SNP-D1.
+Result: (pending)
+Verdict: (pending)
