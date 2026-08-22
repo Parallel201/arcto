@@ -54,6 +54,7 @@ option(BUILD_TESTS "Build unit and end-to-end tests." OFF)
 option(BUILD_BENCHMARKS "Build benchmark executables." OFF)
 option(BUILD_STATIC "Build a static library." OFF)
 option(USE_WARPSIZE_32 "Use wave size 32, e.g., for gfx1100 devices. This option is only applicable for the ROCm backend. Has no effect if the CUDA backend is selected." OFF)
+option(ARCTO_DEVICE_REPORTS "Print per-kernel device resource usage (SGPR/VGPR/AGPR/LDS/scratch/occupancy) at compile time and keep the generated device assembly (--save-temps) for ISA inspection. ROCm backend only; for analysis builds, not for shipping." OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_HIP_STANDARD 17)

@@ -105,6 +105,19 @@ if (CUDA_BACKEND)
   set_cuda_compilation_options()
 endif (CUDA_BACKEND)
 
+if (ARCTO_DEVICE_REPORTS AND NOT CUDA_BACKEND)
+  # -Rpass-analysis=kernel-resource-usage makes the AMDGPU backend print, per
+  # kernel and per offload arch, the SGPR/VGPR/AGPR counts, LDS and scratch
+  # bytes and the resulting occupancy (waves/SIMD) -- the numbers every
+  # launch-bounds / register-pressure decision in docs/AMD_OPTIMIZATION_MAP.md
+  # depends on. --save-temps keeps the device assembly (.s per arch) in the
+  # build tree so ISA-level checks (global_load_dwordx4, ds_bpermute, s_barrier,
+  # nt/slc bits) can be grepped without a profiler.
+  target_compile_options(arcto PRIVATE
+    $<$<COMPILE_LANGUAGE:HIP>:-Rpass-analysis=kernel-resource-usage>
+    $<$<COMPILE_LANGUAGE:HIP>:--save-temps>)
+endif()
+
 if(UNIX)
 target_include_directories(arcto PUBLIC
   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
