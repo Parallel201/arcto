@@ -313,5 +313,22 @@ raw-copy fallback of the whole partition (`use_compression = false`), the only f
 outcome since the decoder applies every configured layer unconditionally.
 Effect: no change to any stream that did not hang; degenerate partitions now compress (raw) instead
 of hanging. The coverage test now runs its full matrix (~1 s of GPU time).
+### CAS-H3 — decoder applied the inverse layers in the wrong order for 0 < num_RLEs < num_deltas   Category: C8 (correctness)   Status: COMMITTED
+Commit: (this commit)  (branch `opt/cascaded-2026-08`)
+Files: `src/CascadedKernels.hiph` (`cascaded_decompression_fcn`)
+Found by: `test_cascaded_coverage` after CAS-H1/H2 let the matrix run to `char, rles 1, deltas 2,
+bp 1` (partition of 1024 elements): `REQUIRE(back == inputs[i])` — decompressed data differs from
+the input, status success. The compressor applies, per iteration k, `[RLE if k < num_RLEs]` then
+`[delta if k < num_deltas]` (so {1, 2} is RLE, Δ, Δ); the decoder decided the order with the
+remaining counters — `delta_remaining >= rle_remaining` for a delta, then `rle_remaining >=
+delta_remaining` (after the decrement) for an RLE — which undoes RLE before the first delta for
+{1, 2} (Δ⁻¹, RLE⁻¹, Δ⁻¹). The rule is equivalent to the correct order exactly when num_RLEs ≥
+num_deltas or num_RLEs == 0, i.e. for nvCOMP's default {2, 1} and the pure-delta configurations —
+which is how it survived; inherited from nvCOMP 2.2.
+Change: the decoder mirrors the encoder's layer indices: for k = max−1 … 0, undo delta if
+k < num_deltas, then RLE if k < num_RLEs; the remaining counters still select the headers/offsets.
+Effect: configurations with more delta than RLE layers now round-trip; every other configuration
+executes the identical sequence (bytes and order unchanged). Perf-neutral.
+Measured: (gate in cas5 / cas3b)
 ### Resource evidence — gfx942 (MI300A), ROCm 7.0.1, baseline kernels (before CAS-S2/S1/C1)
 `-Rpass-analysis=kernel-resource-usage`, wave64, 128-thread blocks (inherited): `cascaded_compression_kernel<int,128,4096>` SGPR 106 / VGPR 71 / LDS 13456 B per block / 9 SGPR spills / est. 7 waves per SIMD; `cascaded_decompression_kernel<4B,128,4096>` SGPR 106 / VGPR 73 / LDS 13192 B / 12 SGPR spills / est. 6 waves per SIMD; `get_decompress_size_kernel` 22 / 10 / 0 LDS / 8. The SGPR spills (scalar state of the nested RLE/delta/bit-pack passes) and the 13 KB of LDS per 128-thread block (≤4 blocks per CU by LDS) are the two structural costs to attack (CAS-S2 launch bounds already committed; CAS-D5 LDS shrink queued).

@@ -1667,9 +1667,19 @@ __device__ void cascaded_decompression_fcn(
       int rle_remaining = num_RLEs;
       int delta_remaining = num_deltas;
 
+      // CAS-H3: the compressor applies, for k = 0, 1, ...: [RLE if k < num_RLEs]
+      // then [delta if k < num_deltas]; the inverse must undo, for k descending:
+      // [delta if k < num_deltas] then [RLE if k < num_RLEs]. The inherited
+      // tie-break (`delta_remaining >= rle_remaining`, then
+      // `rle_remaining >= delta_remaining` after the decrement) is equivalent
+      // only when num_RLEs >= num_deltas or num_RLEs == 0; for
+      // 0 < num_RLEs < num_deltas (e.g. {1, 2}) it undid the RLE layer before
+      // the first delta and produced wrong data without any error. Found by
+      // test_cascaded_coverage.
       for (int layer_idx = 0; layer_idx < max(num_RLEs, num_deltas);
            layer_idx++) {
-        if (delta_remaining > 0 && delta_remaining >= rle_remaining) {
+        const int k = max(num_RLEs, num_deltas) - 1 - layer_idx;
+        if (k < num_deltas) {
           // Decompress the delta layer
           block_delta_decompress<data_type, size_type, threadblock_size>(
               shared_input_buffer,
@@ -1689,7 +1699,7 @@ __device__ void cascaded_decompression_fcn(
           delta_remaining--;
         }
 
-        if (rle_remaining > 0 && rle_remaining >= delta_remaining) {
+        if (k < num_RLEs) {
           // Load the count array from global memory to shared memory
           if (block_read<run_type, size_type, threadblock_size>(
                   rle0_ptr + rle_offsets[rle_remaining - 1] / 4,
