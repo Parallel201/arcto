@@ -36,7 +36,7 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
 | Snappy comp | SNP-C2 | one barrier per literal/copy pair via double-buffered match state | −1…−4 % | −2…−6 % | reverted |
 | Snappy comp | SNP-C1 | one-round-ahead prefetch of the match-search word | −4…−7 % | −4…−7 % | reverted |
 | Cascaded decomp | CAS-D2 | multi-item (4/thread) block scan in delta decompression: 4× fewer scans+barriers per chunk | ints +8.6 % (sat), +5 % (x0); zeros −1.6 %; TTI ≈ | ints +9 % (sat), +8 % (x0); TTI +2 % | kept |
-| Cascaded decomp | CAS-D1 → D1f → D1w | load-balanced expansion of long RLE runs: block-wide vote on an absolute run length (D1), on run > F × average (D1f), then **wave-local** (each wave balances its own runs' output; wave ballot, no block barrier) | D1: zeros ×7.9 (sat) / ×6.7 (x0), ints −6.5 % (sat) at any cutoff (4/16/64/256) and any factor (4/8/16) — the block vote itself cost it; D1w *pending (final sweep)* | D1: zeros ×3.0 (sat) / ×4.45 (x0); ints −9 % (sat) / −4.6 % (x0); D1w *pending* | D1w kept (final numbers pending) |
+| Cascaded decomp | CAS-D1 → D1f → D1w | load-balanced expansion of long RLE runs: block-wide vote on an absolute run length (D1), on run > F × average (D1f), then **wave-local** (each wave balances its own runs' output; wave ballot, no block barrier) | D1: zeros ×7.9 (sat), ints −6.5 % at any cutoff/factor (the block vote itself); D1w: ints +8–9 % vs D1 (×1.28 sat / ×1.16 x0 vs base), zeros ×6.4 (sat) / ×4.3 (x0) | D1: zeros ×3.0 / ×4.45, ints −9 % / −4.6 %; D1w: ints +6–10 % vs D1 (×1.43 / ×1.40 vs base), zeros ×2.49 (sat) / ×3.86 (x0) | D1w kept |
 | Cascaded comp | CAS-C1 | single-pass min/max in `get_for_bitwidth` (2 block reduces instead of 2 per 128 elements) | ints ×1.54, TTI ×1.70, zeros ×1.05 | ints ×1.44, TTI ×1.57, zeros ×1.14 | kept (largest Cascaded compression win) |
 | Cascaded comp | CAS-C4 | incremental input-window indices in `block_bitpack` (no per-word integer division) | ≈ 0 (±1 %) | ≈ 0 (−1 %, in drift) | neutral-kept |
 | LZ4 decomp | LZ4-D2 | incremental `i % dist` in the overlapped-match repeat copy | ≈ 0 (wave32 uses the doubling path) | ≈ 0 on non-repetitive inputs; zeros *pending* | kept (exact, cheaper per byte) |
@@ -119,10 +119,14 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
   ×1.08 / ≈1.00 / ×1.15 at saturation. Compression: neutral on gfx1100, +1–2.5 % on gfx942 (SNP-C5,
   which also fixes the wave64 half-cleared hash map). Three compression attempts (C1, C2, C3) were
   measured negative on both parts and reverted; the log keeps them.
-* **Cascaded** (`opt/cascaded-2026-08`), base → S6 (S5/H1/H2 *pending*): gfx1100 compression ints
-  ×1.80, TTI ×1.98, zeros ×1.17, decompression ints ×1.21, zeros ×7.8, TTI ×0.985; gfx942
-  compression ints ×2.55–2.98, TTI ×3.4–3.6, zeros ×1.6–1.8, decompression ints ×1.33–1.48, zeros
-  ×3.0–4.45, TTI ×1.34–1.67. Bytes identical throughout.
+* **Cascaded** (`opt/cascaded-2026-08`), final head vs base (`777135f`), full coverage matrix
+  green, bytes identical: gfx1100 compression ints ×2.07 (x0) / ×2.16 (sat), TTI ×2.26 / ×2.32,
+  zeros ×1.61 (sat); decompression ints ×1.16 / ×1.28, zeros ×4.3 / ×6.4, TTI ×0.98 (sat). gfx942
+  compression ints ×2.60 / ×3.17, TTI ×3.58 / ×3.82, zeros ×1.60 / ×2.10; decompression ints ×1.40
+  / ×1.43, zeros ×3.86 / ×2.49, TTI ×1.54 (x0; saturation in the node's noise band). Order of
+  contribution: S1 256-thread blocks (CDNA) and C1 single-pass min/max, then S4 warp scans, C2
+  register slab, S5 16-B compression-side copies, D2 multi-item delta, D5 LDS shrink, D1w wave-local
+  RLE expansion (the zeros lever), S6; H1/H2/H3 fix three inherited defects.
 * **LZ4 decompression on wave64** (`opt/lz4-decomp-wave64-2026-08`, base `origin/opt/curated`):
   final head vs base on gfx942 — decompression binary ×2.28 (small batch) / ×1.35 (saturation), TTI
   ×2.20 / ×1.12, zeros ×1.17 / ×1.37, words ×0.80 / ×0.75; compression unchanged; gfx1100
