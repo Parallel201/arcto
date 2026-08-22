@@ -137,3 +137,17 @@ Result: the one input made of short sequences — where the scalar parser should
 one that loses (−5…−8 % on wave64): the `v_readfirstlane` + SALU→VALU hand-offs per token add latency
 to a chain that is already latency-bound, and the other inputs do not care.
 Verdict: REVERTED (next commit); the log keeps the attempt.
+
+### LZ4-D1w — wave64 default: decompression-side vectorised copies on                   Category: C3   Status: COMMITTED (final sweep pending)
+Commit: (this commit)  (branch `opt/lz4-decomp-wave64-2026-08`)
+Files: `src/LZ4Kernels.hiph`
+Change: `ARCTO_LZ4_VEC_COPY_DECOMP` defaults to 1 on every AMD target (wave32 unchanged: it was
+already on); `ARCTO_LZ4_VEC_COPY_COMP` keeps the wave32-only default; `ARCTO_LZ4_VEC_COPY_MIN`
+stays 32. CUDA unchanged.
+Why: the lz4b measurements (LZ4-D1s): on wave64 the decompression-side paths are ×2.15–2.18 (x0)
+and +30 % / +45 % (saturation) on binary / TTI, −5 % on long zero runs at saturation and −17…−24 %
+on short-sequence text at any cutoff; the project's data (seismic / binary fields) is the former.
+The cost on text is recorded and the knob remains for text-dominated workloads.
+Prediction (final sweep vs the curated base): gfx942 decompression binary ×2.2 / ×1.3, TTI ×2.2 /
+×1.45, zeros ×1.02 / ×0.95, words ×0.83 / ×0.76; gfx1100 unchanged; bytes identical.
+Measured: (pending — lz4c final sweep on both nodes)

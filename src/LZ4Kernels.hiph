@@ -628,8 +628,19 @@ private:
 #    define ARCTO_LZ4_VEC_COPY 0
 #  endif
 #endif
+// LZ4-D1w: on wave64 AMD targets the decompression-side vectorisation is on by
+// default — measured on gfx942: literal-/long-match-dominated data (binary,
+// TTI) x2.15-2.18 at small batch and +30 % / +45 % at saturation, long zero
+// runs -5 % at saturation, short-sequence text -17...-24 % (a code-generation
+// effect, independent of the short-length cutoff); the compression side stays
+// off there (-54 % compression on text). Workloads dominated by short
+// sequences can build with -DARCTO_LZ4_VEC_COPY_DECOMP=0.
 #ifndef ARCTO_LZ4_VEC_COPY_DECOMP
-#  define ARCTO_LZ4_VEC_COPY_DECOMP ARCTO_LZ4_VEC_COPY
+#  if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+#    define ARCTO_LZ4_VEC_COPY_DECOMP 1
+#  else
+#    define ARCTO_LZ4_VEC_COPY_DECOMP ARCTO_LZ4_VEC_COPY
+#  endif
 #endif
 #ifndef ARCTO_LZ4_VEC_COPY_COMP
 #  define ARCTO_LZ4_VEC_COPY_COMP ARCTO_LZ4_VEC_COPY
