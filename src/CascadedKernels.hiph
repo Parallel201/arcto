@@ -217,7 +217,12 @@ __device__ void block_rle_compress(
   // Note: `tmp_buffer` is used because we cannot calculate adjacent differences
   // in place.
 
-  typedef hipcub::BlockScan<size_type, threadblock_size, ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM> BlockScan;
+  // CAS-S6: in-chunk quantities (run counts per thread, output index) are
+  // < 65536 by construction (`chunk_num_elements < 65536`), so the block scan
+  // runs on 32-bit values instead of the 64-bit `size_type` (size_t): single
+  // VALU ops and half the LDS traffic in the scan on AMD; same sums.
+  typedef uint32_t scan_type;
+  typedef hipcub::BlockScan<scan_type, threadblock_size, ARCTO_CASCADED_BLOCK_SCAN_ALGORITHM> BlockScan;
   __shared__ typename BlockScan::TempStorage temp_storage;
 
   const size_type num_inputs_per_thread
@@ -250,7 +255,7 @@ __device__ void block_rle_compress(
 
   // Step 1: Count the number of last elements of the current thread
 
-  size_type num_outputs_current_thread = 0;
+  scan_type num_outputs_current_thread = 0;
 #pragma unroll
   for (int i = 0; i < max_slab; i++) {
     if (i < my_n) {
@@ -266,7 +271,7 @@ __device__ void block_rle_compress(
 
   // Step 2: Use prefix sum to get the output location
 
-  size_type output_idx;
+  scan_type output_idx;
   BlockScan(temp_storage).ExclusiveSum(num_outputs_current_thread, output_idx);
 
   __syncthreads();
@@ -290,7 +295,7 @@ __device__ void block_rle_compress(
 #else
   // Step 1: Count the number of last elements of the current thread
 
-  size_type num_outputs_current_thread = 0;
+  scan_type num_outputs_current_thread = 0;
 
   data_type val = input_buffer[threadIdx.x * num_inputs_per_thread];
   data_type next_val;
@@ -314,7 +319,7 @@ __device__ void block_rle_compress(
 
   // Step 2: Use prefix sum to get the output location
 
-  size_type output_idx;
+  scan_type output_idx;
   BlockScan(temp_storage).ExclusiveSum(num_outputs_current_thread, output_idx);
 
   __syncthreads();

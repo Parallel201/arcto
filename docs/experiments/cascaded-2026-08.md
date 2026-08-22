@@ -195,5 +195,19 @@ Measured: (pending)
 Result: (pending)
 Verdict: (pending)
 
+### CAS-S6 — 32-bit block scan in RLE compression                                      Category: C2   Status: PENDING
+Commit: (this commit)  (branch `opt/cascaded-2026-08`)
+Files: `src/CascadedKernels.hiph` (`block_rle_compress`)
+Change: the exclusive sum of per-thread run-end counts ran on `size_type` = `size_t` (64-bit);
+the values are in-chunk counts (< 65536 by construction), so the scan, the per-thread count and
+the output index are now `uint32_t`. `*num_outputs` (shared, `size_type`) receives the 32-bit
+total as before.
+Why (mechanism): 64-bit adds/compares are VALU pairs (`v_add_co` + `v_addc`) and the scan's
+LDS exchange moves 8 B instead of 4 B per lane; a pure-width change — same sums.
+Prediction: +1–3 % compression (one scan per RLE layer); bytes identical.
+Measured: (pending)
+Result: (pending)
+Verdict: (pending)
+
 ### Resource evidence — gfx942 (MI300A), ROCm 7.0.1, baseline kernels (before CAS-S2/S1/C1)
 `-Rpass-analysis=kernel-resource-usage`, wave64, 128-thread blocks (inherited): `cascaded_compression_kernel<int,128,4096>` SGPR 106 / VGPR 71 / LDS 13456 B per block / 9 SGPR spills / est. 7 waves per SIMD; `cascaded_decompression_kernel<4B,128,4096>` SGPR 106 / VGPR 73 / LDS 13192 B / 12 SGPR spills / est. 6 waves per SIMD; `get_decompress_size_kernel` 22 / 10 / 0 LDS / 8. The SGPR spills (scalar state of the nested RLE/delta/bit-pack passes) and the 13 KB of LDS per 128-thread block (≤4 blocks per CU by LDS) are the two structural costs to attack (CAS-S2 launch bounds already committed; CAS-D5 LDS shrink queued).
