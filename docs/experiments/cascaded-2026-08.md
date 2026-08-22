@@ -15,3 +15,19 @@ branches (`docs/experiments/README.md`). Inputs: the TTI float field (as int32),
 (extreme RLE) and a generated int32 mixture of runs / ramps / small-range noise.
 
 ---
+
+### CAS-S2 — `__launch_bounds__` on the three batched Cascaded kernels                 Category: C5   Status: PENDING
+Commit: (this commit)  (branch `opt/cascaded-2026-08`)
+Files: `src/lowlevel/CascadedBatch.hip`
+Change: `cascaded_compression_kernel`, `cascaded_decompression_kernel_type_check` and
+`get_decompress_size_kernel` carry `__launch_bounds__(threadblock_size)` (the template / constant
+they are launched with). The HLIF kernels (`hlif_shared.hiph`) are shared with other codecs and
+stay as they are for now.
+Why (mechanism): without bounds hip-clang budgets registers for a 1024-thread workgroup
+(`amdgpu_flat_work_group_size` 1..1024) — at most 128 VGPRs per lane on CDNA — and has no
+occupancy target; with the true block size the compiler may use the registers the real block
+allows and schedule accordingly. Enabler for CAS-S1; no algorithm/bytes change.
+Prediction: 0–5 %; bytes identical.
+Measured: (pending) `benchmark_cascaded_chunked`, exact-bytes ladder, `test_cascaded_coverage`.
+Result: (pending)
+Verdict: (pending)

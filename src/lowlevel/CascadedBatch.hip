@@ -99,7 +99,7 @@ template <
     typename size_type,
     int threadblock_size,
     int chunk_size = default_chunk_size>
-__global__ void cascaded_compression_kernel(
+__global__ void __launch_bounds__(threadblock_size) cascaded_compression_kernel(
     int batch_size,
     const data_type* const* uncompressed_data,
     const size_type* uncompressed_bytes,
@@ -153,7 +153,7 @@ template <
     typename size_type,
     int threadblock_size,
     int chunk_size = default_chunk_size>
-__global__ void cascaded_decompression_kernel_type_check(
+__global__ void __launch_bounds__(threadblock_size) cascaded_decompression_kernel_type_check(
     int batch_size,
     const void* const* compressed_data,
     const size_type* compressed_bytes,
@@ -259,7 +259,7 @@ __global__ void cascaded_decompression_kernel_type_check(
   }
 }
 
-__global__ void get_decompress_size_kernel(
+__global__ void __launch_bounds__(cascaded_decompress_threadblock_size) get_decompress_size_kernel(
     const void* const* device_compressed_ptrs,
     const size_t* device_compressed_bytes,
     size_t* device_uncompressed_bytes,
