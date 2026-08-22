@@ -20,8 +20,10 @@ padding); (3) the HIP-decoded field equals the serial-decoded field bit for bit.
 Why: the existing zfp tests are tolerance-based; every kernel/host change below must be shown to
 leave the bits unchanged, and the test also pins the partial-block, all-zero-block and word-sharing
 (rate 12.5) paths.
-Measured: (pending — first run on gfx1100 and gfx942 establishes whether the baseline already
-passes; a baseline failure is itself a finding).
+Measured: gfx942 (MI300A, ROCm 7.0.1): **308 cases byte-exact vs canonical serial** on the
+baseline (LLNL cccbb9d HIP backend) and on every commit of this branch — the HIP encoder/decoder
+are bit-exact with the serial backend for every type/shape/mode combination tested, including
+rate 12.5 (word sharing), partial blocks and all-zero blocks. gfx1100: (zfp1 run queued).
 
 ### ZFP-H1a — no HIP execution policy on throwaway streams (ARCTO side)                 Category: C8   Status: COMMITTED (measure with the batch)
 Commit: (this commit)  (branch `opt/zfp-host-2026-08`)
@@ -37,7 +39,12 @@ twice (header stream + payload stream) plus once per `GetMaxOutputSize`; for a 6
 kernels themselves take ~0.1 ms, so this is a large share of the per-call latency on small and
 medium fields. Zero effect on the bytes (no stream parameters change).
 Prediction: compress call latency −1…−3 ms on small fields; none at 512³; bytes identical (ZFP-T1).
-Measured: (pending)
+Measured (gfx942, `benchmark_zfp_single`, 3 runs × 30 iterations, medians of the per-run means):
+64³ fixed_rate 16 compress 0.456 → 0.435 ms (×0.95), fixed_precision 16 0.555 → 0.437 ms (×0.79);
+256³ ≈ (×0.96 / ×1.26 — noise). This benchmark's run-to-run band is ±20 % (the T1 commit, identical
+code, reads ×0.74 and ×1.22 on the two 256³/64³ fixed-rate rows), so H1a alone is below the
+resolution of this protocol; it is kept as part of the host-path set measured next.
+Result: within noise alone; bytes identical.
 
 ### ZFP-H1b / ZFP-H2a / ZFP-D4 — fork-side host glue (vendored zfp branch `opt/zfp-host-2026-08`)   Category: C8   Status: COMMITTED (measure with the batch)
 Commit: (this commit: gitlink `third_party/zfp` → 6332c5c)  (fork commits ef9ee46 H1b, 3246564 H2a, 6332c5c D4 on top of LLNL cccbb9d)
@@ -58,5 +65,14 @@ Changes:
 Why: the ZFP wrapper's per-call latency on small/medium fields is dominated by HIP API calls, not by
 the kernels (`benchmark_zfp_single` 64³ float ≈ 1 MB). None of these touch the bit streams (ZFP-T1).
 Prediction: per-call compress/decompress latency −2…−5 ms for 64³; ≈ 0 at 512³; bytes identical.
-Measured: (pending: `benchmark_zfp_single -3 64,64,64` and a 256³ synthetic field, fixed_rate 16 /
-fixed_precision 16, both nodes)
+Measured (gfx942, vs the branch base, medians of 3 runs × 30 iterations; T1 gate: 308 cases
+byte-exact at this commit): 256³ fixed_rate 16: compress 3.80 → 0.82 ms (×0.22 time, 17.7 → 81.5
+GB/s), decompress 2.98 → 0.82 ms (×0.27, 22.5 → 82.2 GB/s); 256³ fixed_precision 16: compress
+3.01 → 2.49 ms (×0.83), decompress 0.91 → 0.40 ms (×0.44, 73.8 → 167 GB/s); 64³ fixed_rate:
+compress 0.456 → 0.270 ms (×0.59), decompress 0.346 → 0.254 ms (×0.73); 64³ fixed_precision:
+compress ×0.66, decompress ×0.75. The per-call hipMalloc/hipFree of the staging buffers (tens of MB
+at 256³: `hipFree` synchronises and returns memory to the OS) and the device counter round trip
+were most of the wall time of a call on the MI300A (unified memory makes the H2D/D2H copies cheap,
+so the API overhead dominated even more than predicted).
+Result: LARGE — the ZFP host path was API-bound; bytes identical (ZFP-T1 308/308).
+Verdict: KEPT (all three); gfx1100 pending (zfp1 run queued).
