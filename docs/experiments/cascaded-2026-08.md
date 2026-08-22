@@ -262,5 +262,22 @@ Measured: (part of the sweep; expected ≈ 0)
 
 ### Cumulative on gfx1100 (wave32), base 777135f → S6 c375cab (S5/H1 rebuilt, measured separately): compression ints_mixed ×1.80 (x32), TTI ×1.98 (x512), zeros ×1.17 (x512); decompression ints_mixed ×1.21 (x32), zeros ×7.8 (x512), TTI ×0.985 (x512). Bytes identical on the ladder throughout; gfx942 pending.
 
+### CAS-H2 — compression hang: a delta layer on a chunk with no elements left               Category: C8 (correctness)   Status: COMMITTED
+Commit: (this commit)  (branch `opt/cascaded-2026-08`)
+Files: `src/CascadedKernels.hiph` (`do_cascaded_compression_kernel`)
+Found by: `test_cascaded_coverage` ("every layer configuration…") — once CAS-H1 let the determinism
+check pass, the test case ran on past it and the gate never returned: the GPU sat at 100 % for
+20+ minutes (first seen in the diagnostic run, then in the cas3 gate on gfx1100). Per-configuration
+timing shows every configuration round-trips in ~2.5 ms until `char, rles 3, deltas 2, bp 1`.
+Mechanism: with `num_deltas` ≥ 2, a 1-element partition (or any chunk an RLE layer collapses to
+one run — e.g. all-zero data with `{1 RLE, 2 deltas}`) reaches the second delta layer with zero
+elements; `block_delta_compress` loops `element_idx < input_size - 1` on an unsigned `size_t`, i.e.
+to SIZE_MAX — an effectively infinite loop on the GPU. Inherited from nvCOMP 2.2 (same code); the
+default `{2 RLEs, 1 delta}` never reaches it, which is why it went unnoticed.
+Change: before a delta layer, a chunk with `num_elements_current_chunk == 0` takes the existing
+raw-copy fallback of the whole partition (`use_compression = false`), the only format-consistent
+outcome since the decoder applies every configured layer unconditionally.
+Effect: no change to any stream that did not hang; degenerate partitions now compress (raw) instead
+of hanging. The coverage test now runs its full matrix (~1 s of GPU time).
 ### Resource evidence — gfx942 (MI300A), ROCm 7.0.1, baseline kernels (before CAS-S2/S1/C1)
 `-Rpass-analysis=kernel-resource-usage`, wave64, 128-thread blocks (inherited): `cascaded_compression_kernel<int,128,4096>` SGPR 106 / VGPR 71 / LDS 13456 B per block / 9 SGPR spills / est. 7 waves per SIMD; `cascaded_decompression_kernel<4B,128,4096>` SGPR 106 / VGPR 73 / LDS 13192 B / 12 SGPR spills / est. 6 waves per SIMD; `get_decompress_size_kernel` 22 / 10 / 0 LDS / 8. The SGPR spills (scalar state of the nested RLE/delta/bit-pack passes) and the 13 KB of LDS per 128-thread block (≤4 blocks per CU by LDS) are the two structural costs to attack (CAS-S2 launch bounds already committed; CAS-D5 LDS shrink queued).

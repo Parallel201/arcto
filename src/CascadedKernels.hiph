@@ -1245,6 +1245,18 @@ __device__ void do_cascaded_compression_kernel(
         }
 
         if (delta_remaining > 0) {
+          // CAS-H2: a chunk that has no elements left cannot take another
+          // delta layer (a partition with fewer elements than delta layers, or
+          // an all-equal chunk that an RLE layer collapsed to one run):
+          // block_delta_compress would iterate to `input_size - 1` = SIZE_MAX
+          // and the inherited kernel hung the GPU here. The decoder applies
+          // every configured layer, so the only format-consistent outcome is
+          // the raw copy of the partition.
+          if (num_elements_current_chunk == 0) {
+            use_compression = false;
+            goto afterlastchunk;
+          }
+
           // Run Delta
           block_delta_compress<data_type, size_type>(
               shared_input_buffer,
