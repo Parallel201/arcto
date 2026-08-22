@@ -31,3 +31,24 @@ Prediction: 0–5 %; bytes identical.
 Measured: (pending) `benchmark_cascaded_chunked`, exact-bytes ladder, `test_cascaded_coverage`.
 Result: (pending)
 Verdict: (pending)
+
+### CAS-S1 — 256-thread blocks on wave64 targets                                        Category: C6   Status: PENDING
+Commit: (this commit)  (branch `opt/cascaded-2026-08`)
+Files: `src/CascadedKernels.hiph`
+Change: `cascaded_compress_threadblock_size` / `cascaded_decompress_threadblock_size` become
+`(arcto::warpsize >= 64) ? 256 : 128` — 4 waves per block on every target. All device code (the
+batched kernels, the HLIF wrappers and their occupancy queries, hipCUB collectives) is templated
+on the constant; the element-to-thread mapping changes the schedule only, never the values
+(RLE output order and bit-pack words are index-defined). wave32 and CUDA unchanged (128).
+Why (mechanism): the LDS footprint of a block is fixed by the 4 KB chunk (10–25 KB per block), so
+on CDNA (64 KB LDS/CU) a 128-thread block is 2 wave64 and the CU holds 2–6 blocks → 1–3 waves per
+SIMD; 256 threads doubles the resident waves at the same LDS (u32: 5 blocks × 4 waves = 5 waves/
+SIMD instead of 2.5), halves the number of rounds of every "per threadblock_size elements" loop
+(`get_for_bitwidth`, delta/RLE decompress, RLE compress prefix sums), and halves
+`num_inputs_per_thread` in `block_rle_compress` (16-B per-lane stride instead of 32 B → 4-way
+instead of 8-way LDS bank conflicts).
+Prediction: compression 15–30 %, decompression 10–25 % on gfx942; nil on gfx1100 (unchanged);
+bytes identical on both.
+Measured: (pending) gfx942 = the target; gfx1100 as a no-change check.
+Result: (pending)
+Verdict: (pending)

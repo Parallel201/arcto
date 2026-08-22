@@ -54,6 +54,7 @@
 #include <assert.h>
 #include <stdint.h>
 
+#include "arcto_device_types.h"
 #include "arcto_hipcub.hiph"
 
 namespace arcto
@@ -91,8 +92,16 @@ constexpr int default_chunk_size = 4096;
 constexpr size_t partition_metadata_size = 8;
 constexpr size_t num_bits_per_byte = 8;
 
-constexpr int cascaded_compress_threadblock_size = 128;
-constexpr int cascaded_decompress_threadblock_size = 128;
+// Threads per block: 256 (4 waves) on wave64 targets, 128 (4 waves) otherwise.
+// The LDS footprint of a block is fixed by the 4 KB chunk, not by the thread
+// count, so on CDNA (64 KB LDS per CU) a 256-thread block doubles the resident
+// waves per CU at the same LDS and halves the number of "per threadblock_size
+// elements" rounds of every stage; on wave32 (RDNA3) and on the CUDA backend
+// 128 threads are the four waves nvCOMP designed for. All device code is
+// templated on the constant; the element-to-thread mapping only changes the
+// schedule, never the results.
+constexpr int cascaded_compress_threadblock_size = (arcto::warpsize >= 64) ? 256 : 128;
+constexpr int cascaded_decompress_threadblock_size = (arcto::warpsize >= 64) ? 256 : 128;
 
 /**
  * Helper function to calculate the size in byte of the chunk metadata. The size
