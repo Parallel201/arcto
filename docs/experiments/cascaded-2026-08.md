@@ -173,5 +173,27 @@ Measured: (pending)
 Result: (pending)
 Verdict: (pending)
 
+### CAS-C2 — RLE compression: per-thread slab in registers                              Category: C4   Status: PENDING
+Commit: (this commit)  (branch `opt/cascaded-2026-08`)
+Files: `src/CascadedKernels.hiph` (`block_rle_compress`, new template parameter `max_num_inputs`)
+Change: `block_rle_compress` keeps its element→thread assignment (`num_inputs_per_thread`
+consecutive elements per thread) but reads the slab from LDS once into a register array of
+`max_num_inputs / threadblock_size` elements (4096-B chunk: int 8 @128 / 4 @256 threads, u8
+32 / 16) plus the one element after it; the run-end count and the compaction pass then run on
+registers. The inherited code re-read every element from LDS three times (count pass once,
+compaction pass twice — `input_buffer[idx + 1]` and `input_buffer[idx]`). On by default on AMD
+(`ARCTO_CASCADED_RLE_SLAB`), off on the CUDA backend.
+Why (mechanism): LDS reads at a lane stride of `num_inputs_per_thread × sizeof(T)` (16 B for
+int) are 4–8-way bank-conflicted on wave64 (`(addr/4) mod 32` repeats every 8 lanes), so each
+of the three passes over the chunk cost several conflicted `ds_read_b32` per element; the slab
+load pays that once (and is vectorisable to `ds_read_b128` when alignment is visible — a follow-up),
+the rest is VALU. Same run ends in the same order: bytes identical.
+Prediction: +5–15 % compression on RLE-using configurations (default: 2 RLE layers), more for
+small types; ≈ 0 on decompression; bytes identical. Register cost: the u8 instantiation at 128
+threads holds 32 slab registers — watch `-Rpass-analysis` for spills.
+Measured: (pending)
+Result: (pending)
+Verdict: (pending)
+
 ### Resource evidence — gfx942 (MI300A), ROCm 7.0.1, baseline kernels (before CAS-S2/S1/C1)
 `-Rpass-analysis=kernel-resource-usage`, wave64, 128-thread blocks (inherited): `cascaded_compression_kernel<int,128,4096>` SGPR 106 / VGPR 71 / LDS 13456 B per block / 9 SGPR spills / est. 7 waves per SIMD; `cascaded_decompression_kernel<4B,128,4096>` SGPR 106 / VGPR 73 / LDS 13192 B / 12 SGPR spills / est. 6 waves per SIMD; `get_decompress_size_kernel` 22 / 10 / 0 LDS / 8. The SGPR spills (scalar state of the nested RLE/delta/bit-pack passes) and the 13 KB of LDS per 128-thread block (≤4 blocks per CU by LDS) are the two structural costs to attack (CAS-S2 launch bounds already committed; CAS-D5 LDS shrink queued).
