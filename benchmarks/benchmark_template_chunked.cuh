@@ -364,9 +364,19 @@ multi_file(const std::vector<std::string>& filenames, const size_t chunk_size,
   }
 
   const size_t num_chunks = split_data.size();
+  // Inserting a range of a vector into itself is undefined behaviour; with
+  // libstdc++ a reallocating insert moves the existing elements into the new
+  // storage *before* copying the source range, so every duplicate round that
+  // reallocated (sizes 16, 32, 64, ... for a 16-chunk file) appended EMPTY
+  // chunks: at -x 512 on a 16-chunk file 160 of the 8208 chunks were empty
+  // (503 MB measured instead of 513 MB). Empty chunks pass through Snappy/LZ4
+  // but make Cascaded report arctoErrorCannotDecompress. Reserve up front and
+  // copy element by element from the (now stable) originals.
+  split_data.reserve(num_chunks * (num_duplicates + 1));
   for (size_t d = 0; d < num_duplicates; ++d) {
-    split_data.insert(split_data.end(), split_data.begin(),
-        split_data.begin()+num_chunks);
+    for (size_t c = 0; c < num_chunks; ++c) {
+      split_data.push_back(split_data[c]);
+    }
   }
 
   return split_data;
