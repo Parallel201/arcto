@@ -77,6 +77,17 @@ namespace arcto {
  */
 #include <assert.h>
 
+// Stream-ordered scratch allocation (hipMallocAsync/hipFreeAsync) where the
+// runtime has it: HIP 6+ on AMD, CUDA 11.2+ on the CUDA backend. The
+// hipified `CUDART_VERSION >= 11020` gate was never true on AMD and silently
+// fell back to synchronous hipMalloc/hipFree (hipFree synchronises the device).
+#if (defined(__HIP_PLATFORM_AMD__) && defined(HIP_VERSION_MAJOR) && HIP_VERSION_MAJOR >= 6) \
+    || (defined(CUDART_VERSION) && CUDART_VERSION >= 11020)
+#define ARCTO_ASYNC_SCRATCH 1
+#else
+#define ARCTO_ASYNC_SCRATCH 0
+#endif
+
 template <typename FormatSpecHeader>
 struct ManagerBase : arctoManagerBase {
 
@@ -187,7 +198,7 @@ public: // API
   {
     if (scratch_buffer_filled) {
       if (manager_filled_scratch_buffer) {
-        #if CUDART_VERSION >= 11020
+        #if ARCTO_ASYNC_SCRATCH
           HipUtils::check(hipFreeAsync(scratch_buffer, user_stream));
         #else
           HipUtils::check(hipFree(scratch_buffer));
@@ -208,7 +219,7 @@ public: // API
     assert(finished_init);
 
     if (!scratch_buffer_filled) {
-      #if CUDART_VERSION >= 11020
+      #if ARCTO_ASYNC_SCRATCH
         HipUtils::check(hipMallocAsync(&scratch_buffer, scratch_buffer_size, user_stream));
       #else
         HipUtils::check(hipMalloc(&scratch_buffer, scratch_buffer_size));
@@ -235,8 +246,7 @@ public: // API
     assert(finished_init);
 
     if (!scratch_buffer_filled) {
-      #if CUDART_VERSION >= 11020
-        //: TODO check ROCm version for which this is available
+      #if ARCTO_ASYNC_SCRATCH
         HipUtils::check(hipMallocAsync(&scratch_buffer, scratch_buffer_size, user_stream));
       #else
         HipUtils::check(hipMalloc(&scratch_buffer, scratch_buffer_size));
