@@ -154,4 +154,11 @@ on short-sequence text at any cutoff; the project's data (seismic / binary field
 The cost on text is recorded and the knob remains for text-dominated workloads.
 Prediction (final sweep vs the curated base): gfx942 decompression binary ×2.2 / ×1.3, TTI ×2.2 /
 ×1.45, zeros ×1.02 / ×0.95, words ×0.83 / ×0.76; gfx1100 unchanged; bytes identical.
-Measured: (pending — lz4c final sweep on both nodes)
+Measured (lz4c, gfx942, 30 reps, head 34d036a vs curated base 433772a; tests green, ladder identical):
+decompression synth_binary x0 4.37 → 9.97 GB/s (×2.28), x512 576 → 776 (×1.35); tti x0 4.38 → 9.64
+(×2.20), x512 487 → 547 (×1.12); zeros x0 9.38 → 10.95 (×1.17), x512 604 → 826 (×1.37); words x0
+2.39 → 1.90 (×0.80), x32 26.1 → 19.4 (×0.75). Compression ×0.997–1.01 (unchanged by design).
+Open point: the lz4b variant with the same paths *and* LZ4-D5 still in read tti x512 at 693–704 GB/s
+(vs 547 here) while x0 matched (9.4–9.6) — either this node's saturation drift or a real D5 × vec
+interaction (scalar parsing state relieving the 84-VGPR build); a D5-on-head variant is queued (lz4e).
+gfx1100: (lz4c pending)
