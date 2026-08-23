@@ -559,7 +559,7 @@ __device__ void block_delta_decompress(
     data_type aggregate;
     BlockScan(temp_storage)
         .ExclusiveScan(
-            input_vals, output_vals, initial_value, hipcub::Sum(), aggregate);
+            input_vals, output_vals, initial_value, arcto::ops::Sum(), aggregate);
     initial_value += aggregate;
 
 #pragma unroll
@@ -627,10 +627,10 @@ __device__ void get_for_bitwidth(
   }
 
   const signed_data_type minimum
-      = BlockReduce(temp_storage).Reduce(local_min, hipcub::Min());
+      = BlockReduce(temp_storage).Reduce(local_min, arcto::ops::Min());
   __syncthreads();
   const signed_data_type maximum
-      = BlockReduce(temp_storage).Reduce(local_max, hipcub::Max());
+      = BlockReduce(temp_storage).Reduce(local_max, arcto::ops::Max());
   __syncthreads();
 
   // Next, we store the frame of reference, the bitwidth and the number of
