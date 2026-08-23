@@ -242,3 +242,69 @@ all from curated (this branch is configuration-identical on wave32). gfx942 comp
 binary/TTI, ×4.0–4.4 words, ×1.1–1.15 zeros (curated); decompression binary ×2.22 (x0) / ×1.30
 (sat), TTI ×2.27 / ×1.16, zeros ×1.18 / ×0.76, words ×0.78 / ×0.78 (this branch × curated).
 
+## 6. Final: the integrated tree vs `main` as it came out of hipify
+
+Everything above measures one branch against its own base. This section measures **the shipped
+tree** — all optimization branches merged plus the cleanup pass (`chore/cleanup-2026-08`) — against
+`bench/baseline-2026-08`, which is `main` with *only* the benchmark instrumentation added (the
+per-repetition CSV and the `-x` duplication fix; no library change whatsoever). Same protocol as
+§0, one sweep per codec per GPU, 30 repetitions, exact-bytes ladder identical between the two
+commits and every test green on both parts.
+
+Ratios are head ÷ baseline, so **> 1 is faster**.
+
+| codec | input | regime | gfx1100 comp | gfx1100 decomp | gfx942 comp | gfx942 decomp |
+|---|---|---|---:|---:|---:|---:|
+| lz4 | binary | small batch | ×3.19 | ×1.53 | ×12.30 | ×2.22 |
+| lz4 | binary | saturation | ×3.36 | ×1.00 | ×11.08 | ×1.50 |
+| lz4 | tti | small batch | ×3.16 | ×1.87 | ×12.32 | ×2.24 |
+| lz4 | tti | saturation | ×4.84 | ×1.27 | ×13.37 | ×1.32 |
+| lz4 | words | small batch | ×1.59 | ×0.72 | ×4.45 | ×0.81 |
+| lz4 | words | saturation | ×1.43 | ×0.68 | ×3.65 | ×0.74 |
+| lz4 | zeros | small batch | ×1.01 | ×3.06 | ×1.07 | ×1.16 |
+| lz4 | zeros | saturation | ×1.16 | ×0.81 | ×1.11 | ×1.06 |
+| | | | | | | |
+| snappy | binary | small batch | ×1.00 | ×1.23 | ×1.02 | ×1.12 |
+| snappy | binary | saturation | ×1.00 | ×1.24 | ×1.01 | ×1.02 |
+| snappy | tti | small batch | ×0.98 | ×1.41 | ×0.99 | ×1.22 |
+| snappy | tti | saturation | ×1.00 | ×1.37 | ×1.00 | ×1.11 |
+| snappy | words | small batch | ×1.00 | ×1.10 | ×1.03 | ×1.18 |
+| snappy | words | saturation | ×1.00 | ×1.08 | ×1.02 | ×1.16 |
+| | | | | | | |
+| cascaded | ints | small batch | ×2.37 | ×1.30 | ×2.63 | ×1.36 |
+| cascaded | ints | saturation | ×2.20 | ×1.26 | ×3.19 | ×1.39 |
+| cascaded | zeros | small batch | ×1.03 | ×4.38 | ×1.60 | ×3.74 |
+| cascaded | zeros | saturation | ×1.65 | ×6.21 | ×2.10 | ×2.55 |
+| cascaded | tti | small batch | ×2.06 | ×0.83 | ×3.63 | ×1.45 |
+| cascaded | tti | saturation | ×2.38 | ×0.98 | ×3.83 | ×1.49 |
+| | | | | | | |
+
+ZFP (call time, lower is better; ratio = baseline ÷ head, so > 1 is faster):
+
+| shape | mode | gfx1100 compress | gfx1100 decompress | gfx942 compress | gfx942 decompress |
+|---|---|---:|---:|---:|---:|
+| 256³ | fixed_rate | ×1.23 | ×1.09 | ×3.43 | ×2.86 |
+| 256³ | fixed_precision | ×1.09 | ×0.82 | ×1.50 | ×2.70 |
+| 64³ | fixed_rate | ×3.28 | ×2.12 | ×1.65 | ×1.39 |
+| 64³ | fixed_precision | ×1.96 | ×2.01 | ×1.53 | ×1.35 |
+
+### Reading it
+
+* **Cascaded** is the largest win on both parts — compression ×2.2–2.4 (gfx1100) and ×2.6–3.8
+  (gfx942), decompression ×1.26–1.30 (ints) and ×4.4–6.2 (zeros) on gfx1100, ×1.36–1.49 and
+  ×2.5–3.7 on gfx942. The two levers are algorithmic (single-pass min/max, register-resident RLE
+  slab, multi-item scans, wave-local run expansion) and structural (256-thread blocks and the LDS
+  shrink on CDNA).
+* **LZ4** compression carries the earlier `opt/curated` lineage: ×3.2–4.8 on gfx1100 and
+  **×11–13.4** on gfx942 for binary/TTI. Decompression: ×1.5–1.9 (gfx1100 small batch) and
+  ×2.2 / ×1.3–1.5 (gfx942) on binary/TTI from this campaign's wave64 work; short-sequence text and
+  long runs lose (gfx1100 words ×0.68–0.72, zeros at saturation ×0.81 — from the curated wave32
+  copy vectorisation; gfx942 words ×0.74–0.81 — from this campaign's wave64 one). Both are the same
+  documented trade and both are one build flag away (`ARCTO_LZ4_VEC_COPY_DECOMP=0`).
+* **Snappy** decompression ×1.10–1.41 (gfx1100) and ×1.03–1.22 (gfx942), compression neutral to
+  +2 %.
+* **ZFP** is a host-path result: per-call time ×1.35–3.4 faster, most of it on the APU where the
+  HIP API calls were the whole cost of a small field.
+* **TTI decompression on Cascaded/gfx1100** is the one row at ×0.83–0.98: the input compresses to a
+  raw fall-back for most chunks, so the decompressor is a copy loop that the optimizations do not
+  touch, and the residual is the byte-determinism fix (CAS-H1, −1…−3 %).
