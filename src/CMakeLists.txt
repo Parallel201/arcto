@@ -79,8 +79,15 @@ endmacro(setup_cuda_devices)
 macro (set_cuda_compilation_options)
   set_property(TARGET arcto PROPERTY POSITION_INDEPENDENT_CODE ON)
   set_property(TARGET arcto PROPERTY CUDA_ARCHITECTURES ${GPU_ARCHS})
+  # The device sources are compiled as CUDA on this backend (they are marked
+  # LANGUAGE CUDA above), so the generator expression must name CUDA -- with
+  # COMPILE_LANGUAGE:HIP these flags were silently never applied.
+  #  --expt-relaxed-constexpr: hip-clang lets device code call constexpr host
+  #    functions (std::numeric_limits<T>::max() and friends); nvcc needs this
+  #    flag for the same code.
   target_compile_options(arcto PRIVATE
-      $<$<COMPILE_LANGUAGE:HIP>:--expt-extended-lambda>)
+      $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda>
+      $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
   if(DEFINED CUB_DIR)
     target_include_directories(arcto PRIVATE "${CUB_DIR}")
   endif()
