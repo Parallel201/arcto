@@ -70,6 +70,14 @@ from it.
 `warp_mask_t`, `LANE_MASK_FULL`. `warpSize` in particular is a non-constexpr built-in on HIP and
 cannot size a type or a template parameter.
 
+**Corollary — a compilable wave size is not a supported one.** RDNA hardware executes wave64 code
+objects, and ARCTO builds and computes correctly in that mode, but ROCm's own libraries assume
+wave32 for gfx10/11/12 (rocPRIM's `ROCPRIM_NAVI` fixes its hardware wave size at 32 and
+`static_assert`s against 64-lane primitives), and the measured runtime is pathological: two test
+binaries that take 1.7 s and 13.8 s in wave32 were still running after 30 min and 12.6 min in
+wave64. Offer the mode, check it at build time, and keep the architecture's native wave size as the
+default.
+
 ## 3. Wave-level primitives: prefer the library, then measure the intrinsic
 
 | Item | Change | Measured |

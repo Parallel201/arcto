@@ -42,16 +42,33 @@ Companion documents: `OPTIMIZATION_GAINS_2026-08.md` (the numbers),
   wave64 code objects. (Previously *any* mismatch threw, which made wave64 builds unusable on
   gfx1100 even though the hardware supports them.)
 
-**Measured caveat — wave64 on RDNA is functional but not competitive, and not fully supported by
-ROCm's libraries.** rocPRIM derives its hardware wavefront size from the *architecture family*
-(ROCm 7.0.1 reports 32 for every gfx10/11/12 target, `ROCPRIM_NAVI`) and ignores
-`-mwavefrontsize64`; asking it for 64-lane warp primitives fails a `static_assert`. ARCTO therefore
-falls back to its portable shuffle trees for that configuration (identical results, a few percent
-slower). hipCUB's *block* collectives, which Cascaded uses, still compute with rocPRIM's
-architecture-derived assumption: on a wave64 gfx1100 build `test_cascaded` ran **> 55× slower** than
-in wave32 (13.8 s → still running at 12.6 min when it was stopped) at 100 % GPU. The configuration
-is kept available and documented — Snappy and LZ4 do not use those collectives — but wave32 remains
-the recommended and default mode for RDNA.
+**Measured caveat — wave64 on RDNA builds and computes, but it is performance-pathological; wave32
+stays the RDNA default.**
+
+* ROCm's own libraries do not support it: rocPRIM derives its hardware wavefront size from the
+  *architecture family* (ROCm 7.0.1 reports 32 for every gfx10/11/12 target, `ROCPRIM_NAVI`) and
+  ignores `-mwavefrontsize64`, so asking it for 64-lane warp primitives fails a `static_assert`
+  inside `rocprim/intrinsics/arch.hpp`. ARCTO detects that case and uses the portable shuffle trees
+  the CUDA backend already used — identical results, a few percent slower — which is what makes the
+  build possible at all.
+* The runtime cost is far larger than that fallback, and it is **not** confined to the code that
+  uses the ROCm collectives. On a wave64 gfx1100 build, two independent test binaries that take
+  seconds in wave32 did not finish:
+
+  | test | wave32 | wave64 (same GPU, same build tree) |
+  |---|---|---|
+  | `test_cascaded` | 13.8 s | still running at 12.6 min (**> 55×**), 100 % GPU, stopped |
+  | `test_snappy_batch_c_api` | 1.66 s | still running at > 30 min (**> 1000×**), stopped |
+
+  Cascaded goes through hipCUB block collectives (which still compute with rocPRIM's
+  architecture-derived wave size); Snappy does not — it uses ARCTO's own wave primitives and a
+  three-wave producer/consumer design with spin-waits. The common factor is the RDNA wave64
+  execution model itself (a 64-lane wave issued over the 32-wide SIMD), which changes both the
+  spin-wait dynamics and the resident-group count. **The exact mechanism was not isolated** — the
+  runs were stopped rather than profiled — so this is recorded as a measurement, not an explanation.
+* Conclusion: the configuration is *available* (it compiles, and the wave32-independent parts of the
+  test suite that did finish passed), but wave32 remains the default and the recommendation for
+  RDNA. On CDNA nothing changes: gfx9 is wave64-only and is unaffected by any of this.
 
 ## 4. HIP-first with a CUDA backend: what it took to make it true
 
@@ -83,7 +100,7 @@ allocation on HIP ≥ 6 and CUDA ≥ 11.2.
 | Configuration | Build | Tests |
 |---|---|---|
 | gfx1100 (RX 7900 XT), wave32 — default for RDNA | ✅ | **17/17** |
-| gfx1100, wave64 (`-mwavefrontsize64`) | ✅ | Snappy/LZ4 suites pass; Cascaded pathologically slow (§3) |
+| gfx1100, wave64 (`-mwavefrontsize64`) | ✅ | builds; the tests that complete pass, but two of them are > 55× / > 1000× slower than in wave32 and were stopped (§3) |
 | gfx942 (MI300A), wave64 — default for CDNA | ✅ | **17/17** |
 | GH200 (`sm_90`), CUDA 13.2, `-D CUDA_BACKEND=ON` | ✅ | **17/17** |
 
