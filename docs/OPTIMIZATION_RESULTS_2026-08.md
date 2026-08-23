@@ -114,8 +114,12 @@ round-trip tests stayed green. Items still being measured are marked *pending*.
 
 ## 2. Outcome per codec (vs `main`, bytes identical, tests green)
 
-(The per-optimization Δ tables, branch totals, accumulated end-to-end ratios and the comparison with
-the earlier LZ4 branch `opt/curated` are in `OPTIMIZATION_GAINS_2026-08.md`.)
+(The per-optimization Δ tables, branch totals, accumulated end-to-end ratios, the comparison with
+the earlier LZ4 branch `opt/curated`, and the final integrated tree measured against post-hipify
+`main` are in `OPTIMIZATION_GAINS_2026-08.md`. Phase 2 — the single integration branch, the
+cleanup, the wave-size work and the CUDA backend — is in `INTEGRATION_AND_CLEANUP_2026-08.md`; the
+rules that keep the code AMD-fast and NVIDIA-portable are in `HIP_FIRST_PORTABILITY.md`; the
+measurement against nvCOMP on a GH200 is in `NVIDIA_COMPARISON_2026-08.md`.)
 
 * **Snappy** (`opt/snappy-2026-08`): decompression gfx1100 ×1.24 (binary) / ×1.39 (TTI) / ×1.075
   (words) at saturation and the same at small batch; gfx942 ×1.12 / ×1.23 / ×1.21 at small batch,
