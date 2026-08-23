@@ -127,7 +127,7 @@ __device__ inline int num_set_bits<int64_t>(int64_t v) {
 }
 
 // Warp-level communication
-#if (__CUDACC_VER_MAJOR__ >= 9)
+#if defined(__CUDACC_VER_MAJOR__) && (__CUDACC_VER_MAJOR__ >= 9)
 #  define INDEPENDENT_THREAD_SCHEDULING
 #endif
 #ifdef INDEPENDENT_THREAD_SCHEDULING
