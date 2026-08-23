@@ -7,6 +7,10 @@ bought on its own, what each branch bought in total, and what the shipped heads 
 
 ## 0. How to read the tables
 
+*Branch names in the section headings are the lineages as they were developed; they are all merged
+into `opt/aggregate` now (see `INTEGRATION_AND_CLEANUP_2026-08.md` §1). `bench/baseline-2026-08` is
+the tag `baseline/post-hipify-2026-08`.*
+
 * Every figure is a ratio of **medians of 30 repetitions** (per-repetition CSV of
   `benchmark_*_chunked -p 65536`), **later ÷ earlier**, so ×1.10 = +10 % throughput. Δ tables
   compare each commit with its predecessor *in the same sweep* (rows marked † join two sweeps of

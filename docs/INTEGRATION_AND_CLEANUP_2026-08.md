@@ -10,17 +10,24 @@ Companion documents: `OPTIMIZATION_GAINS_2026-08.md` (the numbers),
 `HIP_FIRST_PORTABILITY.md` (the rules), `NVIDIA_COMPARISON_2026-08.md` (ARCTO vs nvCOMP),
 `AMD_OPTIMIZATION_MAP.md` (the plan), `docs/experiments/*.md` (per-commit logs).
 
-## 1. Branches
+## 1. Where the work lives
 
-| Branch | Contents |
+The whole campaign is **one branch**, `opt/aggregate`, plus two tags. The per-codec lineages were
+developed on separate branches (one commit per change, each with its measurement); those branches
+were merged and then deleted — every commit remains reachable from `opt/aggregate`, so the
+per-commit history, its verdicts and `git bisect` are unaffected.
+
+| Ref | What it is |
 |---|---|
-| `bench/baseline-2026-08` | `main` + **only** the benchmark instrumentation (per-repetition CSV, the `-x` duplication fix). This is the "post-hipify, no optimization" measurement baseline: no kernel or library change of any kind. |
-| `opt/claude/integration-2026-08` | `main` merged with all six work branches — `chore/build-and-cleanup`, `test/coverage`, `opt/snappy`, `opt/cascaded`, `opt/zfp-host`, `opt/lz4-decomp-wave64` (which itself carries the earlier `opt/curated` LZ4 lineage). All six merged without conflicts. |
-| `chore/cleanup-2026-08` | the integration lineage + the 14 cleanup/portability commits below (**+865 / −8581 lines**). This is the head that was measured and that the numbers refer to. |
+| **`opt/aggregate`** | the deliverable: `main` + every optimization lineage + the cleanup/portability pass + all documentation. This is the branch to merge into `main`. |
+| `baseline/post-hipify-2026-08` (tag) | `main` + **only** the benchmark instrumentation (per-repetition CSV and the `-x` duplication fix). No library or kernel change: the "post-hipify, no optimization" reference every number in `OPTIMIZATION_GAINS_2026-08.md` is measured against. |
+| `attempts/snappy-comp-2026-08` (tag) | the three Snappy compression attempts that measured negative (SNP-C1/C2/C3) and their reverts — the only code that is *not* in `opt/aggregate`. Their measurements and verdicts are, in `docs/experiments/snappy-comp-2026-08.md`. |
 
-The merge branch is namespaced `opt/claude/...` to keep it clear of the pre-existing
-`origin/opt/integration-2026-08`, which is part of the earlier curated LZ4 lineage and unrelated
-to this merge.
+Inside `opt/aggregate` the lineage is still legible: the merge commits name the branches they came
+from (`chore/build-and-cleanup`, `test/coverage`, `opt/snappy`, `opt/cascaded`, `opt/zfp-host`,
+`opt/lz4-decomp-wave64` — the last of which carries the earlier `origin/opt/curated` LZ4 work),
+the merge point of all six is `d338d21`, and the cleanup pass is the 14 commits after it. The
+vendored zfp is pinned to its own branch inside `third_party/zfp`.
 
 ## 2. What was removed
 

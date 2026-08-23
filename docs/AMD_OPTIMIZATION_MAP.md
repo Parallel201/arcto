@@ -9,8 +9,8 @@ measured result unless it quotes one of the `opt/*` commit messages.
 **Measured results (August 2026).** The status chips below were updated from the optimization
 campaign of 2026-08-22; the numbers, per category, are aggregated in
 `docs/OPTIMIZATION_RESULTS_2026-08.md`, and every commit has an entry in `docs/experiments/*.md`
-on its branch (`opt/snappy-2026-08`, `opt/cascaded-2026-08`, `opt/lz4-decomp-wave64-2026-08`,
-`opt/zfp-host-2026-08`).
+on its lineage (`opt/snappy-2026-08`, `opt/cascaded-2026-08`, `opt/lz4-decomp-wave64-2026-08`,
+`opt/zfp-host-2026-08`) — all of which are merged into the single branch `opt/aggregate`.
 
 <div class="callout rule"><p><strong>Ground rule.</strong> No proposal in this document changes a
 codec's algorithm or on-the-wire format: LZ4 stays LZ77 with a hash table and a 64 KiB sliding

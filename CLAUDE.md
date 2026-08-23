@@ -109,6 +109,11 @@ Cross-cutting conventions:
 - **One branch per optimization aggregation**, off `main`, named `opt/<topic>-<yyyy-mm>`
   (e.g. `opt/lz4-compress-2026-08`); stacked combinations get their own branch
   (user shorthand: opt1, opt2, opt1+2). Curated integrations live on `opt/curated`.
+- The August-2026 campaign is consolidated: every lineage is merged into **`opt/aggregate`**
+  (the branch to merge into `main`), and the two references that are not part of it are tags —
+  `baseline/post-hipify-2026-08` (the measurement baseline behind every number in
+  `docs/OPTIMIZATION_GAINS_2026-08.md`) and `attempts/snappy-comp-2026-08` (measured-negative
+  compression attempts, kept for the record). Documentation lives in `docs/` on that branch.
 - **Never add `Co-Authored-By` trailers. Never `git push`.** Committing is fine.
 - Acceptance gates used so far: ctest green on wave64 and wave32, compressed bytes identical
   (or ratio deviation reported in exact bytes), round-trip bit-exact, throughput measured on
