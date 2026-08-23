@@ -129,13 +129,22 @@ TEST_CASE("DevicePointerTest", "[small]")
   HIP_RT_CALL(hipMemset(pinned_dev_ptr, 0, sizeof(*pinned_dev_ptr)));
   HIP_RT_CALL(hipHostFree(pinned_ptr));
 
-  // check an unregistered pointer - should throw an exception
-  try {
-    size_t unregistered;
-    HipUtils::device_pointer(&unregistered);
-    REQUIRE(false); // unreachable
-  } catch (const std::exception&) {
-    // pass
+  // Check an unregistered host pointer. On a discrete GPU the runtime knows
+  // nothing about it and device_pointer() throws. On systems where host memory
+  // is coherently addressable by the GPU (Grace-Hopper, and APUs in general)
+  // the runtime reports a valid device address for ordinary host memory, so
+  // returning one is equally correct -- what must never happen is a silent
+  // null.
+  {
+    size_t unregistered = 0;
+    bool threw = false;
+    void* mapped = nullptr;
+    try {
+      mapped = HipUtils::device_pointer(&unregistered);
+    } catch (const std::exception&) {
+      threw = true;
+    }
+    REQUIRE((threw || mapped != nullptr));
   }
 
   // check a null pointer - should throw an exception
