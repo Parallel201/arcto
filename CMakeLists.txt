@@ -70,6 +70,13 @@ list( APPEND CMAKE_MODULE_PATH
 macro(setup_cuda_build)
   enable_language(CUDA)
 
+  # CUDA 12/13 ship CCCL (Thrust/CUB/libcu++), which requires C++17; nvcc still
+  # defaults to an older dialect, so state it here as CMAKE_CXX_STANDARD does
+  # for the host compiler and CMAKE_HIP_STANDARD for hip-clang.
+  set(CMAKE_CUDA_STANDARD 17)
+  set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+  set(CMAKE_CUDA_EXTENSIONS OFF)
+
   message(STATUS "Finding CUDAToolkit")
   find_package(CUDAToolkit REQUIRED)
   include_directories("${CUDAToolkit_INCLUDE_DIRS}")

@@ -45,6 +45,20 @@
 #include <rocprim/warp/warp_scan.hpp>
 #include <rocprim/warp/warp_reduce.hpp>
 #include <type_traits>
+// rocPRIM derives its hardware wavefront size from the architecture family and
+// ignores -mwavefrontsize64: in ROCm 7.0.1 `rocprim::arch::wavefront::min_size()`
+// is 32 for every gfx10/11/12 target (config.hpp: ROCPRIM_NAVI), so asking it
+// for 64-lane warp primitives in a wave64 build of an RDNA target fails a
+// static_assert in rocprim/intrinsics/arch.hpp. Such builds (gfx1100 with
+// -mwavefrontsize64, which ARCTO supports) use the portable shuffle trees
+// further down instead -- same results, a few percent slower than DPP.
+#  if defined(USE_WARPSIZE_64) && defined(ROCPRIM_NAVI) && (ROCPRIM_NAVI)
+#    define ARCTO_ROCPRIM_WARP_PRIMITIVES 0
+#  else
+#    define ARCTO_ROCPRIM_WARP_PRIMITIVES 1
+#  endif
+#else
+#  define ARCTO_ROCPRIM_WARP_PRIMITIVES 0
 #endif
 
 namespace arcto {
@@ -299,7 +313,7 @@ __device__ inline uint32_t ballot1<uint32_t,32u>(uint32_t t,int predicate,int pr
 }
 #endif
 
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+#if ARCTO_ROCPRIM_WARP_PRIMITIVES
 // AMD: wave-level inclusive prefix sum and all-lanes sum through rocPRIM's
 // warp primitives. For a logical warp that is a power of two up to the
 // hardware wave size rocPRIM selects its cross-lane implementation (DPP row
@@ -350,10 +364,12 @@ public:
 };
 #endif
 
-// Warp reduction helpers (shuffle trees; the CUDA backend, and the reference
-// implementation the rocPRIM path above must match)
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
-// (specialisations below are not used on AMD; the primary template is complete)
+// Warp reduction helpers (shuffle trees; the CUDA backend, wave64 builds of
+// RDNA targets, and the reference implementation the rocPRIM path above must
+// match)
+#if ARCTO_ROCPRIM_WARP_PRIMITIVES
+// (specialisations below are not used when rocPRIM provides the primitives;
+//  the primary template above is complete)
 #elif defined(USE_WARPSIZE_64)
 template <typename T> inline __device__ T WarpReduceSum2(T acc)     { return acc + SHFL1_XOR(acc, 1); }
 template <typename T> inline __device__ T WarpReduceSum4(T acc)     { acc = WarpReduceSum2(acc); return acc + SHFL1_XOR(acc, 2); }
