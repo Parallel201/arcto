@@ -74,6 +74,32 @@ using ssize_t = ptrdiff_t;
 #define ARCTO_KRESTRICT
 #endif
 
+/**
+ * @brief Launch bounds with explicit, per-platform semantics.
+ *
+ * The two platforms give the SECOND argument of __launch_bounds__ different
+ * meanings:
+ *   CUDA: __launch_bounds__(maxThreadsPerBlock, minBlocksPerMultiprocessor)
+ *   HIP:  __launch_bounds__(maxThreadsPerBlock, minWavesPerExecutionUnit)
+ *         i.e. the minimum number of wavefronts the compiler must keep
+ *         resident per SIMD (amdgpu_waves_per_eu) -- it caps the VGPR budget
+ *         (CDNA: <=64 VGPRs for 8 waves/SIMD, <=72 for 7, <=80 for 6, <=96 for
+ *         5, <=128 for 4) and is NOT "blocks per CU".
+ *
+ * ARCTO_LAUNCH_BOUNDS(threads, min_waves_per_eu, min_blocks_per_sm) lets a
+ * kernel state both intents in one place and expands to whichever form the
+ * active platform understands. ARCTO_LAUNCH_BOUNDS_1(threads) is the
+ * single-argument form (identical on both platforms).
+ */
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+  #define ARCTO_LAUNCH_BOUNDS(threads, min_waves_per_eu, min_blocks_per_sm) \
+    __launch_bounds__(threads, min_waves_per_eu)
+#else
+  #define ARCTO_LAUNCH_BOUNDS(threads, min_waves_per_eu, min_blocks_per_sm) \
+    __launch_bounds__(threads, min_blocks_per_sm)
+#endif
+#define ARCTO_LAUNCH_BOUNDS_1(threads) __launch_bounds__(threads)
+
 namespace arcto {
 
 namespace {
