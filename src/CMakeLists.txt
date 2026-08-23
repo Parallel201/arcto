@@ -48,18 +48,32 @@
 # SOFTWARE.
 
 macro (setup_cuda_devices)
-  # build real and virtual, so as to run on 6x cards.
-  set(GPU_ARCHS "60")
-
-  if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER "8")
-    set(GPU_ARCHS ${GPU_ARCHS} "70-real")
+  if(NOT "${CMAKE_CUDA_ARCHITECTURES}" STREQUAL "")
+    # an explicit -D CMAKE_CUDA_ARCHITECTURES=... always wins, exactly as
+    # CMAKE_HIP_ARCHITECTURES does on the AMD side
+    set(GPU_ARCHS ${CMAKE_CUDA_ARCHITECTURES})
+  else()
+    # Default fan-out, bounded by what the toolkit still accepts: CUDA 12
+    # dropped Kepler/Maxwell, CUDA 13 dropped Pascal (sm_60) and Volta
+    # (sm_70), so an inherited fixed list stops compiling with new toolkits.
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13")
+      set(GPU_ARCHS "75-real" "80-real" "86-real" "89-real" "90")
+    elseif(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12")
+      set(GPU_ARCHS "70-real" "75-real" "80-real" "86-real" "90")
+    else()
+      set(GPU_ARCHS "60")
+      if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER "8")
+        set(GPU_ARCHS ${GPU_ARCHS} "70-real")
+      endif()
+      if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER "9")
+        set(GPU_ARCHS ${GPU_ARCHS} "75-real")
+      endif()
+      if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11")
+        set(GPU_ARCHS ${GPU_ARCHS} "80")
+      endif()
+    endif()
   endif()
-  if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER "9")
-    set(GPU_ARCHS ${GPU_ARCHS} "75-real")
-  endif()
-  if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11")
-    set(GPU_ARCHS ${GPU_ARCHS} "80")
-  endif()
+  message(STATUS "CUDA architectures: ${GPU_ARCHS}")
 endmacro(setup_cuda_devices)
 
 macro (set_cuda_compilation_options)
