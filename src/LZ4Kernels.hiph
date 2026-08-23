@@ -72,13 +72,7 @@
 #include <iostream>
 #include <vector>
 
-#if !defined(USE_WARPSIZE_64) && !defined(USE_WARPSIZE_32)
-# if defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__)
-#   define USE_WARPSIZE_64
-#  endif
-#endif
-
-#if (__CUDACC_VER_MAJOR__ >= 9)
+#if defined(__CUDACC_VER_MAJOR__) && (__CUDACC_VER_MAJOR__ >= 9)
 #  define SHFL10(v)        __shfl_sync(~0, v, 0)
 #  define SHFL1(v, t)      __shfl_sync(~0, v, t)
 #  define SHFL1_DOWN(v, m)  __shfl_down_sync(~0, v, m)
@@ -94,7 +88,14 @@
 #  define BALLOT1(v)       __ballot(v)
 #endif
 
-#if (defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)) && defined (ENABLE_HIP_OPT_WARPSIZE64) && defined(USE_WARPSIZE_64)
+// Lane-mask width follows the build's wave size, whose single source of truth
+// is arcto_device_types.h (included through device_functions.hiph): wave32
+// when USE_WARPSIZE_32 is set, wave64 on AMD otherwise, 32 on the CUDA
+// backend. The static_assert below keeps the two in step -- the previous
+// condition also required ENABLE_HIP_OPT_WARPSIZE64, so a build that set only
+// -DUSE_WARPSIZE_64 silently got 32-bit lane masks here while the rest of the
+// library used 64.
+#if defined(USE_WARPSIZE_64)
 typedef uint64_t lane_mask_t;
 typedef int64_t signed_lane_mask_t;
 constexpr lane_mask_t LANE_MASK_FULL = ~0ULL;
@@ -111,6 +112,10 @@ constexpr uint32_t uwarpsize = 32U;
 #define BREV(x) __brev(x)
 #define CLZ(x) __clz(x)
 #endif
+
+static_assert(
+    warpsize == arcto::warpsize,
+    "LZ4 lane-mask width must match arcto::warpsize (arcto_device_types.h)");
 
 constexpr lane_mask_t LANE_MASK_ZERO = 0;
 constexpr lane_mask_t LANE_MASK_ONE = 1;
@@ -288,7 +293,7 @@ inline __device__ signed_lane_mask_t warpMatchAny(const signed_lane_mask_t parti
 inline __device__ bool findEarliestTwin(
     const int numValidThreads, const word_type val, int& twin_lane)
 {
-#if __CUDA_ARCH__ >= 700
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 700)
   signed_lane_mask_t m = 0;
   if (threadIdx.x < numValidThreads) {
     m = __match_any_sync(numValidThreadsToMask(numValidThreads), val);

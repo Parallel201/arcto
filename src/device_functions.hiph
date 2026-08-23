@@ -257,7 +257,7 @@ __device__ inline warp_mask_t BALLOT1(int predicate) {
 //    resident on the same SIMD (the previous AMD fallback was clock(), i.e. a
 //    tight poll).
 //  - other CUDA targets: no-op (as upstream).
-#if (__CUDA_ARCH__ >= 700)
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 700)
 #  define SPIN_SLEEP(d)  __nanosleep((d))
 #elif defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
 #  define SPIN_SLEEP(d)  __builtin_amdgcn_s_sleep((d))

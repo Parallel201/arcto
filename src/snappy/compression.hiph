@@ -157,7 +157,7 @@ static inline __device__ uint8_t *StoreCopy(
 template <typename GROUPMASK_T, typename SIGNED_GROUPMASK_T,unsigned WARPSIZE>
 static inline __device__ GROUPMASK_T HashMatchAny(uint32_t v, uint32_t t)  //: warp size dependent datatype
 {
-#if (__CUDA_ARCH__ >= 700)
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 700)
   return __match_any_sync(~0, v); //: special case for <uint32_t,int32_t,32u>
 #else
   //: applies to AMD too
