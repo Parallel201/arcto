@@ -15,8 +15,12 @@ Companion documents: `OPTIMIZATION_GAINS_2026-08.md` (the numbers),
 | Branch | Contents |
 |---|---|
 | `bench/baseline-2026-08` | `main` + **only** the benchmark instrumentation (per-repetition CSV, the `-x` duplication fix). This is the "post-hipify, no optimization" measurement baseline: no kernel or library change of any kind. |
-| `opt/integration-2026-08` | `main` merged with all six work branches — `chore/build-and-cleanup`, `test/coverage`, `opt/snappy`, `opt/cascaded`, `opt/zfp-host`, `opt/lz4-decomp-wave64` (which itself carries the earlier `opt/curated` LZ4 lineage). All six merged without conflicts. |
+| `opt/claude/integration-2026-08` | `main` merged with all six work branches — `chore/build-and-cleanup`, `test/coverage`, `opt/snappy`, `opt/cascaded`, `opt/zfp-host`, `opt/lz4-decomp-wave64` (which itself carries the earlier `opt/curated` LZ4 lineage). All six merged without conflicts. |
 | `chore/cleanup-2026-08` | the integration lineage + the 14 cleanup/portability commits below (**+865 / −8581 lines**). This is the head that was measured and that the numbers refer to. |
+
+The merge branch is namespaced `opt/claude/...` to keep it clear of the pre-existing
+`origin/opt/integration-2026-08`, which is part of the earlier curated LZ4 lineage and unrelated
+to this merge.
 
 ## 2. What was removed
 
